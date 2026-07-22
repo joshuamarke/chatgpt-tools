@@ -13,7 +13,7 @@
         <span class="dt-logo" aria-hidden="true">{ }</span>
         <div>
           <div class="dt-title">Skin DevTools</div>
-          <div class="dt-sub">宿主生命周期 · 运行时快照 · 载荷 / 校验（后续扩展）</div>
+          <div class="dt-sub">宿主点选审查 · DOM / Styles · 生命周期</div>
         </div>
       </div>
       <div class="dt-actions">
@@ -23,14 +23,64 @@
     </header>
 
     <nav class="dt-tabs" role="tablist" aria-label="DevTools 面板">
-      <button type="button" class="dt-tab active" data-tab="host" role="tab" aria-selected="true">Host</button>
+      <button type="button" class="dt-tab active" data-tab="elements" role="tab" aria-selected="true">Elements</button>
+      <button type="button" class="dt-tab" data-tab="host" role="tab" aria-selected="false">Host</button>
       <button type="button" class="dt-tab" data-tab="runtime" role="tab" aria-selected="false">Runtime</button>
       <button type="button" class="dt-tab" data-tab="skins" role="tab" aria-selected="false">Skins</button>
       <button type="button" class="dt-tab" data-tab="about" role="tab" aria-selected="false">About</button>
     </nav>
 
     <main class="dt-main">
-      <section class="dt-panel active" id="panel-host" data-panel="host">
+      <!-- ═══ Elements (Scheme A: real-window pick) ═══ -->
+      <section class="dt-panel active el-panel" id="panel-elements" data-panel="elements">
+        <div class="el-toolbar">
+          <button type="button" id="btnPick" class="dt-btn pick-btn" title="在真实 ChatGPT/Codex 窗口上点选元素">
+            <span class="pick-ico" aria-hidden="true">▣</span>
+            <span id="btnPickLabel">选择元素</span>
+          </button>
+          <button type="button" id="btnConnect" class="dt-btn">连接宿主</button>
+          <button type="button" id="btnReloadTree" class="dt-btn">刷新 DOM</button>
+          <span class="el-conn" id="elConnStatus">未连接</span>
+        </div>
+
+        <div class="el-crumbs" id="elCrumbs" title="祖先路径">—</div>
+
+        <div class="el-split">
+          <div class="el-tree-pane">
+            <div class="el-pane-title">DOM</div>
+            <div class="el-tree" id="elTree" tabindex="0">
+              <div class="el-empty">连接宿主后加载 DOM 树，或点选元素后在此展开路径。</div>
+            </div>
+          </div>
+          <div class="el-styles-pane">
+            <div class="el-pane-title-row">
+              <div class="el-pane-title">Styles</div>
+              <div class="el-style-tabs">
+                <button type="button" class="el-style-tab active" data-style-tab="matched">Rules</button>
+                <button type="button" class="el-style-tab" data-style-tab="computed">Computed</button>
+                <button type="button" class="el-style-tab" data-style-tab="html">HTML</button>
+              </div>
+            </div>
+            <div class="el-sel-head" id="elSelHead">
+              <div class="el-sel-label">未选择节点</div>
+              <code class="el-sel-hint" id="elSelHint"></code>
+            </div>
+            <div class="el-style-body">
+              <div class="el-style-view active" id="viewMatched">
+                <div class="el-empty">点选宿主元素后显示匹配的 CSS 规则（类似 Chrome Styles）。</div>
+              </div>
+              <div class="el-style-view" id="viewComputed" hidden>
+                <div class="el-empty">选择节点后显示关键 computed 属性。</div>
+              </div>
+              <div class="el-style-view" id="viewHtml" hidden>
+                <pre class="el-html" id="elOuterHtml">—</pre>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="dt-panel" id="panel-host" data-panel="host" hidden>
         <div class="dt-panel-head">
           <h2>宿主状态</h2>
           <p>对应 <code>hostStatus</code> / lifecycle 三信号（进程 · CDP 端口 · app:// 渲染页）</p>
@@ -42,7 +92,7 @@
       <section class="dt-panel" id="panel-runtime" data-panel="runtime" hidden>
         <div class="dt-panel-head">
           <h2>会话 / 注入结果</h2>
-          <p>来自最近一次 <code>status</code> 的 shell / art 与暂停状态（完整 Runtime evaluate 将在后续版本接入）</p>
+          <p>来自最近一次 <code>status</code> 的 shell / art 与暂停状态</p>
         </div>
         <div class="dt-grid" id="runtimeCards"></div>
         <pre class="dt-json" id="runtimeJson">加载中…</pre>
@@ -51,7 +101,7 @@
       <section class="dt-panel" id="panel-skins" data-panel="skins" hidden>
         <div class="dt-panel-head">
           <h2>皮肤清单</h2>
-          <p>当前管理器可见的皮肤（不含预览图体积，便于调试 id / markers / active）</p>
+          <p>当前管理器可见的皮肤（不含预览图体积）</p>
         </div>
         <div class="dt-table-wrap">
           <table class="dt-table" id="skinsTable">
@@ -75,10 +125,11 @@
           <h2>关于 Skin DevTools</h2>
         </div>
         <div class="dt-about">
-          <p>独立调试窗口入口（主窗口标题栏「DevTools」或 <kbd>F12</kbd> / <kbd>Ctrl+Shift+I</kbd>）。</p>
+          <p>独立调试窗口：主窗口标题栏「DevTools」按钮打开（不占用 F12）。</p>
           <ul>
-            <li><b>P0（当前）</b>：Host 生命周期、会话注入字段、皮肤清单、引擎版本 / 路径</li>
-            <li><b>后续</b>：CDP evaluate 宿主 <code>__CHATGPT_TOOLS_SKIN_HOST__</code>、DOM 探针、Live CSS、verify / check-payload</li>
+            <li><b>Elements</b>：在真实宿主窗口点选（CDP Overlay），右侧显示 DOM 路径与 Styles / Computed</li>
+            <li><b>Host / Runtime / Skins</b>：生命周期与换肤会话诊断</li>
+            <li>Tauri 自带 F12 只能审查本工具窗口，宿主审查必须走 CDP</li>
           </ul>
           <pre class="dt-json" id="aboutJson">加载中…</pre>
         </div>

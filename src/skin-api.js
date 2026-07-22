@@ -76,5 +76,22 @@
     engineVersion: () => invoke("engine_version"),
     /** Open or focus the independent Skin DevTools window. */
     openDevtools: () => invoke("open_devtools"),
+
+    // ── Host inspect (real-window Overlay pick → Elements) ──
+    inspectConnect: () => invoke("inspect_connect"),
+    inspectDisconnect: () => invoke("inspect_disconnect"),
+    inspectStatus: () => invoke("inspect_status"),
+    inspectSetPicking: (enabled) =>
+      invoke("inspect_set_picking", { enabled: enabled === true }),
+    inspectPoll: (opts = {}) =>
+      invoke("inspect_poll", { waitMs: opts.waitMs ?? 0 }),
+    inspectGetDocument: (opts = {}) =>
+      invoke("inspect_get_document", { depth: opts.depth ?? 2 }),
+    inspectGetChildren: (nodeId) =>
+      invoke("inspect_get_children", { nodeId: Number(nodeId) }),
+    inspectSelectNode: (nodeId) =>
+      invoke("inspect_select_node", { nodeId: Number(nodeId) }),
+    inspectHighlight: (nodeId) =>
+      invoke("inspect_highlight", { nodeId: Number(nodeId) }),
   };
 })();

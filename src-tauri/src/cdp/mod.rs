@@ -7,6 +7,7 @@ mod host;
 mod http;
 mod image;
 mod inject;
+pub mod inspect;
 mod keep;
 mod launch;
 mod native;

@@ -1,4 +1,4 @@
-//! Single-page CDP WebSocket session (Runtime.evaluate / Page.*).
+//! Single-page CDP WebSocket session (Runtime.evaluate / Page.* / events).
 //!
 //! One background I/O thread owns the socket (tungstenite is not duplex-safe under a single mutex).
 
@@ -37,17 +37,52 @@ enum IoCmd {
     Close,
 }
 
-/// Thread-owned WebSocket with request/response matching.
+/// Thread-owned WebSocket with request/response matching and optional event fan-out.
 pub struct CdpSession {
     cmd_tx: Sender<IoCmd>,
     next_id: std::sync::Mutex<u64>,
     #[allow(dead_code)]
     target_id: String,
+    /// Optional CDP event stream (`method` + `params` frames without `id`).
+    event_rx: Option<std::sync::Mutex<Receiver<Value>>>,
     _join: Option<thread::JoinHandle<()>>,
+}
+
+pub struct OpenOptions {
+    pub open_timeout_ms: u64,
+    /// When true, Runtime/Page domains are enabled (inject path).
+    pub enable_default_domains: bool,
+    /// When true, push CDP events onto an internal channel (inspect path).
+    pub with_events: bool,
+}
+
+impl Default for OpenOptions {
+    fn default() -> Self {
+        Self {
+            open_timeout_ms: 8000,
+            enable_default_domains: true,
+            with_events: false,
+        }
+    }
 }
 
 impl CdpSession {
     pub fn open(target: &CdpTarget, port: u16, open_timeout_ms: u64) -> Result<Self, CdpSessionError> {
+        Self::open_with(
+            target,
+            port,
+            OpenOptions {
+                open_timeout_ms,
+                ..Default::default()
+            },
+        )
+    }
+
+    pub fn open_with(
+        target: &CdpTarget,
+        port: u16,
+        opts: OpenOptions,
+    ) -> Result<Self, CdpSessionError> {
         let url = Url::parse(&target.web_socket_debugger_url)
             .map_err(|e| CdpSessionError::msg(format!("bad WS URL: {e}")))?;
         let host = url.host_str().unwrap_or("");
@@ -73,30 +108,66 @@ impl CdpSession {
 
         if let MaybeTlsStream::Plain(stream) = socket.get_ref() {
             let _ = stream.set_read_timeout(Some(Duration::from_millis(250)));
-            let _ = stream.set_write_timeout(Some(Duration::from_millis(open_timeout_ms.max(5000))));
+            let _ = stream.set_write_timeout(Some(Duration::from_millis(
+                opts.open_timeout_ms.max(5000),
+            )));
         }
 
         let (cmd_tx, cmd_rx) = mpsc::channel::<IoCmd>();
+        let (event_tx, event_rx) = if opts.with_events {
+            let (tx, rx) = mpsc::channel::<Value>();
+            (Some(tx), Some(rx))
+        } else {
+            (None, None)
+        };
         let target_id = target.id.clone();
 
-        let join = thread::spawn(move || io_loop(socket, cmd_rx));
+        let join = thread::spawn(move || io_loop(socket, cmd_rx, event_tx));
 
         let session = Self {
             cmd_tx,
             next_id: std::sync::Mutex::new(1),
             target_id,
+            event_rx: event_rx.map(std::sync::Mutex::new),
             _join: Some(join),
         };
 
-        // Enable domains (same as Node injector)
-        session.send("Runtime.enable", json!({}), 8000)?;
-        session.send("Page.enable", json!({}), 8000)?;
+        if opts.enable_default_domains {
+            session.send("Runtime.enable", json!({}), 8000)?;
+            session.send("Page.enable", json!({}), 8000)?;
+        }
         Ok(session)
     }
 
     #[allow(dead_code)]
     pub fn target_id(&self) -> &str {
         &self.target_id
+    }
+
+    /// Drain buffered CDP events (non-blocking). Empty if events were not enabled.
+    pub fn poll_events(&self) -> Vec<Value> {
+        let Some(rx_lock) = self.event_rx.as_ref() else {
+            return Vec::new();
+        };
+        let Ok(rx) = rx_lock.lock() else {
+            return Vec::new();
+        };
+        let mut out = Vec::new();
+        while let Ok(ev) = rx.try_recv() {
+            out.push(ev);
+            if out.len() >= 64 {
+                break;
+            }
+        }
+        out
+    }
+
+    /// Block until an event arrives or timeout. Returns None on timeout / no event channel.
+    #[allow(dead_code)]
+    pub fn recv_event_timeout(&self, timeout_ms: u64) -> Option<Value> {
+        let rx_lock = self.event_rx.as_ref()?;
+        let rx = rx_lock.lock().ok()?;
+        rx.recv_timeout(Duration::from_millis(timeout_ms)).ok()
     }
 
     pub fn send(
@@ -184,7 +255,7 @@ impl Drop for CdpSession {
     }
 }
 
-fn io_loop(mut socket: Ws, cmd_rx: Receiver<IoCmd>) {
+fn io_loop(mut socket: Ws, cmd_rx: Receiver<IoCmd>, event_tx: Option<Sender<Value>>) {
     let mut pending: HashMap<u64, Sender<Result<Value, String>>> = HashMap::new();
     let mut running = true;
 
@@ -239,6 +310,11 @@ fn io_loop(mut socket: Ws, cmd_rx: Receiver<IoCmd>) {
                         };
                         if let Some(tx) = pending.remove(&id) {
                             let _ = tx.send(result);
+                        }
+                    } else if v.get("method").and_then(|m| m.as_str()).is_some() {
+                        // CDP event (no id)
+                        if let Some(ref tx) = event_tx {
+                            let _ = tx.send(v);
                         }
                     }
                 }

@@ -454,7 +454,7 @@ pub async fn engine_version() -> Result<Value, String> {
 }
 
 /// Open (or focus) the independent Skin DevTools window.
-/// Reuses a single window labeled `devtools` so F12 / the toolbar button stay idempotent.
+/// Reuses a single window labeled `devtools` so the toolbar button stays idempotent.
 #[tauri::command]
 pub async fn open_devtools(app: AppHandle) -> Result<Value, String> {
     if let Some(win) = app.get_webview_window(DEVTOOLS_WINDOW_LABEL) {
@@ -470,8 +470,8 @@ pub async fn open_devtools(app: AppHandle) -> Result<Value, String> {
         WebviewUrl::App("devtools.html".into()),
     )
     .title("Skin DevTools")
-    .inner_size(1120.0, 780.0)
-    .min_inner_size(840.0, 560.0)
+    .inner_size(1280.0, 860.0)
+    .min_inner_size(960.0, 640.0)
     .resizable(true)
     .center()
     .decorations(true)
@@ -483,6 +483,87 @@ pub async fn open_devtools(app: AppHandle) -> Result<Value, String> {
         "reused": false,
         "label": DEVTOOLS_WINDOW_LABEL
     }))
+}
+
+// ── Host element inspect (Scheme A: real-window Overlay pick) ──────────────
+
+fn map_inspect(e: crate::cdp::inspect::InspectError) -> String {
+    e.to_string()
+}
+
+#[tauri::command]
+pub async fn inspect_connect() -> Result<Value, String> {
+    tauri::async_runtime::spawn_blocking(|| crate::cdp::inspect::connect().map_err(map_inspect))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub async fn inspect_disconnect() -> Result<Value, String> {
+    tauri::async_runtime::spawn_blocking(|| crate::cdp::inspect::disconnect().map_err(map_inspect))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub async fn inspect_status() -> Result<Value, String> {
+    tauri::async_runtime::spawn_blocking(|| crate::cdp::inspect::status().map_err(map_inspect))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub async fn inspect_set_picking(enabled: bool) -> Result<Value, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        crate::cdp::inspect::set_picking(enabled).map_err(map_inspect)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub async fn inspect_poll(wait_ms: Option<u64>) -> Result<Value, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        crate::cdp::inspect::poll(wait_ms).map_err(map_inspect)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub async fn inspect_get_document(depth: Option<i64>) -> Result<Value, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        crate::cdp::inspect::get_document_tree(depth).map_err(map_inspect)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub async fn inspect_get_children(node_id: i64) -> Result<Value, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        crate::cdp::inspect::get_children(node_id).map_err(map_inspect)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub async fn inspect_select_node(node_id: i64) -> Result<Value, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        crate::cdp::inspect::select_node(node_id).map_err(map_inspect)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub async fn inspect_highlight(node_id: i64) -> Result<Value, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        crate::cdp::inspect::highlight(node_id).map_err(map_inspect)
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 fn file_path_to_string(path: FilePath) -> Result<String, String> {
