@@ -1,0 +1,43 @@
+{
+  "id": "linglong",
+  "name": "剑来 · 宁姚",
+  "nameEn": "JianLai Ning Yao",
+  "description": "废土科幻，极光电蓝色元炁流动与白月魁挂轴画卷",
+  "tags": [
+    "仙侠",
+    "水墨",
+    "宁姚",
+    "剑来"
+  ],
+  "previewGradient": "linear-gradient(135deg, #f0f4f8 0%, #06b6d4 50%, #0891b2 100%)",
+  "accent": "#06B6D4",
+  "port": 9338,
+  "assets": {
+    "css": "assets/linglong-skin.css",
+    "art": "assets/linglong-reference.png",
+    "artMime": "image/png",
+    "plugin": "assets/plugin.json"
+  },
+  "markers": {
+    "rootClass": "codex-linglong-skin",
+    "homeClass": "linglong-home",
+    "styleId": "codex-linglong-skin-style",
+    "chromeId": "codex-linglong-skin-chrome",
+    "stateKey": "__CODEX_LINGLONG_SKIN_STATE__",
+    "disabledKey": "__CODEX_LINGLONG_SKIN_DISABLED__",
+    "artVar": "--linglong-art"
+  },
+  "desktopTheme": {
+    "appearanceTheme": "light",
+    "appearanceLightCodeThemeId": "codex",
+    "appearanceLightChromeTheme": "{ accent = \"#06B6D4\", contrast = 62, fonts = { code = \"SF Mono\", ui = \"PingFang SC\" }, ink = \"#1e293b\", opaqueWindows = true, semanticColors = { diffAdded = \"#bbf7d0\", diffRemoved = \"#fecaca\", skill = \"#a855f7\" }, surface = \"#f0f4f8\" }"
+  },
+  "appearance": "auto",
+  "art": {
+    "focusX": 0.72,
+    "focusY": 0.45,
+    "safeArea": "left",
+    "taskMode": "ambient"
+  },
+  "version": "2.0.0"
+}

@@ -1,0 +1,41 @@
+{
+  "id": "eva",
+  "name": "新世纪 · 唐觉醒",
+  "nameEn": "Evangelion Unit-01",
+  "description": "亮紫机身与荧光黄绿点缀，NERV风格警示控制面板与绝对领域(A.T. Field)呼吸特效",
+  "tags": [
+    "漫画",
+    "唐风"
+  ],
+  "previewGradient": "linear-gradient(135deg, #f5f0fb 0%, #39ff14 50%, #ff6b08 100%)",
+  "accent": "#ff6b08",
+  "port": 9339,
+  "assets": {
+    "css": "assets/eva-skin.css",
+    "art": "assets/eva-reference.png",
+    "artMime": "image/jpeg",
+    "plugin": "assets/plugin.json"
+  },
+  "markers": {
+    "rootClass": "codex-eva-skin",
+    "homeClass": "eva-home",
+    "styleId": "codex-eva-skin-style",
+    "chromeId": "codex-eva-skin-chrome",
+    "stateKey": "__CODEX_EVA_SKIN_STATE__",
+    "disabledKey": "__CODEX_EVA_SKIN_DISABLED__",
+    "artVar": "--eva-art"
+  },
+  "desktopTheme": {
+    "appearanceTheme": "light",
+    "appearanceLightCodeThemeId": "codex",
+    "appearanceLightChromeTheme": "{ accent = \"#FF6B08\", contrast = 62, fonts = { code = \"SF Mono\", ui = \"PingFang SC\" }, ink = \"#1f0e39\", opaqueWindows = true, semanticColors = { diffAdded = \"#bbf7d0\", diffRemoved = \"#fecaca\", skill = \"#a855f7\" }, surface = \"#f5f0fb\" }"
+  },
+  "appearance": "auto",
+  "art": {
+    "focusX": 0.72,
+    "focusY": 0.45,
+    "safeArea": "left",
+    "taskMode": "ambient"
+  },
+  "version": "2.0.0"
+}

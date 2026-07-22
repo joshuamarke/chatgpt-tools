@@ -1,0 +1,11 @@
+{
+  "name": "chatgpt-tools-engine",
+  "version": "2.0.0",
+  "private": true,
+  "description": "ChatGPT Tools engine v2: shared renderer-core, payload pipeline, hardened CDP (CLI + Tauri host).",
+  "type": "commonjs",
+  "dependencies": {
+    "adm-zip": "^0.5.16",
+    "ws": "^8.18.3"
+  }
+}

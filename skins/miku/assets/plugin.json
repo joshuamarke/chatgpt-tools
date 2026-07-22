@@ -1,0 +1,5 @@
+{
+  "version": "2.0.0",
+  "chromeHtml": "<div class=\"miku-brand\">\n<span class=\"miku-seal\">歌</span>\n<span><b>HATSUNE MIKU</b><small>TEAL CONCERT</small></span>\n</div>\n<div class=\"miku-signature\">MIKU-STAGE: LIVE</div>\n<div class=\"miku-clouds\"><i></i><i></i><i></i><i></i><i></i><i></i></div>\n<div class=\"miku-scroll\"></div>\n<div class=\"miku-ornament\">✦  ✦  ✦  <span>VOCAL_LINK_OK</span></div>",
+  "skipAnalysis": false
+}

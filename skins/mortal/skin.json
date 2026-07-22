@@ -1,0 +1,43 @@
+{
+  "id": "mortal",
+  "name": "凡人修仙 · 银姬",
+  "nameEn": "Mortal Jade",
+  "description": "仙雾缭绕，翠玉描金，御剑乘风去，乾坤道法中",
+  "tags": [
+    "修仙",
+    "翠玉",
+    "御剑",
+    "仙侠"
+  ],
+  "previewGradient": "linear-gradient(135deg, #edf7f2 0%, #10b981 50%, #fef08a 100%)",
+  "accent": "#10B981",
+  "port": 9337,
+  "assets": {
+    "css": "assets/mortal-skin.css",
+    "art": "assets/mortal-reference.jpg",
+    "artMime": "image/jpeg",
+    "plugin": "assets/plugin.json"
+  },
+  "markers": {
+    "rootClass": "codex-mortal-skin",
+    "homeClass": "mortal-home",
+    "styleId": "codex-mortal-skin-style",
+    "chromeId": "codex-mortal-skin-chrome",
+    "stateKey": "__CODEX_MORTAL_SKIN_STATE__",
+    "disabledKey": "__CODEX_MORTAL_SKIN_DISABLED__",
+    "artVar": "--mortal-art"
+  },
+  "desktopTheme": {
+    "appearanceTheme": "light",
+    "appearanceLightCodeThemeId": "codex",
+    "appearanceLightChromeTheme": "{ accent = \"#10B981\", contrast = 62, fonts = { code = \"SF Mono\", ui = \"Kaiti SC\" }, ink = \"#0f2c20\", opaqueWindows = true, semanticColors = { diffAdded = \"#bbf7d0\", diffRemoved = \"#fecaca\", skill = \"#fbbf24\" }, surface = \"#edf7f2\" }"
+  },
+  "appearance": "auto",
+  "art": {
+    "focusX": 0.72,
+    "focusY": 0.45,
+    "safeArea": "left",
+    "taskMode": "ambient"
+  },
+  "version": "2.0.0"
+}

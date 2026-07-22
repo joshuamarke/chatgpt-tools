@@ -1,0 +1,39 @@
+[package]
+name = "chatgpt-tools"
+version = "1.0.0"
+description = "ChatGPT Tools — lightweight ChatGPT / Codex skin manager (Tauri 2)"
+authors = ["chatgpt-tools"]
+edition = "2021"
+
+[lib]
+name = "chatgpt_tools_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["protocol-asset"] }
+tauri-plugin-dialog = "2"
+tauri-plugin-opener = "2"
+tauri-plugin-shell = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+base64 = "0.22"
+# Native CDP engine (no system Node for apply/status/inject)
+ureq = { version = "2.12", default-features = false, features = ["json", "tls"] }
+tungstenite = { version = "0.24", default-features = false, features = ["handshake"] }
+url = "2"
+sha2 = "0.10"
+hex = "0.4"
+parking_lot = "0.12"
+# Native .cgskin / .zip import-export (no Node adm-zip)
+zip = { version = "2.2", default-features = false, features = ["deflate"] }
+
+[profile.release]
+panic = "abort"
+codegen-units = 1
+lto = true
+opt-level = "s"
+strip = true

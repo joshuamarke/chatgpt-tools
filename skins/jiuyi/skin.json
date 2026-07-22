@@ -1,0 +1,47 @@
+{
+  "id": "jiuyi",
+  "name": "烟雨客 · ᐝ久憶",
+  "nameEn": "Rainy Jianghu jiuyi",
+  "description": "烟雨巷陌，油纸伞下的江湖限定；暗色毛玻璃与朱砂印（Dark 模式）",
+  "tags": [
+    "烟雨",
+    "江湖",
+    "武侠",
+    "暗色",
+    "Dark",
+    "限定"
+  ],
+  "previewGradient": "linear-gradient(135deg, #141a24 0%, #2a3548 45%, #a83a2e 100%)",
+  "accent": "#A83A2E",
+  "port": 9336,
+  "assets": {
+    "css": "assets/jiuyi-skin.css",
+    "art": "assets/jiuyi.png",
+    "artMime": "image/png",
+    "plugin": "assets/plugin.json"
+  },
+  "markers": {
+    "rootClass": "codex-jiuyi-skin",
+    "homeClass": "jiuyi-home",
+    "styleId": "codex-jiuyi-skin-style",
+    "chromeId": "codex-jiuyi-skin-chrome",
+    "stateKey": "__CODEX_JIUYI_SKIN_STATE__",
+    "disabledKey": "__CODEX_JIUYI_SKIN_DISABLED__",
+    "artVar": "--jiuyi-art"
+  },
+  "desktopTheme": {
+    "appearanceTheme": "dark",
+    "appearanceDarkCodeThemeId": "codex",
+    "appearanceDarkChromeTheme": "{ accent = \"#A83A2E\", contrast = 68, ink = \"#E8E4DC\", opaqueWindows = true, semanticColors = { diffAdded = \"#3D5C4A\", diffRemoved = \"#6B3A32\", skill = \"#C9A45A\" }, surface = \"#141A24\" }",
+    "appearanceLightCodeThemeId": "codex",
+    "appearanceLightChromeTheme": "{ accent = \"#A83A2E\", contrast = 68, ink = \"#E8E4DC\", opaqueWindows = true, semanticColors = { diffAdded = \"#3D5C4A\", diffRemoved = \"#6B3A32\", skill = \"#C9A45A\" }, surface = \"#141A24\" }"
+  },
+  "appearance": "dark",
+  "art": {
+    "focusX": 0.78,
+    "focusY": 0.42,
+    "safeArea": "left",
+    "taskMode": "ambient"
+  },
+  "version": "2.3.1"
+}

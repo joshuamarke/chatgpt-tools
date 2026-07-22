@@ -1,0 +1,32 @@
+{
+  "name": "chatgpt-tools",
+  "version": "2.2.0",
+  "description": "ChatGPT Tools — 轻量 ChatGPT / Codex 桌面换肤工具箱（Tauri 2）",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tauri dev",
+    "build": "tauri build",
+    "tauri": "tauri",
+    "engine": "node engine/cli.mjs",
+    "engine:status": "node engine/cli.mjs status",
+    "verify:engine": "node scripts/verify-engine.mjs",
+    "test:engine": "node --test engine/tests/*.test.mjs",
+    "check:payloads": "node engine/cli.mjs list-skins && node --test engine/tests/injector-self.test.mjs",
+    "postinstall": "node scripts/ensure-resources.mjs"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^2.5.0",
+    "@tauri-apps/plugin-dialog": "^2.2.2",
+    "@tauri-apps/plugin-opener": "^2.2.7",
+    "@tauri-apps/plugin-shell": "^2.2.1",
+    "adm-zip": "^0.5.16",
+    "ws": "^8.18.3"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.5.0"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

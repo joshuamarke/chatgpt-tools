@@ -1,0 +1,42 @@
+{
+  "id": "guofeng",
+  "name": "中国风 · 墨韵",
+  "nameEn": "Chinese Ink",
+  "description": "水墨国风，朱砂印章与山水意境",
+  "tags": [
+    "国风",
+    "水墨",
+    "朱砂"
+  ],
+  "previewGradient": "linear-gradient(135deg, #f6f0e2 0%, #3f6b52 45%, #b83a2a 100%)",
+  "accent": "#B83A2A",
+  "port": 9336,
+  "assets": {
+    "css": "assets/cn-skin.css",
+    "art": "assets/cn-reference.svg",
+    "artMime": "image/svg+xml",
+    "plugin": "assets/plugin.json"
+  },
+  "markers": {
+    "rootClass": "codex-cn-skin",
+    "homeClass": "cn-home",
+    "styleId": "codex-cn-skin-style",
+    "chromeId": "codex-cn-skin-chrome",
+    "stateKey": "__CODEX_CN_SKIN_STATE__",
+    "disabledKey": "__CODEX_CN_SKIN_DISABLED__",
+    "artVar": "--cn-art"
+  },
+  "desktopTheme": {
+    "appearanceTheme": "light",
+    "appearanceLightCodeThemeId": "codex",
+    "appearanceLightChromeTheme": "{ accent = \"#B83A2A\", contrast = 62, fonts = { code = \"SF Mono\", ui = \"Songti SC\" }, ink = \"#2A2418\", opaqueWindows = true, semanticColors = { diffAdded = \"#C8DFC4\", diffRemoved = \"#E8B4A8\", skill = \"#C9A45A\" }, surface = \"#F6F0E2\" }"
+  },
+  "appearance": "auto",
+  "art": {
+    "focusX": 0.72,
+    "focusY": 0.45,
+    "safeArea": "left",
+    "taskMode": "ambient"
+  },
+  "version": "2.0.0"
+}

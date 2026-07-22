@@ -1,0 +1,44 @@
+{
+  "id": "miku",
+  "name": "初音未来 · 葱歌极光",
+  "nameEn": "Hatsune Miku Teal",
+  "description": "冰绿双马尾歌姬，全息樱粉音轨粒子流光与音符气旋呼吸特效",
+  "tags": [
+    "动漫",
+    "初音未来",
+    "虚拟歌姬",
+    "极客",
+    "亮色"
+  ],
+  "previewGradient": "linear-gradient(135deg, #f2faf9 0%, #00f5d4 50%, #feeafb 100%)",
+  "accent": "#00f5d4",
+  "port": 9340,
+  "assets": {
+    "css": "assets/miku-skin.css",
+    "art": "assets/miku-reference.png",
+    "artMime": "image/jpeg",
+    "plugin": "assets/plugin.json"
+  },
+  "markers": {
+    "rootClass": "codex-miku-skin",
+    "homeClass": "miku-home",
+    "styleId": "codex-miku-skin-style",
+    "chromeId": "codex-miku-skin-chrome",
+    "stateKey": "__CODEX_MIKU_SKIN_STATE__",
+    "disabledKey": "__CODEX_MIKU_SKIN_DISABLED__",
+    "artVar": "--miku-art"
+  },
+  "desktopTheme": {
+    "appearanceTheme": "light",
+    "appearanceLightCodeThemeId": "codex",
+    "appearanceLightChromeTheme": "{ accent = \"#00F5D4\", contrast = 62, fonts = { code = \"SF Mono\", ui = \"PingFang SC\" }, ink = \"#0b2b27\", opaqueWindows = true, semanticColors = { diffAdded = \"#bbf7d0\", diffRemoved = \"#fecaca\", skill = \"#a855f7\" }, surface = \"#f2faf9\" }"
+  },
+  "appearance": "auto",
+  "art": {
+    "focusX": 0.72,
+    "focusY": 0.45,
+    "safeArea": "left",
+    "taskMode": "ambient"
+  },
+  "version": "2.0.0"
+}

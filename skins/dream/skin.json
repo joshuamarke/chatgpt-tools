@@ -1,0 +1,42 @@
+{
+  "id": "dream",
+  "name": "Dream 粉紫",
+  "nameEn": "Dream Pink",
+  "description": "粉紫梦幻风格，温柔星光氛围",
+  "tags": [
+    "粉紫",
+    "梦幻",
+    "Fiona"
+  ],
+  "previewGradient": "linear-gradient(135deg, #fff3f9 0%, #f3eafd 50%, #ff73bd 100%)",
+  "accent": "#B65CFF",
+  "port": 9335,
+  "assets": {
+    "css": "assets/dream-skin.css",
+    "art": "assets/dream-reference.png",
+    "artMime": "image/png",
+    "plugin": "assets/plugin.json"
+  },
+  "markers": {
+    "rootClass": "codex-dream-skin",
+    "homeClass": "dream-home",
+    "styleId": "codex-dream-skin-style",
+    "chromeId": "codex-dream-skin-chrome",
+    "stateKey": "__CODEX_DREAM_SKIN_STATE__",
+    "disabledKey": "__CODEX_DREAM_SKIN_DISABLED__",
+    "artVar": "--dream-art"
+  },
+  "desktopTheme": {
+    "appearanceTheme": "light",
+    "appearanceLightCodeThemeId": "codex",
+    "appearanceLightChromeTheme": "{ accent = \"#B65CFF\", contrast = 64, fonts = { code = \"SF Mono\", ui = \"PingFang SC\" }, ink = \"#4A235F\", opaqueWindows = true, semanticColors = { diffAdded = \"#BCE8CF\", diffRemoved = \"#F7B8CE\", skill = \"#C47BFF\" }, surface = \"#FFF4FA\" }"
+  },
+  "appearance": "auto",
+  "art": {
+    "focusX": 0.72,
+    "focusY": 0.45,
+    "safeArea": "left",
+    "taskMode": "ambient"
+  },
+  "version": "2.0.0"
+}

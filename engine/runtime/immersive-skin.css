@@ -1,0 +1,337 @@
+/**
+ * =============================================================================
+ * ChatGPT Tools · FRAMEWORK baseline (adaptive full-window skin capability)
+ * =============================================================================
+ *
+ * This file is part of the **skin framework**, not a product skin.
+ * The payload pipeline prepends it BEFORE each skin's CSS as a capability
+ * baseline. Engine core does NOT force-override author styles — skin CSS
+ * is author-owned and may refine or extend these defaults.
+ *
+ * Framework provides (so skins need not re-implement from zero):
+ *   1) Full-window wallpaper on wide art (body paints once; home / task /
+ *      plugins / scheduled / PR share one continuous surface)
+ *   2) Native-control defaults (header color/legibility, pointer-events on
+ *      real buttons; chrome decorations pointer-events: none by default)
+ *   3) Suggestion cards follow theme text tokens by default
+ *   4) Single composer readability surface (no double native gradients)
+ *
+ * Personalization (skins/<id>/assets/*.css + plugin.json) is free-form:
+ *   - Tokens, brand chromeHtml, fonts, panel polish, extra layout polish
+ *   - Implemented by the skin itself on top of this baseline
+ *   - Authors follow docs/development/skin-contract.md by convention if they
+ *     want to keep native controls / suggestions / full-window wallpaper intact
+ *
+ * Runtime class/vars (renderer-core):
+ *   dream-art-wide | dream-art-standard
+ *   dream-theme-light | dream-theme-dark
+ *   dream-task-ambient | dream-task-banner | dream-task-off
+ *   dream-safe-* , dream-focus-*
+ *   --dream-art , --dream-art-position , --dream-accent , --dream-text , …
+ */
+
+/* ---- Shared readability tokens (skins override via --dream-* on :root) ---- */
+html:is(.dream-art-wide, .dream-art-standard) {
+  --cg-immersive-edge: color-mix(in srgb, var(--dream-canvas, #f7f8fc) 46%, transparent);
+  --cg-immersive-mid: color-mix(in srgb, var(--dream-canvas, #f7f8fc) 28%, transparent);
+  --cg-immersive-far: color-mix(in srgb, var(--dream-canvas, #f7f8fc) 14%, transparent);
+  --cg-immersive-sidebar: color-mix(in srgb, var(--dream-sidebar, #f0f1f6) 50%, transparent);
+  --cg-task-immersive-sidebar: color-mix(in srgb, var(--dream-sidebar, #f0f1f6) 72%, transparent);
+  --cg-task-immersive-edge: color-mix(in srgb, var(--dream-canvas, #f7f8fc) 86%, transparent);
+  --cg-task-immersive-mid: color-mix(in srgb, var(--dream-canvas, #f7f8fc) 78%, transparent);
+  --cg-task-immersive-far: color-mix(in srgb, var(--dream-canvas, #f7f8fc) 66%, transparent);
+  --cg-immersive-composer: color-mix(
+    in srgb,
+    var(--dream-surface-raised, #ffffff) 88%,
+    var(--dream-accent, #8b7cff) 4%
+  );
+  --cg-immersive-line: color-mix(in srgb, var(--dream-line, #c8cad4) 76%, transparent);
+  --cg-text: var(--dream-text, var(--dream-ink, #202536));
+  --cg-surface-raised: var(--dream-surface-raised, #ffffff);
+}
+
+html.dream-theme-dark:is(.dream-art-wide, .dream-art-standard) {
+  --cg-immersive-edge: color-mix(in srgb, var(--dream-canvas, #1a1c24) 43%, transparent);
+  --cg-immersive-mid: color-mix(in srgb, var(--dream-canvas, #1a1c24) 27%, transparent);
+  --cg-immersive-far: color-mix(in srgb, var(--dream-canvas, #1a1c24) 16%, transparent);
+  --cg-immersive-sidebar: color-mix(in srgb, var(--dream-sidebar, #12141a) 48%, transparent);
+  --cg-task-immersive-sidebar: color-mix(in srgb, var(--dream-sidebar, #12141a) 70%, transparent);
+  --cg-task-immersive-edge: color-mix(in srgb, var(--dream-canvas, #1a1c24) 82%, transparent);
+  --cg-task-immersive-mid: color-mix(in srgb, var(--dream-canvas, #1a1c24) 74%, transparent);
+  --cg-task-immersive-far: color-mix(in srgb, var(--dream-canvas, #1a1c24) 60%, transparent);
+  --cg-immersive-composer: color-mix(
+    in srgb,
+    var(--dream-surface-raised, #252830) 90%,
+    var(--dream-accent, #8b7cff) 5%
+  );
+  --cg-text: var(--dream-text, #eef0f6);
+}
+
+/* ==========================================================================
+ * NATIVE CONTROLS (all aspect modes) — framework baseline
+ * Skin CSS may refine colors/decoration; contract recommends not changing
+ * header position/top/z-index so side-panel close keeps working.
+ * ========================================================================== */
+
+html:is(.dream-art-wide, .dream-art-standard) main.main-surface > header.app-header-tint {
+  /* position / top / z-index not set here — leave native fixed header geometry */
+  color: var(--cg-text) !important;
+}
+
+html:is(.dream-art-wide, .dream-art-standard) main.main-surface > header.app-header-tint button,
+html:is(.dream-art-wide, .dream-art-standard) main.main-surface > header.app-header-tint a,
+html:is(.dream-art-wide, .dream-art-standard) main.main-surface > header.app-header-tint [role="button"],
+html:is(.dream-art-wide, .dream-art-standard) main.main-surface > header.app-header-tint [data-state] {
+  pointer-events: auto !important;
+}
+
+/* Sidebar nav stays clickable even when immersed */
+html:is(.dream-art-wide, .dream-art-standard) aside.app-shell-left-panel button,
+html:is(.dream-art-wide, .dream-art-standard) aside.app-shell-left-panel a,
+html:is(.dream-art-wide, .dream-art-standard) aside.app-shell-left-panel [role="button"] {
+  pointer-events: auto !important;
+}
+
+/* Skin chrome decorations must never capture clicks (core also sets this; reinforce). */
+html:is(.dream-art-wide, .dream-art-standard) [id$="-skin-chrome"],
+html:is(.dream-art-wide, .dream-art-standard) [id*="-skin-chrome"] {
+  pointer-events: none !important;
+}
+
+/* Dark application menu bar (outside main-surface) */
+html.dream-theme-dark [class~="group/application-menu-top-bar"] {
+  color: var(--cg-text) !important;
+  background: color-mix(in srgb, var(--dream-sidebar, #12141a) 90%, transparent) !important;
+  border-bottom: 1px solid var(--cg-immersive-line) !important;
+}
+
+html.dream-theme-dark [class~="group/application-menu-top-bar"] button,
+html.dream-theme-dark [class~="group/application-menu-top-bar"] [role="button"] {
+  color: inherit !important;
+  pointer-events: auto !important;
+}
+
+/* ==========================================================================
+ * SUGGESTION CARDS (all aspect modes) — framework baseline text tokens
+ * Skins may restyle cards; prefer var(--dream-text) / --cg-text for contrast.
+ * ========================================================================== */
+
+html:is(.dream-art-wide, .dream-art-standard) .dream-home .group\/home-suggestions button,
+html:is(.dream-art-wide, .dream-art-standard) [class*="home-suggestions"] button,
+html:is(.dream-art-wide, .dream-art-standard) [class*="HomeSuggestions"] button {
+  color: var(--cg-text) !important;
+}
+
+html:is(.dream-art-wide, .dream-art-standard) .dream-home .group\/home-suggestions button span,
+html:is(.dream-art-wide, .dream-art-standard) [class*="home-suggestions"] button span,
+html:is(.dream-art-wide, .dream-art-standard) .dream-home .group\/home-suggestions button p,
+html:is(.dream-art-wide, .dream-art-standard) [class*="home-suggestions"] button p {
+  color: inherit !important;
+}
+
+/* ==========================================================================
+ * COMPOSER readability (all aspect modes)
+ * ========================================================================== */
+
+html:is(.dream-art-wide, .dream-art-standard) .composer-surface-chrome {
+  color: var(--cg-text) !important;
+}
+
+html:is(.dream-art-wide, .dream-art-standard) .ProseMirror {
+  color: var(--cg-text) !important;
+  caret-color: var(--dream-accent, currentColor) !important;
+}
+
+/* ==========================================================================
+ * FULL-WINDOW WALLPAPER (wide art / dream-art-wide) — framework baseline layout
+ * Skins supply --dream-art + tokens and may refine; contract recommends one
+ * continuous body wallpaper instead of per-panel cover crops.
+ * ========================================================================== */
+
+html.dream-art-wide:has(main.main-surface.dream-home-shell) body,
+html.dream-art-wide:is(.dream-task-ambient, .dream-task-banner):has(main.main-surface:not(.dream-home-shell)) body {
+  background-color: var(--dream-canvas, #f7f8fc) !important;
+  background-image: var(--dream-art) !important;
+  background-position: var(--dream-art-position, 50% 50%) !important;
+  background-size: cover !important;
+  background-repeat: no-repeat !important;
+  background-attachment: fixed !important;
+}
+
+/* Hide decorative body::before overlays skins may use in standard mode */
+html.dream-art-wide body::before {
+  opacity: 0 !important;
+  background-image: none !important;
+  content: none !important;
+}
+
+html.dream-art-wide:has(main.main-surface.dream-home-shell) aside.app-shell-left-panel,
+html.dream-art-wide:is(.dream-task-ambient, .dream-task-banner):has(main.main-surface:not(.dream-home-shell))
+  aside.app-shell-left-panel {
+  background: linear-gradient(90deg, var(--cg-immersive-sidebar), var(--cg-immersive-edge)) !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+}
+
+html.dream-art-wide:is(.dream-task-ambient, .dream-task-banner):has(main.main-surface:not(.dream-home-shell))
+  aside.app-shell-left-panel {
+  background: linear-gradient(
+    90deg,
+    var(--cg-task-immersive-sidebar),
+    var(--cg-task-immersive-edge)
+  ) !important;
+}
+
+/* Sidebar collapse resize hot-zone: do not paint opaque strip into main */
+html.dream-art-wide aside.app-shell-left-panel::after {
+  background: transparent !important;
+}
+
+html.dream-art-wide main.main-surface.dream-home-shell,
+html.dream-art-wide:is(.dream-task-ambient, .dream-task-banner) main.main-surface:not(.dream-home-shell) {
+  background: linear-gradient(
+    90deg,
+    var(--cg-immersive-edge),
+    var(--cg-immersive-mid) 64%,
+    var(--cg-immersive-far)
+  ) !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+}
+
+html.dream-art-wide:is(.dream-task-ambient, .dream-task-banner) main.main-surface:not(.dream-home-shell) {
+  background: linear-gradient(
+    90deg,
+    var(--cg-task-immersive-edge),
+    var(--cg-task-immersive-mid) 64%,
+    var(--cg-task-immersive-far)
+  ) !important;
+}
+
+/* Transparent continuous top bar over full-window art */
+html.dream-art-wide main.main-surface > header.app-header-tint {
+  background: transparent !important;
+  border-bottom: 0 !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+  text-shadow:
+    0 1px 2px color-mix(in srgb, var(--dream-canvas, #f7f8fc) 86%, transparent),
+    0 0 8px color-mix(in srgb, var(--dream-canvas, #f7f8fc) 58%, transparent) !important;
+}
+
+html.dream-art-wide main.main-surface > header.app-header-tint svg {
+  filter: drop-shadow(0 1px 2px color-mix(in srgb, var(--dream-canvas, #f7f8fc) 72%, transparent));
+}
+
+html.dream-art-wide main.main-surface [role="main"] {
+  background: transparent !important;
+}
+
+/* Home hero: no second cropped wallpaper panel */
+html.dream-art-wide main.main-surface.dream-home-shell
+  .dream-home > div:first-child > div:first-child > div:first-child {
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+html.dream-art-wide main.main-surface.dream-home-shell
+  .dream-home > div:first-child > div:first-child > div:first-child::before {
+  content: none !important;
+}
+
+/* Suggestion cards on immersive wallpaper (surface + text) */
+html.dream-art-wide main.main-surface.dream-home-shell .dream-home .group\/home-suggestions button,
+html.dream-art-wide main.main-surface.dream-home-shell [class*="home-suggestions"] button {
+  color: var(--cg-text) !important;
+  background: color-mix(in srgb, var(--cg-surface-raised) 58%, transparent) !important;
+  box-shadow:
+    0 8px 22px color-mix(in srgb, var(--dream-canvas, #f7f8fc) 18%, transparent),
+    inset 0 0 0 1px var(--cg-immersive-line) !important;
+  backdrop-filter: blur(8px) saturate(1.04) !important;
+}
+
+/* Composer: one solid readability surface */
+html.dream-art-wide .composer-surface-chrome {
+  color: var(--cg-text) !important;
+  background: var(--cg-immersive-composer) !important;
+  border: 0 !important;
+  box-shadow:
+    0 10px 30px color-mix(in srgb, var(--dream-canvas, #f7f8fc) 20%, transparent),
+    inset 0 0 0 1px var(--cg-immersive-line) !important;
+  backdrop-filter: none !important;
+}
+
+html.dream-art-wide .composer-surface-chrome::before {
+  content: none !important;
+}
+
+/* Home utility bar + composer merge into one control */
+html:is(.dream-art-wide, .dream-art-standard) .dream-home-utility,
+html:is(.dream-art-wide, .dream-art-standard) [class*="homeUtilityBar"],
+html:is(.dream-art-wide, .dream-art-standard) [class*="_homeUtilityBar_"] {
+  border: 1px solid var(--cg-immersive-line) !important;
+  border-bottom: 0 !important;
+  border-radius: 18px 18px 0 0 !important;
+  background: var(--cg-immersive-composer) !important;
+  box-shadow: none !important;
+}
+
+html.dream-art-wide .dream-home:has(.dream-home-utility) .composer-surface-chrome,
+html.dream-art-wide .dream-home:has([class*="homeUtilityBar"]) .composer-surface-chrome {
+  border-radius: 0 0 18px 18px !important;
+}
+
+/* Plugins / scheduled / PR / search: clear opaque sticky route chrome only */
+html.dream-art-wide:is(.dream-task-ambient, .dream-task-banner)
+  main.main-surface:not(.dream-home-shell)
+  div.sticky:has(input[type="text"]),
+html.dream-art-wide:is(.dream-task-ambient, .dream-task-banner)
+  main.main-surface:not(.dream-home-shell)
+  div.sticky:has(input[type="text"])::after {
+  background: transparent !important;
+}
+
+html.dream-art-wide:is(.dream-task-ambient, .dream-task-banner)
+  main.main-surface:not(.dream-home-shell)
+  div.no-drag:has(> input[type="text"]) {
+  background: var(--cg-immersive-composer) !important;
+  border: 0 !important;
+  box-shadow: inset 0 0 0 1px var(--cg-immersive-line) !important;
+  backdrop-filter: none !important;
+}
+
+html.dream-art-wide:is(.dream-task-ambient, .dream-task-banner)
+  main.main-surface:not(.dream-home-shell)
+  [class~="bg-token-main-surface-primary"][class~="h-full"][class~="w-full"] {
+  background: transparent !important;
+}
+
+/* Kill native double fades that stack with theme surfaces */
+html.dream-art-wide main.main-surface .app-shell-main-content-frame {
+  border-top: 0 !important;
+}
+
+html.dream-art-wide main.main-surface .app-shell-main-content-top-fade {
+  display: none !important;
+  background: transparent !important;
+}
+
+html.dream-art-wide main.main-surface
+  .thread-scroll-container
+  .bg-gradient-to-t.from-token-main-surface-primary {
+  background: transparent !important;
+}
+
+/* Task route residual solid panels */
+html.dream-art-wide:is(.dream-task-ambient, .dream-task-banner) .dream-task {
+  background: transparent !important;
+}
+
+html.dream-art-wide:is(.dream-task-ambient, .dream-task-banner) .dream-task::before {
+  content: none !important;
+}
