@@ -127,7 +127,8 @@
         <div class="dt-about">
           <p>独立调试窗口：主窗口标题栏「DevTools」按钮打开（不占用 F12）。</p>
           <ul>
-            <li><b>Elements</b>：在真实宿主窗口点选（CDP Overlay），右侧显示 DOM 路径与 Styles / Computed</li>
+            <li><b>Elements</b>：在真实宿主窗口点选（CDP Overlay），左侧层级 DOM 树，右侧 Styles / Computed</li>
+            <li><b>关闭窗口</b>：自动断开 inspect CDP（结束点选、释放 Overlay/DOM 会话与轮询）</li>
             <li><b>Host / Runtime / Skins</b>：生命周期与换肤会话诊断</li>
             <li>Tauri 自带 F12 只能审查本工具窗口，宿主审查必须走 CDP</li>
           </ul>

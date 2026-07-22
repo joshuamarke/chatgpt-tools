@@ -401,10 +401,10 @@ button, input { font: inherit; }
 .el-tree {
   flex: 1;
   overflow: auto;
-  padding: 6px 0 16px;
+  padding: 4px 0 20px;
   font-family: var(--mono);
   font-size: 12px;
-  line-height: 1.45;
+  line-height: 1.5;
   user-select: text;
   outline: none;
 }
@@ -418,15 +418,18 @@ button, input { font: inherit; }
 
 .el-node {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   gap: 2px;
-  padding: 1px 8px 1px 0;
+  min-height: 22px;
+  padding: 1px 10px 1px 0;
   cursor: default;
   white-space: nowrap;
+  border-left: 2px solid transparent;
 }
-.el-node:hover { background: rgba(139, 124, 255, 0.08); }
+.el-node:hover { background: rgba(139, 124, 255, 0.1); }
 .el-node.selected {
-  background: rgba(109, 94, 252, 0.28);
+  background: rgba(109, 94, 252, 0.32);
+  border-left-color: var(--accent);
 }
 .el-twisty {
   width: 16px;
@@ -435,16 +438,33 @@ button, input { font: inherit; }
   color: var(--muted);
   cursor: pointer;
   user-select: none;
-  font-size: 10px;
-  line-height: 1.6;
+  font-size: 9px;
+  line-height: 1;
+  padding: 4px 0;
 }
-.el-twisty.empty { visibility: hidden; }
+.el-twisty:hover { color: var(--text); }
+.el-twisty.empty {
+  visibility: hidden;
+  pointer-events: none;
+}
+.el-node-label {
+  cursor: pointer;
+  min-width: 0;
+}
 .el-tag {
   color: #7fdbca;
 }
 .el-attr-name { color: #9ecbff; }
 .el-attr-val { color: #e6db74; }
-.el-text-node { color: #c5cddc; font-style: italic; }
+.el-text-node { color: #a8b0c0; font-style: italic; }
+
+.el-crumbs .crumb[data-crumb-id]:not([data-crumb-id=""]) {
+  cursor: pointer;
+}
+.el-crumbs .crumb[data-crumb-id]:not([data-crumb-id=""]):hover {
+  text-decoration: underline;
+  color: #c4b8ff;
+}
 
 .el-sel-head {
   padding: 10px 12px;

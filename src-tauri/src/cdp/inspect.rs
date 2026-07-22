@@ -201,12 +201,17 @@ pub fn connect() -> Result<Value, InspectError> {
 pub fn disconnect() -> Result<Value, InspectError> {
     let mut guard = INSPECT.lock();
     if let Some(st) = guard.take() {
+        // Best-effort teardown; short timeouts so close never hangs the UI thread.
         let _ = st.session.send(
             "Overlay.setInspectMode",
-            json!({ "mode": "none", "highlightConfig": default_highlight_config() }),
-            3000,
+            json!({
+                "mode": "none",
+                "highlightConfig": default_highlight_config()
+            }),
+            1200,
         );
-        let _ = st.session.send("Overlay.hideHighlight", json!({}), 2000);
+        let _ = st.session.send("Overlay.hideHighlight", json!({}), 800);
+        let _ = st.session.send("Overlay.disable", json!({}), 800);
         st.session.close();
     }
     Ok(json!({ "ok": true, "disconnected": true }))
@@ -641,112 +646,109 @@ fn build_ancestor_chain(session: &CdpSession, node: &Value) -> Result<Vec<Value>
     Ok(chain)
 }
 
+/// Walk parentElement chain and map each element to a frontend nodeId (for DOM tree reveal).
 fn ancestor_chain_via_js(session: &CdpSession, node_id: i64) -> Result<Vec<Value>, InspectError> {
-    let resolved = session
-        .send("DOM.resolveNode", json!({ "nodeId": node_id }), 8000)
-        .map_err(map_err_session)?;
-    let object_id = resolved
-        .get("object")
-        .and_then(|o| o.get("objectId"))
-        .and_then(|v| v.as_str())
-        .ok_or_else(|| InspectError::msg("resolveNode missing objectId"))?
-        .to_string();
+    let mut chain_rev: Vec<Value> = Vec::new();
+    let mut current_id = Some(node_id);
 
-    // r## so JS string fragments like "#" + n.id do not terminate the raw string.
-    let function_declaration = r##"function() {
-  const out = [];
-  let n = this;
-  let guard = 0;
-  while (n && guard++ < 48) {
-    if (n.nodeType === 1) {
-      const attrs = {};
-      if (n.attributes) {
-        for (const a of n.attributes) attrs[a.name] = a.value;
-      }
-      const tag = (n.tagName || "").toLowerCase();
-      let label = tag;
-      if (n.id) label += "#" + n.id;
-      if (n.classList && n.classList.length) {
-        const cls = Array.from(n.classList).slice(0, 3);
-        label += "." + cls.join(".");
-        if (n.classList.length > 3) label += "...";
-      }
-      let selectorHint = tag;
-      if (n.id) selectorHint = "#" + CSS.escape(n.id);
-      else if (n.getAttribute && n.getAttribute("data-testid"))
-        selectorHint = '[data-testid="' + n.getAttribute("data-testid") + '"]';
-      else if (n.classList && n.classList.length) {
-        const safe = Array.from(n.classList).filter(c => c && !c.includes(":") && !c.includes("/")).slice(0, 2);
-        if (safe.length) selectorHint = tag + "." + safe.map(c => CSS.escape(c)).join(".");
-      }
-      out.push({
-        nodeType: 1,
-        localName: tag,
-        nodeName: n.tagName,
-        id: n.id || null,
-        className: n.className && typeof n.className === "string" ? n.className : null,
-        testId: n.getAttribute ? n.getAttribute("data-testid") : null,
-        role: n.getAttribute ? n.getAttribute("role") : null,
-        label: label,
-        selectorHint: selectorHint,
-        attributes: attrs,
-        childNodeCount: n.childElementCount || 0,
-      });
-    } else if (n.nodeType === 9) {
-      out.push({
-        nodeType: 9,
-        localName: "#document",
-        nodeName: "#document",
-        label: "#document",
-        selectorHint: "document",
-        attributes: {},
-        childNodeCount: 1,
-      });
-      break;
-    }
-    n = n.parentNode;
-  }
-  return out.reverse();
-}"##;
-
-    let result = session
-        .send(
-            "Runtime.callFunctionOn",
-            json!({
-                "objectId": object_id,
-                "functionDeclaration": function_declaration,
-                "returnByValue": true,
-                "awaitPromise": false,
-            }),
-            8000,
-        )
-        .map_err(map_err_session)?;
-
-    if let Some(details) = result.get("exceptionDetails") {
-        let t = details
-            .get("text")
-            .and_then(|v| v.as_str())
-            .unwrap_or("callFunctionOn failed");
-        return Err(InspectError::msg(t.to_string()));
-    }
-
-    let arr = result
-        .get("result")
-        .and_then(|r| r.get("value"))
-        .and_then(|v| v.as_array())
-        .cloned()
-        .unwrap_or_default();
-    let len = arr.len();
-    let mut out = Vec::with_capacity(len);
-    for (i, item) in arr.into_iter().enumerate() {
-        let mut obj = item.as_object().cloned().unwrap_or_default();
-        // Only the selected leaf is guaranteed to have a frontend nodeId
-        if i + 1 == len {
-            obj.insert("nodeId".into(), json!(node_id));
+    for _ in 0..40 {
+        let Some(cid) = current_id else { break };
+        let described = session
+            .send(
+                "DOM.describeNode",
+                json!({ "nodeId": cid, "depth": 0 }),
+                5000,
+            )
+            .map_err(map_err_session)?;
+        let Some(node) = described.get("node").cloned() else {
+            break;
+        };
+        let mut summary = node_summary(&node);
+        if let Some(obj) = summary.as_object_mut() {
+            obj.insert("nodeId".into(), json!(cid));
         }
-        out.push(Value::Object(obj));
+        chain_rev.push(summary);
+
+        let ntype = node.get("nodeType").and_then(|v| v.as_i64()).unwrap_or(0);
+        if ntype == 9 {
+            break;
+        }
+
+        // parent via JS remote object → DOM.requestNode for frontend id
+        let resolved = match session.send("DOM.resolveNode", json!({ "nodeId": cid }), 5000) {
+            Ok(v) => v,
+            Err(_) => break,
+        };
+        let object_id = match resolved
+            .get("object")
+            .and_then(|o| o.get("objectId"))
+            .and_then(|v| v.as_str())
+        {
+            Some(s) => s.to_string(),
+            None => break,
+        };
+
+        let parent_res = session
+            .send(
+                "Runtime.callFunctionOn",
+                json!({
+                    "objectId": object_id,
+                    "functionDeclaration": "function() { return this.parentElement || this.parentNode || null; }",
+                    "returnByValue": false,
+                    "awaitPromise": false,
+                }),
+                5000,
+            )
+            .map_err(map_err_session)?;
+        if parent_res.get("exceptionDetails").is_some() {
+            break;
+        }
+        let parent_type = parent_res
+            .get("result")
+            .and_then(|r| r.get("type"))
+            .and_then(|t| t.as_str())
+            .unwrap_or("undefined");
+        if parent_type == "undefined" || parent_type == "null" {
+            break;
+        }
+        let parent_object_id = match parent_res
+            .get("result")
+            .and_then(|r| r.get("objectId"))
+            .and_then(|v| v.as_str())
+        {
+            Some(s) => s.to_string(),
+            None => break,
+        };
+
+        let req = match session.send(
+            "DOM.requestNode",
+            json!({ "objectId": parent_object_id }),
+            5000,
+        ) {
+            Ok(v) => v,
+            Err(_) => break,
+        };
+        let parent_node_id = req.get("nodeId").and_then(|v| v.as_i64());
+        // Release remote objects to avoid leaking handles in the host
+        let _ = session.send(
+            "Runtime.releaseObject",
+            json!({ "objectId": object_id }),
+            2000,
+        );
+        let _ = session.send(
+            "Runtime.releaseObject",
+            json!({ "objectId": parent_object_id }),
+            2000,
+        );
+
+        if parent_node_id == Some(cid) {
+            break;
+        }
+        current_id = parent_node_id;
     }
-    Ok(out)
+
+    chain_rev.reverse();
+    Ok(chain_rev)
 }
 
 fn build_tree_path(
@@ -754,18 +756,27 @@ fn build_tree_path(
     ancestors: &[Value],
     selected_id: i64,
 ) -> Result<Vec<Value>, InspectError> {
-    // For each ancestor that has a nodeId, fetch shallow children so the UI can render a path tree
+    // Each ancestor with a frontend nodeId + its direct children (for Chrome-like path expand).
     let mut levels = Vec::new();
     for anc in ancestors {
         let Some(nid) = anc.get("nodeId").and_then(|v| v.as_i64()) else {
+            // Skip entries without nodeId (cannot expand in tree)
+            levels.push(json!({
+                "nodeId": null,
+                "label": anc.get("label"),
+                "selected": false,
+                "children": [],
+                "summary": anc,
+            }));
             continue;
         };
-        let children = request_children(session, nid, 1)?;
+        let children = request_children(session, nid, 1).unwrap_or_default();
         levels.push(json!({
             "nodeId": nid,
-            "label": anc.get("label"),
+            "label": anc.get("label").cloned().unwrap_or(Value::Null),
             "selected": nid == selected_id,
             "children": children,
+            "summary": anc,
         }));
     }
     Ok(levels)
@@ -1050,10 +1061,11 @@ fn format_style_body(style: &Value) -> Value {
     })
 }
 
-/// Document root + first-level children for initial Elements tree.
+/// Document root + shallow children for initial Elements tree.
+/// Default depth 3 so html → body → main shells appear without extra clicks.
 pub fn get_document_tree(depth: Option<i64>) -> Result<Value, InspectError> {
     ensure_connected()?;
-    let depth = depth.unwrap_or(2).clamp(1, 4);
+    let depth = depth.unwrap_or(3).clamp(1, 5);
     let mut guard = INSPECT.lock();
     let st = guard
         .as_mut()
@@ -1064,7 +1076,7 @@ pub fn get_document_tree(depth: Option<i64>) -> Result<Value, InspectError> {
         .send(
             "DOM.getDocument",
             json!({ "depth": depth, "pierce": true }),
-            12000,
+            15000,
         )
         .map_err(map_err_session)?;
     let root = doc
@@ -1079,6 +1091,7 @@ pub fn get_document_tree(depth: Option<i64>) -> Result<Value, InspectError> {
         "ok": true,
         "documentNodeId": st.document_node_id,
         "root": tree,
+        "depth": depth,
     }))
 }
 

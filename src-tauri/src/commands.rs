@@ -4,7 +4,7 @@ use crate::engine::{self, EngineError};
 use base64::{engine::general_purpose::STANDARD as B64, Engine as _};
 use serde::Deserialize;
 use serde_json::{json, Value};
-use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindowBuilder};
+use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindowBuilder, WindowEvent};
 use tauri_plugin_dialog::{DialogExt, FilePath, MessageDialogButtons, MessageDialogKind};
 use tauri_plugin_opener::OpenerExt;
 
@@ -455,6 +455,7 @@ pub async fn engine_version() -> Result<Value, String> {
 
 /// Open (or focus) the independent Skin DevTools window.
 /// Reuses a single window labeled `devtools` so the toolbar button stays idempotent.
+/// Closing the window tears down the dedicated inspect CDP session (Overlay/DOM/CSS).
 #[tauri::command]
 pub async fn open_devtools(app: AppHandle) -> Result<Value, String> {
     if let Some(win) = app.get_webview_window(DEVTOOLS_WINDOW_LABEL) {
@@ -464,7 +465,7 @@ pub async fn open_devtools(app: AppHandle) -> Result<Value, String> {
         return Ok(json!({ "ok": true, "reused": true, "label": DEVTOOLS_WINDOW_LABEL }));
     }
 
-    WebviewWindowBuilder::new(
+    let win = WebviewWindowBuilder::new(
         &app,
         DEVTOOLS_WINDOW_LABEL,
         WebviewUrl::App("devtools.html".into()),
@@ -477,6 +478,16 @@ pub async fn open_devtools(app: AppHandle) -> Result<Value, String> {
     .decorations(true)
     .build()
     .map_err(|e| e.to_string())?;
+
+    // Title-bar close / Alt+F4 / OS destroy: always release inspect CDP resources.
+    win.on_window_event(|event| {
+        if matches!(
+            event,
+            WindowEvent::Destroyed | WindowEvent::CloseRequested { .. }
+        ) {
+            let _ = crate::cdp::inspect::disconnect();
+        }
+    });
 
     Ok(json!({
         "ok": true,
