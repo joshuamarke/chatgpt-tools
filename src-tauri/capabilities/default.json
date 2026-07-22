@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2/capability",
   "identifier": "default",
-  "description": "Default capabilities for ChatGPT Tools UI",
-  "windows": ["main"],
+  "description": "Default capabilities for ChatGPT Tools UI (main + Skin DevTools)",
+  "windows": ["main", "devtools"],
   "permissions": [
     "core:default",
     "core:event:default",
@@ -15,6 +15,8 @@
     "core:window:allow-is-maximized",
     "core:window:allow-start-dragging",
     "core:window:allow-set-focus",
+    "core:window:allow-show",
+    "core:window:allow-unminimize",
     "core:path:default",
     "dialog:default",
     "dialog:allow-open",

@@ -28,6 +28,12 @@
       </div>
 
       <div class="titlebar-actions" data-no-drag>
+        <button type="button" id="btnDevtools" class="chip-btn" title="打开皮肤 / 宿主 DevTools（F12）">
+          <span class="chip-ico" aria-hidden="true">
+            <svg viewBox="0 0 24 24"><path d="M8 6 4 12l4 6"/><path d="m16 6 4 6-4 6"/><path d="m14 5-4 14"/></svg>
+          </span>
+          <span class="chip-label">DevTools</span>
+        </button>
         <button type="button" id="btnHelp" class="chip-btn" title="使用说明">
           <span class="chip-ico" aria-hidden="true">
             <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 16.2v-.3"/><path d="M12 13.2c0-1.1.7-1.6 1.4-2 .8-.5 1.4-1 1.4-2.1A2.7 2.7 0 0 0 12 6.5a2.7 2.7 0 0 0-2.7 2.5"/></svg>
@@ -221,6 +227,7 @@
             <li>不修改官方安装包，可随时还原</li>
             <li>同时只建议启用一套皮肤</li>
             <li>本版为 <b>Tauri 2</b> 轻量客户端（ChatGPT Tools），注入引擎仍需本机 Node.js 18+</li>
+            <li><b>DevTools</b>：顶部「DevTools」或按 <code>F12</code> / <code>Ctrl+Shift+I</code> 打开独立调试窗口</li>
           </ul>
         </div>
       </div>

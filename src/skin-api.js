@@ -74,5 +74,7 @@
     clearAppPath: () => invoke("clear_app_path"),
     enginePaths: () => invoke("engine_paths"),
     engineVersion: () => invoke("engine_version"),
+    /** Open or focus the independent Skin DevTools window. */
+    openDevtools: () => invoke("open_devtools"),
   };
 })();

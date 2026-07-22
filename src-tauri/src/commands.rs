@@ -4,9 +4,12 @@ use crate::engine::{self, EngineError};
 use base64::{engine::general_purpose::STANDARD as B64, Engine as _};
 use serde::Deserialize;
 use serde_json::{json, Value};
-use tauri::AppHandle;
+use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindowBuilder};
 use tauri_plugin_dialog::{DialogExt, FilePath, MessageDialogButtons, MessageDialogKind};
 use tauri_plugin_opener::OpenerExt;
+
+/// Secondary window label for the skin / host DevTools UI.
+pub const DEVTOOLS_WINDOW_LABEL: &str = "devtools";
 
 fn map_err(e: EngineError) -> String {
     e.to_string()
@@ -448,6 +451,38 @@ pub async fn engine_paths() -> Result<Value, String> {
 #[tauri::command]
 pub async fn engine_version() -> Result<Value, String> {
     run_cli_async(vec!["version".into()]).await
+}
+
+/// Open (or focus) the independent Skin DevTools window.
+/// Reuses a single window labeled `devtools` so F12 / the toolbar button stay idempotent.
+#[tauri::command]
+pub async fn open_devtools(app: AppHandle) -> Result<Value, String> {
+    if let Some(win) = app.get_webview_window(DEVTOOLS_WINDOW_LABEL) {
+        let _ = win.unminimize();
+        let _ = win.show();
+        let _ = win.set_focus();
+        return Ok(json!({ "ok": true, "reused": true, "label": DEVTOOLS_WINDOW_LABEL }));
+    }
+
+    WebviewWindowBuilder::new(
+        &app,
+        DEVTOOLS_WINDOW_LABEL,
+        WebviewUrl::App("devtools.html".into()),
+    )
+    .title("Skin DevTools")
+    .inner_size(1120.0, 780.0)
+    .min_inner_size(840.0, 560.0)
+    .resizable(true)
+    .center()
+    .decorations(true)
+    .build()
+    .map_err(|e| e.to_string())?;
+
+    Ok(json!({
+        "ok": true,
+        "reused": false,
+        "label": DEVTOOLS_WINDOW_LABEL
+    }))
 }
 
 fn file_path_to_string(path: FilePath) -> Result<String, String> {

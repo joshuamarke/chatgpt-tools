@@ -65,6 +65,7 @@ pub fn run() {
             commands::reveal_export,
             commands::engine_paths,
             commands::engine_version,
+            commands::open_devtools,
         ])
         .run(tauri::generate_context!())
         .expect("error while running ChatGPT Tools");

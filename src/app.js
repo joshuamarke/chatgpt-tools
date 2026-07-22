@@ -703,6 +703,28 @@ searchInput?.addEventListener("input", () => {
   if (latestStatus) render(latestStatus);
 });
 
+/* —— DevTools 独立窗口 —— */
+async function openDevtoolsWindow() {
+  try {
+    await window.skinAPI.openDevtools();
+  } catch (err) {
+    showToast(friendlyError(err), "error");
+  }
+}
+document.getElementById("btnDevtools")?.addEventListener("click", () => {
+  openDevtoolsWindow();
+});
+document.addEventListener("keydown", (e) => {
+  // F12 or Ctrl+Shift+I → Skin DevTools (independent window)
+  const isF12 = e.key === "F12";
+  const isCtrlShiftI =
+    (e.ctrlKey || e.metaKey) && e.shiftKey && String(e.key || "").toLowerCase() === "i";
+  if (isF12 || isCtrlShiftI) {
+    e.preventDefault();
+    openDevtoolsWindow();
+  }
+});
+
 /* —— 帮助 / 导入 / 刷新 / 还原 —— */
 const helpModal = document.getElementById("helpModal");
 function openHelp() {
