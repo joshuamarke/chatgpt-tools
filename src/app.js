@@ -703,7 +703,7 @@ searchInput?.addEventListener("input", () => {
   if (latestStatus) render(latestStatus);
 });
 
-/* —— DevTools 独立窗口 —— */
+/* —— DevTools 独立窗口（仅标题栏按钮；不绑定 F12，避免占用系统/WebView 调试快捷键） —— */
 async function openDevtoolsWindow() {
   try {
     await window.skinAPI.openDevtools();
@@ -713,16 +713,6 @@ async function openDevtoolsWindow() {
 }
 document.getElementById("btnDevtools")?.addEventListener("click", () => {
   openDevtoolsWindow();
-});
-document.addEventListener("keydown", (e) => {
-  // F12 or Ctrl+Shift+I → Skin DevTools (independent window)
-  const isF12 = e.key === "F12";
-  const isCtrlShiftI =
-    (e.ctrlKey || e.metaKey) && e.shiftKey && String(e.key || "").toLowerCase() === "i";
-  if (isF12 || isCtrlShiftI) {
-    e.preventDefault();
-    openDevtoolsWindow();
-  }
 });
 
 /* —— 帮助 / 导入 / 刷新 / 还原 —— */
