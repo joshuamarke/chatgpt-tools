@@ -1,6 +1,10 @@
 mod cdp;
+mod cloud;
 mod commands;
 mod engine;
+mod env;
+mod providers;
+mod sessions;
 
 use tauri::Manager;
 
@@ -12,6 +16,10 @@ pub fn run() {
     std::env::set_var("CODEX_SKIN_ROOT", &root);
     // 状态目录名：%LOCALAPPDATA%\ChatGPTTools
     std::env::set_var("CODEX_SKIN_STATE_NAME", "ChatGPTTools");
+    // Align cloud version filters with product version (GUI APP_VERSION).
+    if std::env::var("CODEX_SKIN_APP_VERSION").is_err() {
+        std::env::set_var("CODEX_SKIN_APP_VERSION", "2.2.0");
+    }
 
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
@@ -53,6 +61,7 @@ pub fn run() {
             commands::restore,
             commands::pause,
             commands::resume,
+            commands::start_host,
             commands::export_skin,
             commands::import_skin,
             commands::delete_skin,
@@ -65,6 +74,8 @@ pub fn run() {
             commands::reveal_export,
             commands::engine_paths,
             commands::engine_version,
+            env::env_check,
+            env::open_install_terminal,
             commands::open_devtools,
             commands::inspect_connect,
             commands::inspect_disconnect,
@@ -75,6 +86,37 @@ pub fn run() {
             commands::inspect_get_children,
             commands::inspect_select_node,
             commands::inspect_highlight,
+            commands::cloud_status,
+            commands::cloud_refresh,
+            commands::cloud_announcements,
+            commands::cloud_mark_announcement_read,
+            commands::cloud_download_skin,
+            commands::cloud_check_update,
+            commands::cloud_clear_skin_cache,
+            sessions::commands::list_local_sessions,
+            sessions::commands::delete_local_session,
+            sessions::commands::undo_local_session,
+            sessions::commands::export_local_session_markdown,
+            sessions::commands::load_provider_sync_targets,
+            sessions::commands::sync_providers_now,
+            sessions::commands::preview_session_index_cleanup,
+            sessions::commands::apply_session_index_cleanup_cmd,
+            sessions::commands::session_paths_info,
+            sessions::commands::list_grok_sessions,
+            sessions::commands::delete_grok_session,
+            sessions::commands::export_grok_session_markdown,
+            providers::list_providers,
+            providers::get_provider,
+            providers::add_provider,
+            providers::update_provider,
+            providers::delete_provider,
+            providers::switch_provider,
+            providers::import_live_as_provider,
+            providers::provider_paths_info,
+            providers::list_provider_presets,
+            providers::reapply_current_provider,
+            providers::test_provider_connectivity,
+            providers::fetch_provider_models,
         ])
         .run(tauri::generate_context!())
         .expect("error while running ChatGPT Tools");

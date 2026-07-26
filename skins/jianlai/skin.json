@@ -1,43 +1,49 @@
 {
-  "id": "linglong",
+  "id": "ningyao",
   "name": "剑来 · 宁姚",
-  "nameEn": "JianLai Ning Yao",
-  "description": "废土科幻，极光电蓝色元炁流动与白月魁挂轴画卷",
+  "nameEn": "Jian Lai · Ning Yao",
+  "description": "青衣执卷，秋叶村舍；引擎不画 body，首页大盒子自挂立绘（hero 文案 + 推荐卡同框）",
+  "categories": ["game", "anime", "art"],
   "tags": [
     "仙侠",
-    "水墨",
+    "剑来",
     "宁姚",
-    "剑来"
+    "浅色",
+    "Light",
+    "青衣"
   ],
-  "previewGradient": "linear-gradient(135deg, #f0f4f8 0%, #06b6d4 50%, #0891b2 100%)",
-  "accent": "#06B6D4",
+  "previewGradient": "linear-gradient(135deg, #eef3f2 0%, #9bc4ce 48%, #b8956a 100%)",
+  "accent": "#6A9EAB",
   "port": 9338,
   "assets": {
-    "css": "assets/linglong-skin.css",
-    "art": "assets/linglong-reference.png",
-    "artMime": "image/png",
-    "plugin": "assets/plugin.json"
+    "css": "assets/ningyao-skin.css",
+    "art": "assets/jl-ningyao.jpg",
+    "artMime": "image/jpeg",
+    "plugin": "assets/plugin.json",
+    "screenshot": "assets/screenshot.jpg"
   },
   "markers": {
-    "rootClass": "codex-linglong-skin",
-    "homeClass": "linglong-home",
-    "styleId": "codex-linglong-skin-style",
-    "chromeId": "codex-linglong-skin-chrome",
-    "stateKey": "__CODEX_LINGLONG_SKIN_STATE__",
-    "disabledKey": "__CODEX_LINGLONG_SKIN_DISABLED__",
-    "artVar": "--linglong-art"
+    "rootClass": "codex-ningyao-skin",
+    "homeClass": "ningyao-home",
+    "styleId": "codex-ningyao-skin-style",
+    "chromeId": "codex-ningyao-skin-chrome",
+    "stateKey": "__CODEX_NINGYAO_SKIN_STATE__",
+    "disabledKey": "__CODEX_NINGYAO_SKIN_DISABLED__",
+    "artVar": "--ningyao-art"
   },
   "desktopTheme": {
     "appearanceTheme": "light",
     "appearanceLightCodeThemeId": "codex",
-    "appearanceLightChromeTheme": "{ accent = \"#06B6D4\", contrast = 62, fonts = { code = \"SF Mono\", ui = \"PingFang SC\" }, ink = \"#1e293b\", opaqueWindows = true, semanticColors = { diffAdded = \"#bbf7d0\", diffRemoved = \"#fecaca\", skill = \"#a855f7\" }, surface = \"#f0f4f8\" }"
+    "appearanceLightChromeTheme": "{ accent = \"#6A9EAB\", contrast = 52, fonts = { code = \"SF Mono\", ui = \"PingFang SC\" }, ink = \"#3F4A50\", opaqueWindows = true, semanticColors = { diffAdded = \"#C5DFD0\", diffRemoved = \"#E8D0CC\", skill = \"#B8956A\" }, surface = \"#EEF3F2\" }"
   },
-  "appearance": "auto",
+  "appearance": "light",
   "art": {
+    "mode": "token-only",
+    "paint": "custom",
     "focusX": 0.72,
-    "focusY": 0.45,
+    "focusY": 0.42,
     "safeArea": "left",
-    "taskMode": "ambient"
+    "taskMode": "off"
   },
-  "version": "2.0.0"
+  "version": "2.1.0"
 }

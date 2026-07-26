@@ -1,44 +1,125 @@
 /**
  * jiuyi — Dark 模式皮肤
- * - appearance / desktopTheme 固定 dark，引擎会挂 dream-theme-dark
+ * - appearance / desktopTheme 固定 dark，引擎会挂 skins-theme-dark
  * - 视觉与宿主 design token 全部按 dark 语义；字体跟随宿主默认，不指定品牌字体
+ *
+ * 壁纸挂载（引擎方案 A · art.mode / art.paint）：
+ *   skin.json: mode=token-only, paint=custom
+ *   → 引擎只注入 --jiuyi-art / --skins-art，不画 body
+ *   → 宽图：本文件在 body 铺一次立绘；main 仅 scrim
+ *   → 标准：main 铺立绘 + scrim（body 只保留雨夜渐变底）
+ *   运行时标记：data-skins-art-paint="custom" data-skins-art-mode="token-only"
  */
 
 /* 品牌色与雨夜 token（皮肤专属） */
 :root.codex-jiuyi-skin {
-  --jiuyi-ink: #e8e4dc;
-  --jiuyi-ink-muted: #a8a296;
+  /* 推荐列表 opt-in（引擎 --skins-suggest-list-*；未设则宿主原生） */
+  --skins-suggest-list-color: rgba(255, 255, 255, 0.5);
+  --skins-suggest-list-color-hover: rgb(255, 255, 255);
+  --skins-suggest-list-bg: transparent;
+  --skins-suggest-list-bg-image: none;
+  --skins-suggest-list-bg-hover: transparent;
+  --skins-suggest-list-radius: 12.5px;
+  --skins-suggest-list-border: 0;
+  --skins-suggest-list-shadow: none;
+  --skins-suggest-list-panel-bg: linear-gradient(165deg, rgba(32, 44, 60, 0.88) 0%, rgba(22, 32, 46, 0.9) 55%, rgba(16, 24, 34, 0.92) 100%);
+  --skins-suggest-list-panel-border: 1px solid var(--jiuyi-glass-border, rgba(180, 200, 220, 0.22));
+  --skins-suggest-list-panel-radius: 14px;
+  --skins-suggest-list-panel-padding: 8px 10px 10px;
+  --skins-suggest-list-panel-shadow: 0 14px 36px rgba(0, 0, 0, 0.36), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  /* 推荐卡片 token */
+  --skins-suggest-card-color: #ebe7df;
+  --skins-suggest-card-bg: rgba(28, 40, 54, 0.52);
+  --skins-suggest-card-radius: 14px;
+  --skins-suggest-card-border: rgba(200, 220, 240, 0.28);
+  --skins-suggest-card-shadow: 0 10px 28px rgba(0, 0, 0, 0.22), inset 0 1px 0 rgba(255, 255, 255, 0.12);
+
+  --jiuyi-ink: #ebe7df;
+  --jiuyi-ink-muted: #b0aaa0;
   --jiuyi-cinnabar: #a83a2e;
   --jiuyi-cinnabar-deep: #7a2a22;
   --jiuyi-gold: #c9a45a;
-  --jiuyi-mist: #8a9bb0;
-  --jiuyi-night: #0e141c;
-  --jiuyi-slate: #1a2330;
-  --jiuyi-slate-soft: #243040;
-  --jiuyi-glass: rgba(28, 38, 52, 0.55);
-  --jiuyi-glass-border: rgba(180, 200, 220, 0.18);
-  --jiuyi-line: rgba(140, 160, 185, 0.22);
-  --dream-accent: #a83a2e;
+  --jiuyi-mist: #94a5b8;
+  --jiuyi-night: #121a24;
+  --jiuyi-slate: #1c2634;
+  --jiuyi-slate-soft: #263648;
+  --jiuyi-glass: rgba(32, 44, 58, 0.5);
+  --jiuyi-glass-border: rgba(190, 210, 230, 0.22);
+  --jiuyi-line: rgba(150, 170, 195, 0.28);
+  /* 主区立绘 scrim：首页更透（提亮）、对话更稳（见 main 规则） */
+  --jiuyi-scrim-home: linear-gradient(
+    105deg,
+    rgba(14, 22, 34, 0.34) 0%,
+    rgba(16, 24, 36, 0.24) 22%,
+    rgba(18, 28, 40, 0.14) 46%,
+    rgba(20, 30, 42, 0.06) 68%,
+    rgba(16, 24, 36, 0.04) 86%,
+    rgba(12, 18, 28, 0.1) 100%
+  );
+  --jiuyi-scrim-thread: linear-gradient(
+    105deg,
+    rgba(8, 12, 18, 0.72) 0%,
+    rgba(10, 16, 24, 0.62) 22%,
+    rgba(12, 18, 28, 0.5) 42%,
+    rgba(14, 20, 30, 0.36) 58%,
+    rgba(14, 20, 30, 0.22) 74%,
+    rgba(10, 14, 22, 0.3) 100%
+  );
+  --jiuyi-scrim-default: linear-gradient(
+    105deg,
+    rgba(8, 14, 22, 0.62) 0%,
+    rgba(10, 16, 26, 0.5) 24%,
+    rgba(12, 18, 28, 0.38) 46%,
+    rgba(14, 20, 30, 0.26) 66%,
+    rgba(14, 20, 30, 0.16) 82%,
+    rgba(10, 14, 22, 0.22) 100%
+  );
+  --skins-accent: #a83a2e;
 }
 
 /*
- * Dark 模式入口：与 renderer-core 的 dream-theme-dark 对齐。
+ * immersive 基线 token（宽图 / 标准）：雨夜半透，避免 dark canvas 混色后过黑。
+ * 基线已用 [class*="home-shell"] 匹配任意皮肤壳，不再依赖 dream-home-shell。
+ */
+html.codex-jiuyi-skin.skins-art-wide,
+html.codex-jiuyi-skin.skins-art-standard {
+  --cg-immersive-edge: rgba(18, 28, 40, 0.28);
+  --cg-immersive-mid: rgba(16, 24, 36, 0.16);
+  --cg-immersive-far: rgba(12, 18, 28, 0.06);
+  --cg-immersive-sidebar: rgba(22, 32, 46, 0.72);
+  --cg-task-immersive-sidebar: rgba(20, 28, 40, 0.82);
+  --cg-task-immersive-edge: rgba(16, 24, 34, 0.7);
+  --cg-task-immersive-mid: rgba(14, 20, 30, 0.52);
+  --cg-task-immersive-far: rgba(12, 18, 26, 0.36);
+  --cg-immersive-composer: rgba(28, 38, 52, 0.86);
+  --cg-immersive-line: rgba(190, 210, 230, 0.28);
+  --cg-text: #ebe7df;
+  --cg-surface-raised: rgba(36, 48, 64, 0.55);
+  /* 创建 / 发送等主按钮字色：勿用 --skins-surface-raised（暗皮是深色面板） */
+  --cg-primary-button-ink: #f5e6c8;
+}
+
+/*
+ * Dark 模式入口：与 renderer-core 的 skins-theme-dark 对齐。
  * appearance:"dark" 时引擎必挂此类；即使 auto 解析为 dark 也走同一套。
  */
-:root.codex-jiuyi-skin.dream-theme-dark,
+:root.codex-jiuyi-skin.skins-theme-dark,
 :root.codex-jiuyi-skin {
   color-scheme: dark !important;
 
   /* 契约 token：基线 immersive-skin / 建议卡 / 顶栏可读性 */
-  --dream-ink: #e8e4dc;
-  --dream-text: #e8e4dc;
-  --dream-canvas: #0e141c;
-  --dream-sidebar: #141c28;
-  --dream-surface-raised: #1a2330;
-  --dream-line: rgba(140, 160, 185, 0.28);
-  --dream-accent: #a83a2e;
+  --skins-ink: #ebe7df;
+  --skins-text: #ebe7df;
+  --skins-canvas: #121a24;
+  --skins-sidebar: #161f2c;
+  --skins-surface-raised: #1c2634;
+  --skins-line: rgba(150, 170, 195, 0.32);
+  --skins-accent: #a83a2e;
 
-  /* 覆盖宿主 design token：侧栏/正文/设置否则会吃到亮色壳 */
+  /*
+   * 短名 alias（部分旧路径 / 皮肤内部可读）
+   * 注意：宿主 electron-dark 原生弹层不读这组，见下方 --color-token-*。
+   */
   --main-surface-primary: #101820 !important;
   --main-surface-secondary: #141c28 !important;
   --sidebar-surface-primary: #141c28 !important;
@@ -54,46 +135,266 @@
   --icon-primary: #d8d4c8 !important;
   --icon-secondary: #a8a296 !important;
   --link: #c9a45a !important;
+
+  /*
+   * 宿主真实 design token（CDP 实测 electron-dark 弹层消费链）：
+   *   background: var(--color-token-dropdown-background)
+   *   menu:       var(--color-token-menu-background) / --vscode-menu-background
+   *   表面:       --color-token-main-surface-primary / --codex-base-surface
+   * 此前只改 --main-surface-* 时弹层一直停在默认灰 #181818 / rgb(45,45,45)。
+   */
+  --codex-base-surface: #101820 !important;
+  --color-background-surface: #101820 !important;
+  --color-background-surface-under: #0e141c !important;
+
+  /*
+   * 设置页分组卡 / 抬升面 / 控件（CDP 实测）：
+   *   style="background-color: var(--color-background-panel, var(--color-token-bg-fog))"
+   * 未覆盖时宿主 electron-dark 默认 --color-background-panel:#232323，
+   * 设置项卡片整块停在中性灰，与雨夜 canvas 脱节。
+   */
+  --color-background-panel: #1a2330 !important;
+  --color-background-control: rgba(26, 35, 48, 0.96) !important;
+  --color-background-control-opaque: #1a2330 !important;
+  --color-background-elevated-primary: rgba(36, 48, 64, 0.96) !important;
+  --color-background-elevated-primary-opaque: #243040 !important;
+  --color-background-elevated-secondary: rgba(232, 228, 220, 0.04) !important;
+  --color-background-elevated-secondary-opaque: #1a2330 !important;
+  --color-background-editor-opaque: #141c28 !important;
+  --color-background-button-secondary: rgba(232, 228, 220, 0.06) !important;
+  --color-background-button-secondary-hover: rgba(168, 58, 46, 0.16) !important;
+  --color-background-button-secondary-active: rgba(168, 58, 46, 0.22) !important;
+  --color-background-button-tertiary: rgba(232, 228, 220, 0.04) !important;
+  --color-background-button-tertiary-hover: rgba(140, 160, 185, 0.12) !important;
+  --color-background-button-tertiary-active: rgba(140, 160, 185, 0.18) !important;
+
+  --color-token-bg-primary: #101820 !important;
+  --color-token-bg-secondary: color-mix(in srgb, #141c28 92%, transparent) !important;
+  --color-token-bg-tertiary: color-mix(in srgb, #1a2330 88%, transparent) !important;
+  /* 全局 fog 保持淡雾；项目条局部再覆写为 transparent */
+  --color-token-bg-fog: color-mix(in oklab, #e8e4dc 3.5%, transparent) !important;
+  --color-token-main-surface-primary: #101820 !important;
+  --color-token-side-bar-background: #141c28 !important;
+  --color-token-editor-background: #141c28 !important;
+
+  /* 下拉 / 命令菜单 / portal 面板（略抬升于主 canvas，雨夜 slate） */
+  --color-token-dropdown-background: #1a2330 !important;
+  --color-token-dropdown-foreground: #e8e4dc !important;
+  --color-token-menu-background: rgba(26, 35, 48, 0.97) !important;
+  --color-token-menu-border: rgba(140, 160, 185, 0.22) !important;
+  --color-token-editor-widget-background: rgba(36, 48, 64, 0.96) !important;
+
+  --color-token-border: rgba(140, 160, 185, 0.2) !important;
+  --color-token-border-default: rgba(140, 160, 185, 0.2) !important;
+  --color-token-border-heavy: rgba(140, 160, 185, 0.32) !important;
+  --color-token-border-light: rgba(140, 160, 185, 0.12) !important;
+  --color-token-list-hover-background: rgba(168, 58, 46, 0.14) !important;
+  --color-token-list-active-selection-background: rgba(168, 58, 46, 0.22) !important;
+  --color-token-list-active-selection-foreground: #f0ebe3 !important;
+  --color-token-list-active-selection-icon-foreground: #f0ebe3 !important;
+
+  --color-token-text-primary: #e8e4dc !important;
+  --color-token-text-secondary: #b8b2a6 !important;
+  --color-token-text-tertiary: #8a9bb0 !important;
+  --color-token-foreground: #e8e4dc !important;
+  --color-token-description-foreground: rgba(232, 228, 220, 0.55) !important;
+  --color-token-icon-foreground: #d8d4c8 !important;
+  --color-token-input-background: rgba(14, 20, 28, 0.92) !important;
+  --color-token-input-border: rgba(140, 160, 185, 0.28) !important;
+  --color-token-input-foreground: #e8e4dc !important;
+  --color-token-focus-border: rgba(201, 164, 90, 0.55) !important;
+  --color-token-link: #c9a45a !important;
+
+  /* VS Code / Electron 壳菜单（与 color-token 平行的一套） */
+  --vscode-menu-background: rgba(26, 35, 48, 0.97) !important;
+  --vscode-menu-foreground: #e8e4dc !important;
+  --vscode-menu-border: rgba(140, 160, 185, 0.22) !important;
+  --vscode-menu-selectionBackground: rgba(168, 58, 46, 0.28) !important;
+  --vscode-menu-selectionForeground: #f5e6c8 !important;
+  --vscode-menu-separatorBackground: rgba(140, 160, 185, 0.18) !important;
+  --vscode-dropdown-background: #1a2330 !important;
+  --vscode-dropdown-foreground: #e8e4dc !important;
+  --vscode-dropdown-border: rgba(140, 160, 185, 0.22) !important;
+  --vscode-dropdown-listBackground: rgba(26, 35, 48, 0.98) !important;
+  --vscode-settings-dropdownBackground: #1a2330 !important;
+  --vscode-settings-dropdownForeground: #e8e4dc !important;
+  --vscode-settings-dropdownBorder: rgba(140, 160, 185, 0.22) !important;
+  --vscode-settings-dropdownListBorder: rgba(140, 160, 185, 0.22) !important;
+  --vscode-settings-rowHoverBackground: rgba(168, 58, 46, 0.1) !important;
+  --vscode-settings-headerForeground: #e8e4dc !important;
+  --vscode-settings-headerBorder: rgba(140, 160, 185, 0.18) !important;
+  --vscode-settings-sashBorder: rgba(140, 160, 185, 0.18) !important;
+  --vscode-settings-textInputBackground: rgba(14, 20, 28, 0.92) !important;
+  --vscode-settings-textInputForeground: #e8e4dc !important;
+  --vscode-settings-textInputBorder: rgba(140, 160, 185, 0.28) !important;
+  --vscode-settings-numberInputBackground: rgba(14, 20, 28, 0.92) !important;
+  --vscode-settings-numberInputForeground: #e8e4dc !important;
+  --vscode-settings-numberInputBorder: rgba(140, 160, 185, 0.28) !important;
+  --vscode-settings-checkboxBackground: #1a2330 !important;
+  --vscode-settings-checkboxForeground: #e8e4dc !important;
+  --vscode-settings-checkboxBorder: rgba(140, 160, 185, 0.28) !important;
+  --vscode-list-hoverBackground: rgba(168, 58, 46, 0.14) !important;
+
+  /* 编辑器 / 面板 / 输入：宿主默认 #282828 / #2d2d2d / #363636，设置页控件会吃到 */
+  --vscode-editor-background: #141c28 !important;
+  --vscode-panel-background: rgba(26, 35, 48, 0.96) !important;
+  --vscode-panelSectionHeader-background: rgba(26, 35, 48, 0.96) !important;
+  --vscode-input-background: rgba(14, 20, 28, 0.92) !important;
+  --vscode-input-foreground: #e8e4dc !important;
+  --vscode-input-border: rgba(140, 160, 185, 0.28) !important;
+  --vscode-input-placeholderForeground: rgba(232, 228, 220, 0.45) !important;
+  --vscode-editorWidget-background: rgba(36, 48, 64, 0.96) !important;
+  --vscode-editorSuggestWidget-background: rgba(36, 48, 64, 0.96) !important;
+  --vscode-editorHoverWidget-background: rgba(36, 48, 64, 0.96) !important;
+  --vscode-quickInput-background: rgba(36, 48, 64, 0.96) !important;
+  --vscode-listFilterWidget-background: rgba(26, 35, 48, 0.96) !important;
+  --vscode-inlineChatInput-background: rgba(26, 35, 48, 0.96) !important;
+  --vscode-peekViewEditor-background: rgba(26, 35, 48, 0.96) !important;
+}
+
+/*
+ * 设置分组卡（rounded-2xl + border-token-border + 行间 after:bg-token-border）
+ * 宿主 inline：background-color: var(--color-background-panel, var(--color-token-bg-fog))
+ * 注意：electron chrome 可能以 inline !important 写回 --color-background-panel:#232323，
+ * 仅靠 :root token 会被盖住。元素层写死雨夜 slate，不二次读取被劫持的 host var。
+ */
+html.codex-jiuyi-skin [style*="color-background-panel"],
+html.codex-jiuyi-skin main.main-surface div.rounded-2xl.border.border-token-border.overflow-hidden,
+html.codex-jiuyi-skin main.main-surface div.rounded-2xl.border-token-border.overflow-hidden.flex.flex-col,
+html.codex-jiuyi-skin div.rounded-2xl.border-token-border.overflow-hidden.flex.flex-col {
+  background-color: #1a2330 !important;
+  border-color: rgba(140, 160, 185, 0.22) !important;
+  color: #e8e4dc !important;
+}
+
+/* 设置页内常见抬升面 / 控件灰（#282828 / #2d2d2d / #363636） */
+html.codex-jiuyi-skin.electron-dark,
+html.codex-jiuyi-skin.electron-opaque,
+html.codex-jiuyi-skin {
+  --color-background-panel: #1a2330 !important;
+  --color-background-elevated-primary: rgba(36, 48, 64, 0.96) !important;
+  --color-background-elevated-primary-opaque: #243040 !important;
+  --color-background-elevated-secondary-opaque: #1a2330 !important;
+  --color-background-control: rgba(26, 35, 48, 0.96) !important;
+  --color-background-control-opaque: #1a2330 !important;
+  --color-background-editor-opaque: #141c28 !important;
+  --color-token-editor-background: #141c28 !important;
+  --vscode-editor-background: #141c28 !important;
+  --vscode-panel-background: rgba(26, 35, 48, 0.96) !important;
+  --vscode-input-background: rgba(14, 20, 28, 0.92) !important;
 }
 
 /* ── 全局：雨夜巷陌底色（不指定 font-family，沿用宿主默认字体） ── */
+/* paint=custom：标准模式 body 只做色底；宽图见下方立绘规则 */
 html.codex-jiuyi-skin body {
   background:
-    radial-gradient(circle at 78% 18%, rgba(120, 140, 170, 0.12), transparent 32%),
-    radial-gradient(circle at 12% 70%, rgba(168, 58, 46, 0.06), transparent 28%),
-    linear-gradient(160deg, #0c121a 0%, #141c28 48%, #1a2434 100%) !important;
+    radial-gradient(circle at 78% 18%, rgba(140, 160, 190, 0.2), transparent 34%),
+    radial-gradient(circle at 12% 70%, rgba(168, 58, 46, 0.1), transparent 30%),
+    linear-gradient(160deg, #141c2a 0%, #1c2a3c 48%, #243448 100%) !important;
   color: var(--jiuyi-ink) !important;
   color-scheme: dark !important;
 }
 
-/* 细雨粒子 */
+/* 细雨粒子（标准构图；宽图自挂壁纸时关掉，避免盖在立绘上） */
 html.codex-jiuyi-skin body::before {
   content: "";
   position: fixed;
   inset: 0;
   z-index: 0;
   pointer-events: none;
-  opacity: 0.35;
+  opacity: 0.22;
   background-image:
-    radial-gradient(circle at 18% 22%, rgba(200, 215, 230, 0.1) 0 1px, transparent 2px),
+    radial-gradient(circle at 18% 22%, rgba(200, 215, 230, 0.12) 0 1px, transparent 2px),
     radial-gradient(circle at 72% 58%, rgba(168, 58, 46, 0.08) 0 1px, transparent 2px),
-    radial-gradient(circle at 45% 80%, rgba(180, 200, 220, 0.07) 0 1px, transparent 2px);
+    radial-gradient(circle at 45% 80%, rgba(180, 200, 220, 0.08) 0 1px, transparent 2px);
   background-size: 42px 56px, 58px 72px, 36px 48px;
 }
 
-/* ── 侧栏：烟雨夜幕 ── */
+html.codex-jiuyi-skin.skins-art-wide body::before,
+html.codex-jiuyi-skin[data-skins-art-paint="custom"].skins-art-wide body::before {
+  opacity: 0 !important;
+  background-image: none !important;
+  content: none !important;
+}
+
+/*
+ * 宽图全窗壁纸（paint=custom：皮肤自挂 body，引擎 immersive 不画 body）。
+ * main 只画 scrim，避免 chat 对话页 body+main 双层重复背景。
+ */
+html.codex-jiuyi-skin.skins-art-wide body,
+html.codex-jiuyi-skin[data-skins-art-paint="custom"].skins-art-wide body {
+  background-color: var(--skins-canvas, #121a24) !important;
+  background-image: var(--jiuyi-art, var(--skins-art)) !important;
+  background-position: var(--skins-art-position, 78% 42%) !important;
+  background-size: cover !important;
+  background-repeat: no-repeat !important;
+  background-attachment: fixed !important;
+}
+
+/* ── 侧栏：烟雨夜幕（低不透明度透出底图）+ 常显右边框/拖拽光带；无背景模糊 ── */
 html.codex-jiuyi-skin aside.app-shell-left-panel,
 html.codex-jiuyi-skin aside {
+  position: relative !important;
   background:
-    linear-gradient(180deg, rgba(16, 22, 32, 0.96), rgba(22, 30, 42, 0.94)) !important;
-  border: 1px solid rgba(120, 145, 175, 0.16) !important;
-  border-left: 0 !important;
+    linear-gradient(
+      180deg,
+      rgba(22, 32, 46, 0.68) 0%,
+      rgba(28, 40, 56, 0.6) 55%,
+      rgba(24, 34, 48, 0.56) 100%
+    ) !important;
+  border: 0 !important;
+  border-right: 1px solid rgba(190, 215, 240, 0.42) !important;
   border-radius: 0 !important;
   box-shadow:
-    10px 0 32px rgba(0, 0, 0, 0.35),
-    inset -1px 0 rgba(200, 215, 230, 0.06) !important;
-  backdrop-filter: blur(12px) !important;
+    10px 0 32px rgba(0, 0, 0, 0.18),
+    inset -1px 0 0 rgba(220, 235, 250, 0.14),
+    inset 0 0 0 1px rgba(140, 160, 185, 0.06) !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
   color: var(--jiuyi-ink) !important;
+}
+
+/* 宽图模式：更透，便于看清 body 全窗立绘 */
+html.codex-jiuyi-skin.skins-art-wide aside.app-shell-left-panel,
+html.codex-jiuyi-skin.skins-art-wide:is(.skins-task-ambient, .skins-task-banner)
+  aside.app-shell-left-panel {
+  background: linear-gradient(
+    90deg,
+    rgba(22, 32, 46, 0.66),
+    rgba(26, 38, 52, 0.6)
+  ) !important;
+  border: 0 !important;
+  border-right: 1px solid rgba(190, 215, 240, 0.36) !important;
+  border-radius: 0 !important;
+  box-shadow:
+    8px 0 24px rgba(0, 0, 0, 0.12),
+    inset -1px 0 0 rgba(210, 225, 240, 0.12) !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+/*
+ * 宿主 aside::after 多为侧栏宽度拖拽热区；immersive 基线在 skins-art-wide 下透明化。
+ * 皮肤铺可见光带（常显，不依赖 hover），不改 pointer-events / 几何。
+ */
+html.codex-jiuyi-skin aside.app-shell-left-panel::after,
+html.codex-jiuyi-skin.skins-art-wide aside.app-shell-left-panel::after {
+  background:
+    linear-gradient(
+      180deg,
+      rgba(200, 220, 240, 0.12) 0%,
+      rgba(190, 215, 240, 0.55) 14%,
+      rgba(201, 164, 90, 0.5) 50%,
+      rgba(190, 215, 240, 0.55) 86%,
+      rgba(200, 220, 240, 0.12) 100%
+    ) !important;
+  border-left: 1px solid rgba(220, 235, 250, 0.4) !important;
+  box-shadow:
+    -1px 0 0 rgba(8, 12, 18, 0.45),
+    0 0 12px rgba(180, 205, 230, 0.22),
+    0 0 2px rgba(201, 164, 90, 0.35) !important;
+  opacity: 1 !important;
+  /* 不改 width/left/pointer-events，避免抢热区或破坏拖拽 */
 }
 
 html.codex-jiuyi-skin aside nav {
@@ -102,7 +403,7 @@ html.codex-jiuyi-skin aside nav {
 
 /*
  * 宿主侧栏文案大量走 text-token / Tailwind color，仅设 aside color 不够。
- * 强制下级文字与图标为雨夜浅墨色（与 cyberpunk/eva 侧栏策略一致）。
+ * 强制下级文字与图标为雨夜浅墨色（与 cyberpunk/bengong 侧栏策略一致）。
  */
 html.codex-jiuyi-skin aside,
 html.codex-jiuyi-skin aside * {
@@ -186,39 +487,113 @@ html.codex-jiuyi-skin aside label {
   color: inherit !important;
 }
 
-/* ── 主面板：全幅铺底（引擎只注入 --jiuyi-art，不限制布局） ── */
+/*
+ * 主面板（paint=custom）：
+ *   标准模式 — main 铺立绘 + scrim（引擎不画 body 壁纸）
+ *   宽图模式 — main 仅 scrim（body 已由上方规则铺全窗立绘）
+ * 切勿在 skins-art-wide + chat 再叠一层 var(--jiuyi-art)。
+ */
 html.codex-jiuyi-skin main.main-surface {
   /* main 自身 relative 仅作伪元素定位上下文；勿改子级 header 的 position */
   position: relative;
   isolation: isolate;
-  background-color: #101820 !important;
+  background-color: #141c28 !important;
   background-image:
-    /* 左侧可读雾 + 整体压暗，避免盖住角色 */
-    linear-gradient(
-      105deg,
-      rgba(6, 10, 16, 0.78) 0%,
-      rgba(10, 16, 24, 0.52) 28%,
-      rgba(14, 22, 34, 0.28) 52%,
-      rgba(12, 18, 28, 0.18) 72%,
-      rgba(8, 12, 18, 0.35) 100%
-    ),
-    radial-gradient(circle at 18% 8%, rgba(40, 55, 75, 0.22), transparent 36%),
+    var(--jiuyi-scrim-default),
+    radial-gradient(ellipse 70% 90% at 32% 48%, rgba(10, 16, 24, 0.28), transparent 70%),
+    radial-gradient(circle at 18% 8%, rgba(55, 75, 100, 0.16), transparent 38%),
     var(--jiuyi-art) !important;
   background-repeat: no-repeat !important;
-  background-size: 100% 100%, 100% 100%, cover !important;
+  background-size: 100% 100%, 100% 100%, 100% 100%, cover !important;
   background-position:
     center,
     center,
-    var(--dream-art-position, 78% 42%) !important;
-  background-attachment: local, local, local !important;
-  border: 1px solid rgba(120, 145, 175, 0.14) !important;
+    center,
+    var(--skins-art-position, 78% 42%) !important;
+  background-attachment: local, local, local, local !important;
+  border: 1px solid rgba(140, 165, 195, 0.16) !important;
+  border-left: 0 !important;
   border-right: 0 !important;
   border-bottom: 0 !important;
   border-radius: 16px 0 0 0 !important;
   box-shadow:
-    inset 0 1px rgba(200, 215, 230, 0.06),
-    -8px 0 28px rgba(0, 0, 0, 0.25) !important;
+    inset 0 1px rgba(200, 215, 230, 0.07),
+    -6px 0 24px rgba(0, 0, 0, 0.2) !important;
   overflow: hidden !important;
+}
+
+/* 首页（标准）：更透 scrim + 暖光；仍可带立绘 */
+html.codex-jiuyi-skin main.main-surface.jiuyi-home-shell {
+  background-color: #1c2a3c !important;
+  background-image:
+    var(--jiuyi-scrim-home),
+    radial-gradient(ellipse 80% 92% at 28% 48%, rgba(18, 28, 40, 0.08), transparent 64%),
+    radial-gradient(circle at 18% 12%, rgba(90, 120, 155, 0.18), transparent 42%),
+    radial-gradient(circle at 78% 42%, rgba(255, 220, 170, 0.1), transparent 32%),
+    radial-gradient(circle at 55% 70%, rgba(200, 215, 235, 0.05), transparent 40%),
+    var(--jiuyi-art) !important;
+  background-size: 100% 100%, 100% 100%, 100% 100%, 100% 100%, 100% 100%, cover !important;
+  background-position: center, center, center, center, center, var(--skins-art-position, 78% 42%) !important;
+}
+
+/* 宽图：main 只保留 scrim / 雾面，立绘只在 body 一次（皮肤自挂） */
+html.codex-jiuyi-skin.skins-art-wide main.main-surface,
+html.codex-jiuyi-skin[data-skins-art-paint="custom"].skins-art-wide main.main-surface {
+  background-color: transparent !important;
+  background-image:
+    var(--jiuyi-scrim-default),
+    radial-gradient(ellipse 70% 90% at 32% 48%, rgba(10, 16, 24, 0.28), transparent 60%),
+    radial-gradient(circle at 18% 8%, rgba(55, 75, 100, 0.14), transparent 38%) !important;
+  background-size: 100% 100%, 100% 100%, 100% 100% !important;
+  background-position: center, center, center !important;
+  background-attachment: local, local, local !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+}
+
+html.codex-jiuyi-skin.skins-art-wide main.main-surface.jiuyi-home-shell,
+html.codex-jiuyi-skin.skins-art-wide.skins-task-ambient main.main-surface.jiuyi-home-shell,
+html.codex-jiuyi-skin.skins-art-wide.skins-task-banner main.main-surface.jiuyi-home-shell {
+  background-color: transparent !important;
+  background-image:
+    var(--jiuyi-scrim-home),
+    radial-gradient(circle at 78% 42%, rgba(255, 220, 170, 0.08), transparent 30%),
+    linear-gradient(
+      90deg,
+      rgba(16, 24, 34, 0.22),
+      rgba(14, 20, 30, 0.1) 52%,
+      rgba(12, 18, 26, 0.02)
+    ) !important;
+  background-size: 100% 100%, 100% 100%, 100% 100% !important;
+  background-position: center, center, center !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+}
+
+/* 宽图对话：仅 thread scrim，不再叠第二张立绘 */
+html.codex-jiuyi-skin.skins-art-wide main.main-surface:has(.thread-scroll-container) {
+  background-color: transparent !important;
+  background-image:
+    var(--jiuyi-scrim-thread),
+    radial-gradient(ellipse 70% 90% at 32% 48%, rgba(8, 12, 20, 0.36), transparent 68%),
+    radial-gradient(circle at 18% 8%, rgba(45, 60, 82, 0.16), transparent 36%) !important;
+  background-size: 100% 100%, 100% 100%, 100% 100% !important;
+  background-position: center, center, center !important;
+}
+
+/* 标准模式对话：main 带立绘（token-only + custom：引擎不在 body 铺图） */
+html.codex-jiuyi-skin:not(.skins-art-wide) main.main-surface:has(.thread-scroll-container),
+html.codex-jiuyi-skin[data-skins-art-paint="custom"]:not(.skins-art-wide)
+  main.main-surface:has(.thread-scroll-container) {
+  background-image:
+    var(--jiuyi-scrim-thread),
+    radial-gradient(ellipse 70% 90% at 32% 48%, rgba(8, 12, 20, 0.36), transparent 68%),
+    radial-gradient(circle at 18% 8%, rgba(45, 60, 82, 0.16), transparent 36%),
+    var(--jiuyi-art) !important;
+  background-size: 100% 100%, 100% 100%, 100% 100%, cover !important;
+  background-position: center, center, center, var(--skins-art-position, 78% 42%) !important;
 }
 
 /* 细雨斜纹叠在主窗口上（非横幅局部）；z-index 仅装饰，不抬高子树 */
@@ -228,15 +603,20 @@ html.codex-jiuyi-skin main.main-surface::before {
   inset: 0;
   z-index: 0;
   pointer-events: none;
-  opacity: 0.18;
+  opacity: 0.14;
   background-image: repeating-linear-gradient(
     -12deg,
     transparent 0,
     transparent 9px,
-    rgba(200, 215, 230, 0.09) 9px,
-    rgba(200, 215, 230, 0.09) 10px
+    rgba(200, 215, 230, 0.08) 9px,
+    rgba(200, 215, 230, 0.08) 10px
   );
   mix-blend-mode: screen;
+}
+
+/* 首页细雨更淡，避免再压暗立绘 */
+html.codex-jiuyi-skin main.main-surface.jiuyi-home-shell::before {
+  opacity: 0.05;
 }
 
 /*
@@ -250,17 +630,14 @@ html.codex-jiuyi-skin main.main-surface > *:not(header.app-header-tint) {
   z-index: 1;
 }
 
-/* 顶栏：只润色，不改 position / top / z-index / transform（契约） */
-html.codex-jiuyi-skin main.main-surface > header.app-header-tint {
-  background:
-    linear-gradient(90deg, rgba(12, 18, 28, 0.72), rgba(22, 32, 46, 0.45), rgba(168, 58, 46, 0.06)) !important;
-  border-bottom: 1px solid rgba(120, 145, 175, 0.1) !important;
-  backdrop-filter: blur(12px) saturate(1.05) !important;
-  -webkit-backdrop-filter: blur(12px) saturate(1.05) !important;
-  color: var(--jiuyi-ink) !important;
-  text-shadow: 0 1px 6px rgba(0, 0, 0, 0.45) !important;
-}
-
+/*
+ * 顶栏 app-header-tint（宿主：fixed z-30，bg = --codex-titlebar-tint / transparent）
+ * ─────────────────────────────────────────────────────────────
+ * · 首页 / 对话（jiuyi-home-shell 或 thread）：透明连续立绘，不铺渐变条
+ * · 设置等非 home：实色 #101820，与主内容 canvas / 设置块一致，
+ *   避免透明顶栏透出 main 立绘造成「顶部一条图」突兀感
+ * 契约：不改 position / top / z-index / transform
+ */
 html.codex-jiuyi-skin main.main-surface > header.app-header-tint,
 html.codex-jiuyi-skin main.main-surface > header.app-header-tint * {
   --text-primary: #e8e4dc !important;
@@ -269,24 +646,86 @@ html.codex-jiuyi-skin main.main-surface > header.app-header-tint * {
   --icon-secondary: #b8c0cc !important;
 }
 
-html.codex-jiuyi-skin main.main-surface > header.app-header-tint button,
-html.codex-jiuyi-skin main.main-surface > header.app-header-tint a,
-html.codex-jiuyi-skin main.main-surface > header.app-header-tint [role="button"],
-html.codex-jiuyi-skin main.main-surface > header.app-header-tint [data-state] {
+/* 顶栏次要控件浅色字；主按钮 bg-token-foreground 单独处理（创建/发送） */
+html.codex-jiuyi-skin main.main-surface > header.app-header-tint button:not([class~="bg-token-foreground"]),
+html.codex-jiuyi-skin main.main-surface > header.app-header-tint a:not([class~="bg-token-foreground"]),
+html.codex-jiuyi-skin main.main-surface > header.app-header-tint [role="button"]:not([class~="bg-token-foreground"]),
+html.codex-jiuyi-skin main.main-surface > header.app-header-tint [data-state]:not([class~="bg-token-foreground"]) {
   color: #e8e4dc !important;
   pointer-events: auto !important;
 }
 
-html.codex-jiuyi-skin main.main-surface > header.app-header-tint svg {
+html.codex-jiuyi-skin main.main-surface > header.app-header-tint button:not([class~="bg-token-foreground"]) svg,
+html.codex-jiuyi-skin main.main-surface > header.app-header-tint a:not([class~="bg-token-foreground"]) svg {
   color: #d8d4c8 !important;
   opacity: 1 !important;
 }
 
-/* 应用菜单顶栏（宿主标题栏外层）— 与 dream-theme-dark 双挂，确保真·dark 壳 */
-html.codex-jiuyi-skin [class~="group/application-menu-top-bar"],
-html.codex-jiuyi-skin.dream-theme-dark [class~="group/application-menu-top-bar"] {
+/* 顶栏主按钮：朱砂底 + 浅米字（覆盖 header * 与基线错误 surface 色） */
+html.codex-jiuyi-skin main.main-surface > header.app-header-tint button[class~="bg-token-foreground"],
+html.codex-jiuyi-skin main.main-surface > header.app-header-tint button[class~="bg-token-foreground"] * {
+  color: var(--cg-primary-button-ink, #f5e6c8) !important;
+  --text-primary: #f5e6c8 !important;
+  --text-secondary: #f5e6c8 !important;
+  --icon-primary: #f5e6c8 !important;
+  --icon-secondary: #f5e6c8 !important;
+}
+
+html.codex-jiuyi-skin main.main-surface > header.app-header-tint button[class~="bg-token-foreground"] svg {
+  color: var(--cg-primary-button-ink, #f5e6c8) !important;
+  opacity: 1 !important;
+}
+
+/* 首页 / 对话 / 宽图：顶栏透明，贴合主题立绘 */
+html.codex-jiuyi-skin main.main-surface.jiuyi-home-shell > header.app-header-tint,
+html.codex-jiuyi-skin main.main-surface:has(.thread-scroll-container) > header.app-header-tint,
+html.codex-jiuyi-skin.skins-art-wide main.main-surface.jiuyi-home-shell > header.app-header-tint,
+html.codex-jiuyi-skin.skins-art-wide main.main-surface:has(.thread-scroll-container) > header.app-header-tint {
+  background: transparent !important;
+  background-image: none !important;
+  border-bottom: 0 !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
   color: var(--jiuyi-ink) !important;
-  background: color-mix(in srgb, var(--jiuyi-night) 92%, transparent) !important;
+  text-shadow:
+    0 1px 2px rgba(8, 12, 18, 0.65),
+    0 0 10px rgba(8, 12, 18, 0.4) !important;
+}
+
+/*
+ * 设置 / 非 home：顶栏与内容同色实底（--color-background-surface / main canvas）
+ * 同时关掉 main 上的立绘层，避免滚动边缘或顶栏缝再透出背景图
+ */
+html.codex-jiuyi-skin main.main-surface:not(.jiuyi-home-shell):not(:has(.thread-scroll-container)) {
+  background-color: #101820 !important;
+  background-image: none !important;
+}
+
+/* 设置路由不画细雨伪元素，避免与实底顶栏叠出断层 */
+html.codex-jiuyi-skin main.main-surface:not(.jiuyi-home-shell):not(:has(.thread-scroll-container))::before {
+  opacity: 0 !important;
+  background-image: none !important;
+  content: none !important;
+}
+
+html.codex-jiuyi-skin main.main-surface:not(.jiuyi-home-shell):not(:has(.thread-scroll-container))
+  > header.app-header-tint {
+  background: #101820 !important;
+  background-image: none !important;
+  border-bottom: 1px solid rgba(120, 145, 175, 0.12) !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  color: var(--jiuyi-ink) !important;
+  text-shadow: none !important;
+}
+
+/* 应用菜单顶栏（宿主标题栏外层）— 与 skins-theme-dark 双挂，确保真·dark 壳 */
+html.codex-jiuyi-skin [class~="group/application-menu-top-bar"],
+html.codex-jiuyi-skin.skins-theme-dark [class~="group/application-menu-top-bar"] {
+  color: var(--jiuyi-ink) !important;
+  background: color-mix(in srgb, var(--jiuyi-night) 45%, transparent) !important;
   border-bottom: 1px solid rgba(120, 145, 175, 0.12) !important;
   color-scheme: dark !important;
 }
@@ -294,8 +733,8 @@ html.codex-jiuyi-skin.dream-theme-dark [class~="group/application-menu-top-bar"]
 html.codex-jiuyi-skin [class~="group/application-menu-top-bar"] button,
 html.codex-jiuyi-skin [class~="group/application-menu-top-bar"] [role="button"],
 html.codex-jiuyi-skin [class~="group/application-menu-top-bar"] *,
-html.codex-jiuyi-skin.dream-theme-dark [class~="group/application-menu-top-bar"] button,
-html.codex-jiuyi-skin.dream-theme-dark [class~="group/application-menu-top-bar"] svg {
+html.codex-jiuyi-skin.skins-theme-dark [class~="group/application-menu-top-bar"] button,
+html.codex-jiuyi-skin.skins-theme-dark [class~="group/application-menu-top-bar"] svg {
   color: inherit !important;
 }
 
@@ -356,24 +795,6 @@ html.codex-jiuyi-skin.dream-theme-dark [class~="group/application-menu-top-bar"]
   letter-spacing: 0.08em;
 }
 
-/* 右上角题签：避开宿主窗口控件与顶栏按钮区 */
-.jiuyi-signature {
-  position: absolute;
-  right: 120px;
-  top: 5px;
-  display: none;
-  color: rgba(232, 228, 220, 0.55);
-  font-style: italic;
-  font-weight: 700;
-  font-size: 18px;
-  line-height: 1.2;
-  letter-spacing: 0.28em;
-  text-shadow: 0 0 12px rgba(0, 0, 0, 0.5), 0 1px 0 rgba(255, 255, 255, 0.06);
-  transform: rotate(-2deg);
-  pointer-events: none !important;
-}
-#codex-jiuyi-skin-chrome.jiuyi-home-shell .jiuyi-signature { display: block; }
-
 /* 细雨丝动画：从顶栏下方起画，不压住 header 控件 */
 .jiuyi-rain {
   position: absolute;
@@ -430,16 +851,17 @@ html.codex-jiuyi-skin.dream-theme-dark [class~="group/application-menu-top-bar"]
   100% { opacity: 0.85; filter: brightness(1.15); }
 }
 
-
-
-
 /* ── 主内容区：保持透明，露出 main 全幅背景 ── */
 html.codex-jiuyi-skin [role="main"] {
   background: transparent !important;
-  scrollbar-color: rgba(140, 160, 185, 0.35) transparent;
+  scrollbar-color: rgba(140, 160, 185, 0.25) transparent;
 }
 
-/* 对话线程等常见不透明壳层打穿，避免挡掉窗口背景 */
+/*
+ * 对话线程等常见不透明壳层打穿，避免挡掉窗口背景。
+ * 选择器含 html.main.main-surface，优先级高于 .jiuyi-home … button；
+ * 故建议卡必须用更高优先级重设 background-image（见下方毛玻璃卡规则）。
+ */
 html.codex-jiuyi-skin main.main-surface [class*="bg-token-main-surface"],
 html.codex-jiuyi-skin main.main-surface [class*="bg-token-sidebar"],
 html.codex-jiuyi-skin main.main-surface .bg-token-main-surface-primary,
@@ -455,8 +877,12 @@ html.codex-jiuyi-skin main.main-surface .bg-token-main-surface-secondary {
  * 本皮肤只做视觉润色，不改 flex 基线 / align-items / absolute 定位。
  */
 html.codex-jiuyi-skin .jiuyi-home {
-  /* 与其它皮肤一致放宽内容轨，保证 4 张建议卡并排（48rem 过窄只会露出 ~3 张） */
-  --thread-content-max-width: min(980px, calc(100cqw - 44px)) !important;
+  /*
+   * 对齐宿主 body 默认 --thread-content-max-width: 48rem（CDP 实测 768px）。
+   * 标题壳、建议卡 absolute 轨、composer 的 max-w-(--thread-content-max-width) 同源；
+   * 旧值 980/880px 会把推荐卡和输入框整轨拉宽（见 skin-contract / qingkong）。
+   */
+  --thread-content-max-width: min(48rem, calc(100cqw - 44px)) !important;
   overflow-x: hidden !important;
   background: transparent !important;
 }
@@ -552,11 +978,11 @@ html.codex-jiuyi-skin .jiuyi-home {
 }
 
 .jiuyi-home [data-feature="game-source"]::after {
-  content: "与代码一同，写下属于你的江湖篇章";
+  content: "与ChatGPT一同，写下属于你的江湖篇章";
   display: block;
   margin-top: 12px;
   color: rgba(210, 220, 232, 0.9);
-  font-size: 14px;
+  font-size: 16px;
   line-height: 1.55;
   font-weight: 500;
   letter-spacing: 0.12em;
@@ -584,9 +1010,7 @@ html.codex-jiuyi-skin .jiuyi-home {
 }
 
 /*
- * 建议卡定位：完全交还宿主
- *   absolute inset-x-[var(--composer-suggestion-inline-inset)] top-full mt-8
- * 故意不写 left/right/top/margin 覆盖，避免破坏宿主 mt-8 与 inset 变量。
+ * 建议卡定位：
  */
 
 .jiuyi-home .group\/home-suggestions {
@@ -594,37 +1018,44 @@ html.codex-jiuyi-skin .jiuyi-home {
   gap: 12px !important;
 }
 
-/* 毛玻璃建议卡（仅外观；min-h 贴近宿主 min-h-26 ≈ 104px） */
-.jiuyi-home .group\/home-suggestions button {
+/*
+ * 建议卡：半透明实色（去掉 backdrop blur，立绘更清）
+ * 选择器须压过 main … bg-token-main-surface 的 background-image:none，
+ * 以及 immersive 基线对 suggestion 的 blur。
+ */
+html.codex-jiuyi-skin .jiuyi-home .group\/home-suggestions button:not([class*="home-suggestion-list-item"]),
+html.codex-jiuyi-skin main.main-surface .jiuyi-home .group\/home-suggestions button:not([class*="home-suggestion-list-item"]),
+html.codex-jiuyi-skin.skins-art-wide
+  main.main-surface.jiuyi-home-shell
+  .jiuyi-home
+  .group\/home-suggestions
+  button:not([class*="home-suggestion-list-item"]) {
   position: relative !important;
-  min-height: 104px !important;
-  padding: 14px 12px 16px !important;
   display: flex !important;
   flex-direction: column !important;
   align-items: center !important;
   justify-content: center !important;
   gap: 10px !important;
+  min-height: 104px !important;
+  padding: 14px 12px 16px !important;
   text-align: center !important;
-  border: 1px solid var(--jiuyi-glass-border) !important;
-  border-radius: 16px !important;
-  background:
-    radial-gradient(circle at 50% 18%, rgba(255, 255, 255, 0.08), transparent 42%),
-    linear-gradient(160deg, rgba(36, 48, 64, 0.78), rgba(22, 30, 42, 0.84)) !important;
-  color: #e6e2d8 !important;
+  border: 1px solid rgba(200, 220, 240, 0.28) !important;
+  border-radius: 14px !important;
+  background-color: rgba(28, 40, 54, 0.42) !important;
+  box-shadow:
+    0 10px 28px rgba(0, 0, 0, 0.22),
+    inset 0 1px 0 rgba(255, 255, 255, 0.12) !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  color: #ebe7df !important;
   font-weight: 600 !important;
   line-height: 1.45 !important;
-  backdrop-filter: blur(16px) saturate(1.15) !important;
-  -webkit-backdrop-filter: blur(16px) saturate(1.15) !important;
-  box-shadow:
-    0 10px 28px rgba(0, 0, 0, 0.28),
-    inset 0 1px 0 rgba(255, 255, 255, 0.08),
-    inset 0 0 0 1px rgba(180, 200, 220, 0.06) !important;
   transform: translateY(0);
   transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease !important;
 }
 
 /* 卡片右下朱砂小♡ */
-.jiuyi-home .group\/home-suggestions button::after {
+.jiuyi-home .group\/home-suggestions button:not([class*="home-suggestion-list-item"])::after {
   content: "♡";
   position: absolute;
   right: 10px;
@@ -643,7 +1074,7 @@ html.codex-jiuyi-skin .jiuyi-home {
   opacity: 0.9;
 }
 
-.jiuyi-home .group\/home-suggestions button:hover {
+.jiuyi-home .group\/home-suggestions button:not([class*="home-suggestion-list-item"]):hover {
   transform: translateY(-4px) !important;
   border-color: rgba(201, 164, 90, 0.38) !important;
   box-shadow:
@@ -652,7 +1083,7 @@ html.codex-jiuyi-skin .jiuyi-home {
     inset 0 1px 0 rgba(255, 255, 255, 0.12) !important;
 }
 
-.jiuyi-home .group\/home-suggestions button > span {
+.jiuyi-home .group\/home-suggestions button:not([class*="home-suggestion-list-item"]) > span {
   display: flex !important;
   width: 100% !important;
   justify-content: center !important;
@@ -662,9 +1093,9 @@ html.codex-jiuyi-skin .jiuyi-home {
 }
 
 /* 圆形玻璃图标底 */
-.jiuyi-home .group\/home-suggestions button > span:first-child > span:first-child,
-.jiuyi-home .group\/home-suggestions button span:has(> svg),
-.jiuyi-home .group\/home-suggestions button span:has(> span > svg) {
+.jiuyi-home .group\/home-suggestions button:not([class*="home-suggestion-list-item"]) > span:first-child > span:first-child,
+.jiuyi-home .group\/home-suggestions button:not([class*="home-suggestion-list-item"]) span:has(> svg),
+.jiuyi-home .group\/home-suggestions button:not([class*="home-suggestion-list-item"]) span:has(> span > svg) {
   width: 42px !important;
   height: 42px !important;
   min-width: 42px !important;
@@ -687,7 +1118,7 @@ html.codex-jiuyi-skin .jiuyi-home {
   overflow: hidden !important;
 }
 
-.jiuyi-home .group\/home-suggestions button svg {
+.jiuyi-home .group\/home-suggestions button:not([class*="home-suggestion-list-item"]) svg {
   width: 20px !important;
   height: 20px !important;
   display: block !important;
@@ -697,13 +1128,62 @@ html.codex-jiuyi-skin .jiuyi-home {
   opacity: 0.92;
 }
 
-.jiuyi-home .group\/home-suggestions button > span:last-child {
+.jiuyi-home .group\/home-suggestions button:not([class*="home-suggestion-list-item"]) > span:last-child {
   flex-direction: column !important;
   align-items: center !important;
   justify-content: center !important;
   text-align: center !important;
   color: #d8d4c8 !important;
   font-size: 13px !important;
+}
+
+/*
+ *     flex min-h-10 items-center gap-1.5 rounded-lg pr-1 text-sm
+ *     text-token-description-foreground (~ rgba(255,255,255,.5))
+ *     行内 icon size-4；无卡片壳 / 无圆形图标底 / 无朱砂 ♡
+ * 列表与卡片同属 section.group/home-suggestions，靠 :not(list-item) 隔离卡片样式。
+ */
+/*
+ * 列表展开时 section.group/home-suggestions 底色：
+ * 雨夜毛玻璃面板（对齐主题 slate / glass），替代宿主全透明，
+ * 行本身仍保持透明以便浮在该底上。
+ */
+
+/*
+ * 宿主输入区底部遮罩：
+ *   div.pointer-events-none.absolute.inset-x-0.bottom-0 … > div.bg-gradient-to-t.from-token-main-surface-primary
+ * CDP 实测为 linear-gradient(to top, solid → transparent)。
+ * 用皮肤 assets/composer-bg.png（data URL，CDP 注入的 CSS 无法加载相对路径文件）。
+ * 覆盖 immersive 基线在 skins-art-wide 下把该渐变设为 transparent 的行为。
+ */
+
+
+html.codex-jiuyi-skin div.pointer-events-none.absolute.inset-x-0.bottom-0 > div[class*="bg-gradient-to-t"][class*="from-token-main-surface-primary"],
+html.codex-jiuyi-skin.skins-art-wide main.main-surface .thread-scroll-container .bg-gradient-to-t.from-token-main-surface-primary,
+html.codex-jiuyi-skin main.main-surface div.pointer-events-none.absolute.inset-x-0.bottom-0 > div.mx-auto[class*="bg-gradient-to-t"] {
+  background-color: transparent !important;
+  background-image: url("data:image/png;base64,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") !important;
+  background-size: 100% 100% !important;
+  background-position: center bottom !important;
+  background-repeat: no-repeat !important;
+  /* 去掉 Tailwind 渐变 token 可能叠的 via/from 色 */
+  --tw-gradient-from: transparent !important;
+  --tw-gradient-to: transparent !important;
+  --tw-gradient-stops: transparent !important;
+}
+
+/*
+ * 遮罩层适当宽于输入轨（宿主 fade 与 composer 同 max-w 时两侧会漏透）。
+ * 在 --thread-content-max-width 基础上外扩 ~72px，并去掉过窄的 px 约束。
+ */
+html.codex-jiuyi-skin div.pointer-events-none.absolute.inset-x-0.bottom-0 > div[class*="bg-gradient-to-t"][class*="from-token-main-surface-primary"],
+html.codex-jiuyi-skin.skins-art-wide main.main-surface .thread-scroll-container .bg-gradient-to-t.from-token-main-surface-primary,
+html.codex-jiuyi-skin main.main-surface div.pointer-events-none.absolute.inset-x-0.bottom-0 > div.mx-auto[class*="bg-gradient-to-t"] {
+  max-width: min(calc(var(--thread-content-max-width, 48rem) + 72px), 100%) !important;
+  width: 100% !important;
+  box-sizing: border-box !important;
+  padding-inline: 0 !important;
+  margin-inline: auto !important;
 }
 
 /* ── 输入框：雨夜毛玻璃 ── */
@@ -742,9 +1222,10 @@ html.codex-jiuyi-skin .composer-surface-chrome::before {
 }
 
 /*
- * 发送按钮：宿主 class 含 bg-token-foreground + size-token-button-composer
- * 暗色壳下默认常是近白实心，与雨夜朱砂主题冲突。
+ * 主按钮（发送 / 顶栏创建 / 其它 bg-token-foreground）：
+ * 朱砂实心 + 浅米字。须压过 header * 与 text-token-dropdown-background。
  */
+html.codex-jiuyi-skin button[class~="bg-token-foreground"],
 html.codex-jiuyi-skin .composer-surface-chrome button[class~="bg-token-foreground"],
 html.codex-jiuyi-skin .composer-surface-chrome button[class*="size-token-button-composer"],
 html.codex-jiuyi-skin button[class~="bg-token-foreground"][class*="size-token-button-composer"] {
@@ -753,7 +1234,7 @@ html.codex-jiuyi-skin button[class~="bg-token-foreground"][class*="size-token-bu
     var(--jiuyi-cinnabar) 0%,
     var(--jiuyi-cinnabar-deep) 100%
   ) !important;
-  color: #f5e6c8 !important;
+  color: var(--cg-primary-button-ink, #f5e6c8) !important;
   border: 1px solid rgba(201, 164, 90, 0.35) !important;
   box-shadow:
     0 4px 14px rgba(168, 58, 46, 0.45),
@@ -761,6 +1242,7 @@ html.codex-jiuyi-skin button[class~="bg-token-foreground"][class*="size-token-bu
   opacity: 1 !important;
 }
 
+html.codex-jiuyi-skin button[class~="bg-token-foreground"]:hover,
 html.codex-jiuyi-skin .composer-surface-chrome button[class~="bg-token-foreground"]:hover,
 html.codex-jiuyi-skin .composer-surface-chrome button[class*="size-token-button-composer"]:hover,
 html.codex-jiuyi-skin button[class~="bg-token-foreground"][class*="size-token-button-composer"]:hover {
@@ -794,19 +1276,35 @@ html.codex-jiuyi-skin .composer-surface-chrome button[class*="size-token-button-
   opacity: 1 !important;
 }
 
-/* 项目选择区（含子级 span/svg，避免仍吃宿主黑字） */
-.jiuyi-home div:has(> .horizontal-scroll-fade-mask .group\/project-selector) {
-  position: relative;
-  padding-top: 28px !important;
-  border: 1px solid rgba(140, 160, 185, 0.16);
-  border-bottom: 0;
-  border-radius: 12px 12px 0 0;
-  background: linear-gradient(180deg, rgba(28, 38, 52, 0.72), rgba(18, 26, 38, 0.55)) !important;
-  backdrop-filter: blur(10px);
+/*
+ * 项目选择区（输入框上方横条）
+ * Codex：div > .horizontal-scroll-fade-mask .group/project-selector
+ * Worker/CDOEX：无 project-selector，父级为 flex-nowrap + bg-token-side-bar-background /
+ *   dark:bg-token-bg-fog，子级仅 .horizontal-scroll-fade-mask（文案「选择项目」）。
+ */
+.jiuyi-home div:has(> .horizontal-scroll-fade-mask .group\/project-selector),
+.jiuyi-home div:has(> .horizontal-scroll-fade-mask)[class*="bg-token-side-bar"],
+.jiuyi-home div:has(> .horizontal-scroll-fade-mask)[class*="bg-token-bg-fog"],
+.jiuyi-home div.select-none:has(> .horizontal-scroll-fade-mask) {
+  position: relative !important;
+  border: 1px solid rgba(140, 160, 185, 0.16) !important;
+  border-bottom: 0 !important;
+  border-radius: 12px 12px 0 0 !important;
+  background-color: transparent !important;
+  background-image: linear-gradient(180deg, rgba(28, 38, 52, 0.72), rgba(18, 26, 38, 0.55)) !important;
+  backdrop-filter: blur(10px) !important;
+  -webkit-backdrop-filter: blur(10px) !important;
   color: #e8e4dc !important;
   --text-primary: #e8e4dc !important;
   --text-secondary: #b8b2a6 !important;
   --icon-primary: #d8d4c8 !important;
+  --color-token-side-bar-background: transparent !important;
+  --color-token-bg-fog: transparent !important;
+}
+
+/* Codex 经典结构补顶栏标签；Worker 宿主已自带「选择项目」文案，仅加 padding 给 ::before 区 */
+.jiuyi-home div:has(> .horizontal-scroll-fade-mask .group\/project-selector) {
+  padding-top: 28px !important;
 }
 
 .jiuyi-home div:has(> .horizontal-scroll-fade-mask .group\/project-selector)::before {
@@ -824,21 +1322,29 @@ html.codex-jiuyi-skin .composer-surface-chrome button[class*="size-token-button-
 }
 
 .jiuyi-home .group\/project-selector,
-.jiuyi-home .group\/project-selector * {
+.jiuyi-home .group\/project-selector *,
+.jiuyi-home div:has(> .horizontal-scroll-fade-mask)[class*="bg-token-side-bar"],
+.jiuyi-home div:has(> .horizontal-scroll-fade-mask)[class*="bg-token-side-bar"] *,
+.jiuyi-home div.select-none:has(> .horizontal-scroll-fade-mask),
+.jiuyi-home div.select-none:has(> .horizontal-scroll-fade-mask) * {
   --text-primary: #e8e4dc !important;
   --text-secondary: #b8b2a6 !important;
   color: #d8d4c8 !important;
 }
 
 .jiuyi-home .group\/project-selector > button,
-.jiuyi-home .group\/project-selector button {
+.jiuyi-home .group\/project-selector button,
+.jiuyi-home div:has(> .horizontal-scroll-fade-mask) > .horizontal-scroll-fade-mask button,
+.jiuyi-home div.select-none:has(> .horizontal-scroll-fade-mask) button {
   border-color: rgba(140, 160, 185, 0.22) !important;
   background: linear-gradient(135deg, rgba(40, 54, 72, 0.85), rgba(28, 38, 52, 0.9)) !important;
   color: #d8d4c8 !important;
   box-shadow: 0 3px 10px rgba(0, 0, 0, 0.2) !important;
 }
 
-.jiuyi-home .group\/project-selector svg {
+.jiuyi-home .group\/project-selector svg,
+.jiuyi-home div:has(> .horizontal-scroll-fade-mask) svg,
+.jiuyi-home div.select-none:has(> .horizontal-scroll-fade-mask) svg {
   color: #b8c0cc !important;
   opacity: 1 !important;
 }
@@ -859,31 +1365,51 @@ html.codex-jiuyi-skin .jiuyi-home-utility * {
 }
 
 /*
- * 建议卡点击后的弹出列表 / 菜单 / listbox：不改表面与布局，
- * 交给宿主原始样式（electron-dark 壳自带）。
- * 仅对设置类 dialog 补 token，避免亮色表单；不碰 menu/listbox 外观。
+ * 门户弹层兜底：背景主路径已由 :root 上 --color-token-dropdown/menu-background 驱动。
+ * 此处只保证 color-scheme，并对写死 background 的 hash 表面叠 token 色，避免默认灰残留。
  */
+html.codex-jiuyi-skin [role="menu"],
+html.codex-jiuyi-skin [role="listbox"],
 html.codex-jiuyi-skin [role="dialog"],
 html.codex-jiuyi-skin [role="alertdialog"],
+html.codex-jiuyi-skin [data-radix-popper-content-wrapper],
+html.codex-jiuyi-skin [data-radix-menu-content],
+html.codex-jiuyi-skin [data-radix-select-content],
+html.codex-jiuyi-skin [cmdk-root],
+html.codex-jiuyi-skin [data-cmdk-root],
+html.codex-jiuyi-skin .command-menu-dialog,
+html.codex-jiuyi-skin [class*="Popover"],
+html.codex-jiuyi-skin [class*="Dropdown"],
 html.codex-jiuyi-skin [class*="Modal"],
-html.codex-jiuyi-skin [class*="Dialog"],
-html.codex-jiuyi-skin.dream-theme-dark [role="dialog"],
-html.codex-jiuyi-skin.dream-theme-dark [class*="Dialog"],
-html.codex-jiuyi-skin.dream-theme-dark [class*="Modal"] {
+html.codex-jiuyi-skin [class*="Dialog"] {
   color-scheme: dark !important;
-  --main-surface-primary: #141c28 !important;
-  --main-surface-secondary: #1a2330 !important;
-  --surface-primary: #1a2330 !important;
-  --surface-secondary: #141c28 !important;
-  --text-primary: #e8e4dc !important;
-  --text-secondary: #b8b2a6 !important;
-  --text-tertiary: #9aa8b8 !important;
-  --icon-primary: #d8d4c8 !important;
-  --icon-secondary: #a8a296 !important;
-  --border-primary: rgba(140, 160, 185, 0.22) !important;
-  --border-secondary: rgba(140, 160, 185, 0.14) !important;
 }
 
+/*
+ * 弹层表面兜底（宿主 hash 类已读 var(--color-token-dropdown-background)，
+ * :root 覆盖后通常已够用；此处只钉 role / radix / cmdk，避免 [class*=_surface_] 误伤全局）。
+ */
+html.codex-jiuyi-skin [role="menu"],
+html.codex-jiuyi-skin [role="listbox"],
+html.codex-jiuyi-skin [data-radix-menu-content],
+html.codex-jiuyi-skin [data-radix-select-content],
+html.codex-jiuyi-skin [cmdk-root],
+html.codex-jiuyi-skin [data-cmdk-root] {
+  background-color: var(--color-token-dropdown-background, #1a2330) !important;
+  color: var(--color-token-dropdown-foreground, #e8e4dc) !important;
+  border-color: var(--color-token-menu-border, rgba(140, 160, 185, 0.22));
+}
+
+html.codex-jiuyi-skin [role="dialog"],
+html.codex-jiuyi-skin [role="alertdialog"],
+html.codex-jiuyi-skin .command-menu-dialog,
+html.codex-jiuyi-skin [class*="Modal"],
+html.codex-jiuyi-skin [class*="Dialog"] {
+  background-color: var(--color-token-dropdown-background, #1a2330) !important;
+  color: var(--jiuyi-ink, #e8e4dc) !important;
+}
+
+/* 设置类 dialog 表单可读性（不碰 menu 布局） */
 html.codex-jiuyi-skin [role="dialog"] input,
 html.codex-jiuyi-skin [role="dialog"] textarea,
 html.codex-jiuyi-skin [role="dialog"] select,
@@ -892,8 +1418,8 @@ html.codex-jiuyi-skin [role="alertdialog"] textarea,
 html.codex-jiuyi-skin [class*="Dialog"] input,
 html.codex-jiuyi-skin [class*="Modal"] input {
   color: #e8e4dc !important;
-  background-color: rgba(14, 20, 28, 0.92) !important;
-  border-color: rgba(140, 160, 185, 0.28) !important;
+  background-color: var(--color-token-input-background, rgba(14, 20, 28, 0.92)) !important;
+  border-color: var(--color-token-input-border, rgba(140, 160, 185, 0.28)) !important;
   caret-color: var(--jiuyi-cinnabar) !important;
 }
 
@@ -912,79 +1438,227 @@ html.codex-jiuyi-skin .ProseMirror {
   caret-color: var(--jiuyi-cinnabar) !important;
 }
 
-/* 非 composer 的 token-foreground 主按钮（对话内操作等） */
-html.codex-jiuyi-skin button[class~="bg-token-foreground"]:not([class*="size-token-button-composer"]) {
-  background: linear-gradient(145deg, var(--jiuyi-cinnabar), var(--jiuyi-cinnabar-deep)) !important;
-  color: #f5e6c8 !important;
-  box-shadow: 0 5px 14px rgba(168, 58, 46, 0.35) !important;
-}
-
-html.codex-jiuyi-skin article,
-html.codex-jiuyi-skin [data-message-author-role] {
-  border-radius: 12px;
-}
-
-/* 对话区轻微雾面卡片感（半透明，仍透出主区背景） */
-html.codex-jiuyi-skin [data-message-author-role="assistant"],
-html.codex-jiuyi-skin [data-message-author-role="user"] {
-  background: rgba(28, 38, 52, 0.42);
-  border: 1px solid rgba(140, 160, 185, 0.12);
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.14);
-  backdrop-filter: blur(8px);
-}
-
-/* taskMode 兼容：引擎会挂 dream-task-ambient / banner，但背景始终在 main 全幅 */
-html.codex-jiuyi-skin.dream-task-banner main.main-surface,
-html.codex-jiuyi-skin.dream-task-ambient main.main-surface,
-html.codex-jiuyi-skin.dream-task-off main.main-surface {
-  background-image:
-    linear-gradient(
-      105deg,
-      rgba(6, 10, 16, 0.78) 0%,
-      rgba(10, 16, 24, 0.52) 28%,
-      rgba(14, 22, 34, 0.28) 52%,
-      rgba(12, 18, 28, 0.18) 72%,
-      rgba(8, 12, 18, 0.35) 100%
-    ),
-    radial-gradient(circle at 18% 8%, rgba(40, 55, 75, 0.22), transparent 36%),
-    var(--jiuyi-art) !important;
-  background-size: 100% 100%, 100% 100%, cover !important;
-  background-position: center, center, var(--dream-art-position, 78% 42%) !important;
+/* 主按钮 svg 统一浅字（顶栏创建 / 发送） */
+html.codex-jiuyi-skin button[class~="bg-token-foreground"] svg,
+html.codex-jiuyi-skin .composer-surface-chrome button[class~="bg-token-foreground"] svg,
+html.codex-jiuyi-skin .composer-surface-chrome button[class*="size-token-button-composer"] svg {
+  color: var(--cg-primary-button-ink, #f5e6c8) !important;
+  fill: currentColor;
+  opacity: 1 !important;
 }
 
 /*
- * 宽图模式：引擎基线会把 main 背景换成半透明雾，但本皮肤立绘铺在 main 上。
- * 顶栏保持透明连续，颜色仍走浅墨；侧栏文字 token 已在上方统一。
+ * 对话线程可读性（CDP 实测宿主 2026-07）
+ * ─────────────────────────────────────
+ * 宿主默认：
+ *   · 用户气泡：.bg-token-foreground/5（约 5% 白雾，几乎透底）
+ *   · 助手正文：_markdownContent / text-size-chat，背景 transparent
+ *   · 无 data-message-author-role（旧选择器已失效）
+ *   · thread-scroll-container 透明，直接叠 main 立绘
+ * 皮肤旧规则只给 [data-message-author-role] 雾面卡 → 对话区实际未命中。
+ * 策略：主 scrim 抬暗 + 用户气泡实雾 + 助手 markdown 轻衬 + 微 text-shadow。
  */
-html.codex-jiuyi-skin.dream-art-wide main.main-surface > header.app-header-tint {
-  background: transparent !important;
-  border-bottom: 0 !important;
-  box-shadow: none !important;
-  color: var(--jiuyi-ink) !important;
+
+/* 线程正文：略提亮 + 暗底描影，压住立绘纹理 */
+html.codex-jiuyi-skin .thread-scroll-container,
+html.codex-jiuyi-skin .thread-scroll-container .text-size-chat,
+html.codex-jiuyi-skin .thread-scroll-container [class*="markdownContent"],
+html.codex-jiuyi-skin .thread-scroll-container [class*="_markdownContent_"],
+html.codex-jiuyi-skin .thread-scroll-container [class*="markdownText"],
+html.codex-jiuyi-skin .thread-scroll-container [class*="_markdownText_"] {
+  color: #f2eee6 !important;
+  --text-primary: #f2eee6 !important;
+  --color-token-text-primary: #f2eee6 !important;
+  --color-token-foreground: #f2eee6 !important;
   text-shadow:
-    0 1px 2px rgba(8, 12, 18, 0.75),
-    0 0 10px rgba(8, 12, 18, 0.55) !important;
+    0 1px 2px rgba(4, 8, 14, 0.72),
+    0 0 14px rgba(6, 10, 16, 0.45) !important;
+}
+
+/* 次要元信息（时间、已处理时长等）仍可读，但低于正文 */
+html.codex-jiuyi-skin .thread-scroll-container .text-token-text-secondary,
+html.codex-jiuyi-skin .thread-scroll-container [class*="text-token-text-secondary"],
+html.codex-jiuyi-skin .thread-scroll-container .text-token-text-tertiary,
+html.codex-jiuyi-skin .thread-scroll-container [class*="text-token-text-tertiary"] {
+  color: #c4c0b4 !important;
+  text-shadow: 0 1px 2px rgba(4, 8, 14, 0.55) !important;
+}
+
+/* 用户气泡：宿主仅 /5 雾；改为雨夜 slate 半透 + 轻 blur */
+html.codex-jiuyi-skin .thread-scroll-container [class*="bg-token-foreground/5"],
+html.codex-jiuyi-skin .thread-scroll-container [class*="bg-token-foreground\\/5"] {
+  background-color: rgba(22, 30, 42, 0.78) !important;
+  background-image: linear-gradient(
+    160deg,
+    rgba(36, 48, 64, 0.55),
+    rgba(18, 26, 38, 0.72)
+  ) !important;
+  border: 1px solid rgba(140, 160, 185, 0.2) !important;
+  box-shadow:
+    0 6px 18px rgba(0, 0, 0, 0.28),
+    inset 0 0 0 1px rgba(200, 215, 230, 0.06) !important;
+  backdrop-filter: blur(12px) saturate(1.05) !important;
+  -webkit-backdrop-filter: blur(12px) saturate(1.05) !important;
+  color: #f2eee6 !important;
+}
+
+/*
+ * 助手长文：宿主链为 .group.flex.min-w-0.flex-col > markdownContent（无气泡底）。
+ * 用户消息链为 bg-token-foreground/5 … > markdown，须排除，避免双层底。
+ */
+/*
+ * 助手回复壳：CDP 链 group.flex.min-w-0.flex-col 包 markdown（非用户气泡）。
+ * 在壳层铺雾比直接打 markdown 更稳（宿主 markdown 模块偶发 reset background）。
+ */
+html.codex-jiuyi-skin .thread-scroll-container .group.flex.min-w-0.flex-col:has(> [class*="markdownContent"]),
+html.codex-jiuyi-skin .thread-scroll-container .group.flex.min-w-0.flex-col:has(> [class*="_markdownContent_"]) {
+  border-radius: 12px;
+  background-color: rgba(14, 20, 30, 0.64) !important;
+  background-image: linear-gradient(
+    180deg,
+    rgba(24, 34, 48, 0.28),
+    rgba(12, 18, 28, 0.12)
+  ) !important;
+  border: 1px solid rgba(140, 160, 185, 0.12) !important;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2) !important;
+  backdrop-filter: blur(10px) saturate(1.02) !important;
+  -webkit-backdrop-filter: blur(10px) saturate(1.02) !important;
+  padding: 10px 14px !important;
+}
+
+html.codex-jiuyi-skin .thread-scroll-container
+  .group.flex.min-w-0.flex-col
+  > [class*="markdownContent"],
+html.codex-jiuyi-skin .thread-scroll-container
+  .group.flex.min-w-0.flex-col
+  > [class*="_markdownContent_"] {
+  background-color: transparent !important;
+  background-image: none !important;
+  border: 0 !important;
+  box-shadow: none !important;
+  padding: 0 !important;
+}
+
+/* 用户气泡内：不套助手壳样式（气泡自身已有底） */
+html.codex-jiuyi-skin .thread-scroll-container [class*="bg-token-foreground/5"] .group.flex.min-w-0.flex-col,
+html.codex-jiuyi-skin .thread-scroll-container [class*="bg-token-foreground\\/5"] .group.flex.min-w-0.flex-col {
+  background-color: transparent !important;
+  background-image: none !important;
+  border: 0 !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  padding: 0 !important;
+}
+
+/* 行内 code / 资源小卡：保持抬升，避免与正文糊成一片 */
+html.codex-jiuyi-skin .thread-scroll-container [class*="inline-markdown"],
+html.codex-jiuyi-skin .thread-scroll-container [class*="_inlineMarkdown_"] {
+  text-shadow: none !important;
+}
+
+html.codex-jiuyi-skin .thread-scroll-container [class*="bg-token-dropdown-background"] {
+  text-shadow: none !important;
+}
+
+/*
+ * taskMode：标准模式复用 scrim token；宽图首页由 paint=custom 的 body 自挂规则接管
+ *（皮肤 body 铺图 + main 浅 scrim），此处不再把立绘二次盖到 main 上压暗首页。
+ */
+html.codex-jiuyi-skin.skins-art-standard.skins-task-banner main.main-surface,
+html.codex-jiuyi-skin.skins-art-standard.skins-task-ambient main.main-surface,
+html.codex-jiuyi-skin.skins-art-standard.skins-task-off main.main-surface {
+  background-image:
+    var(--jiuyi-scrim-default),
+    radial-gradient(ellipse 70% 90% at 32% 48%, rgba(10, 16, 24, 0.28), transparent 70%),
+    radial-gradient(circle at 18% 8%, rgba(55, 75, 100, 0.16), transparent 38%),
+    var(--jiuyi-art) !important;
+  background-size: 100% 100%, 100% 100%, 100% 100%, cover !important;
+  background-position: center, center, center, var(--skins-art-position, 78% 42%) !important;
+}
+
+html.codex-jiuyi-skin.skins-art-standard.skins-task-banner main.main-surface.jiuyi-home-shell,
+html.codex-jiuyi-skin.skins-art-standard.skins-task-ambient main.main-surface.jiuyi-home-shell,
+html.codex-jiuyi-skin.skins-art-standard.skins-task-off main.main-surface.jiuyi-home-shell {
+  background-image:
+    var(--jiuyi-scrim-home),
+    radial-gradient(ellipse 80% 92% at 28% 48%, rgba(18, 28, 40, 0.08), transparent 74%),
+    radial-gradient(circle at 18% 12%, rgba(90, 120, 155, 0.18), transparent 42%),
+    radial-gradient(circle at 78% 42%, rgba(255, 220, 170, 0.1), transparent 32%),
+    radial-gradient(circle at 55% 70%, rgba(200, 215, 235, 0.05), transparent 40%),
+    var(--jiuyi-art) !important;
+  background-size: 100% 100%, 100% 100%, 100% 100%, 100% 100%, 100% 100%, cover !important;
+  background-position: center, center, center, center, center, var(--skins-art-position, 78% 42%) !important;
+}
+
+/* 标准模式对话 + task：main 可带立绘；宽图见下条（仅 scrim） */
+html.codex-jiuyi-skin.skins-art-standard:is(.skins-task-banner, .skins-task-ambient, .skins-task-off)
+  main.main-surface:has(.thread-scroll-container) {
+  background-image:
+    var(--jiuyi-scrim-thread),
+    radial-gradient(ellipse 70% 90% at 32% 48%, rgba(8, 12, 20, 0.36), transparent 68%),
+    radial-gradient(circle at 18% 8%, rgba(45, 60, 82, 0.16), transparent 36%),
+    var(--jiuyi-art) !important;
+  background-size: 100% 100%, 100% 100%, 100% 100%, cover !important;
+  background-position: center, center, center, var(--skins-art-position, 78% 42%) !important;
+}
+
+/* 宽图 + task / 对话：main 禁止第二张立绘（皮肤 body 已全窗铺图） */
+html.codex-jiuyi-skin.skins-art-wide:is(.skins-task-ambient, .skins-task-banner, .skins-task-off)
+  main.main-surface.jiuyi-home-shell {
+  background-color: transparent !important;
+  background-image:
+    var(--jiuyi-scrim-home),
+    radial-gradient(circle at 78% 42%, rgba(255, 220, 170, 0.08), transparent 30%),
+    linear-gradient(
+      90deg,
+      rgba(16, 24, 34, 0.22),
+      rgba(14, 20, 30, 0.1) 52%,
+      rgba(12, 18, 26, 0.02)
+    ) !important;
+  background-size: 100% 100%, 100% 100%, 100% 100% !important;
+  background-position: center, center, center !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+}
+
+html.codex-jiuyi-skin.skins-art-wide:is(.skins-task-ambient, .skins-task-banner, .skins-task-off)
+  main.main-surface:has(.thread-scroll-container) {
+  background-color: transparent !important;
+  background-image:
+    var(--jiuyi-scrim-thread),
+    radial-gradient(ellipse 70% 90% at 32% 48%, rgba(8, 12, 20, 0.36), transparent 68%),
+    radial-gradient(circle at 18% 8%, rgba(45, 60, 82, 0.16), transparent 36%) !important;
+  background-size: 100% 100%, 100% 100%, 100% 100% !important;
+  background-position: center, center, center !important;
+}
+
+/* 宽图但处于设置等非对话路由：压过 immersive 基线，强制实底 */
+html.codex-jiuyi-skin.skins-art-wide
+  main.main-surface:not(.jiuyi-home-shell):not(:has(.thread-scroll-container))
+  > header.app-header-tint {
+  background: #101820 !important;
+  background-image: none !important;
+  border-bottom: 1px solid rgba(120, 145, 175, 0.12) !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  text-shadow: none !important;
 }
 
 /* ── 响应式：只缩字号/装饰，不改宿主 flex 几何 ── */
 @media (max-width: 1120px) {
-  .jiuyi-ornament { bottom: 70px; font-size: 13px; }
   .jiuyi-home {
-    --thread-content-max-width: min(880px, calc(100cqw - 30px)) !important;
+    --thread-content-max-width: min(48rem, calc(100cqw - 30px)) !important;
   }
 }
 
 @media (max-width: 900px) {
-  .jiuyi-signature { display: none !important; }
   .jiuyi-brand { left: 14px; top: 48px; }
   .jiuyi-brand b { font-size: 13px; }
   .jiuyi-rain { display: none; }
   .jiuyi-home [data-feature="game-source"] { font-size: 18px !important; }
   .jiuyi-home [data-feature="game-source"]::before { font-size: 11px; margin-bottom: 8px; }
   .jiuyi-home [data-feature="game-source"]::after { font-size: 12px; margin-top: 10px; }
-  .jiuyi-home .group\/home-suggestions button {
-    min-height: 96px !important;
-    font-size: 12px !important;
-    padding: 12px 10px 14px !important;
-  }
 }

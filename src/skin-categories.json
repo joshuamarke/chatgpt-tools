@@ -1,0 +1,78 @@
+{
+  "version": 1,
+  "description": "GUI 侧栏分类注册表。match=all 为上级菜单「全部皮肤」；其余条目为其子菜单。皮肤归属写在 skin.json / catalog 的 categories 字段。",
+  "categories": [
+    {
+      "id": "all",
+      "label": "全部皮肤",
+      "kind": "system",
+      "match": "all",
+      "role": "parent",
+      "order": 0,
+      "icon": "clothes"
+    },
+    {
+      "id": "anime",
+      "label": "动漫风格",
+      "kind": "filter",
+      "match": "category",
+      "role": "child",
+      "order": 10,
+      "icon": "anime"
+    },
+    {
+      "id": "tech",
+      "label": "科技未来",
+      "kind": "filter",
+      "match": "category",
+      "role": "child",
+      "order": 20,
+      "icon": "tech"
+    },
+    {
+      "id": "nature",
+      "label": "自然风景",
+      "kind": "filter",
+      "match": "category",
+      "role": "child",
+      "order": 30,
+      "icon": "nature"
+    },
+    {
+      "id": "game",
+      "label": "游戏世界",
+      "kind": "filter",
+      "match": "category",
+      "role": "child",
+      "order": 40,
+      "icon": "game"
+    },
+    {
+      "id": "art",
+      "label": "艺术创意",
+      "kind": "filter",
+      "match": "category",
+      "order": 50,
+      "role": "child",
+      "icon": "art"
+    },
+    {
+      "id": "minimal",
+      "label": "简约风格",
+      "kind": "filter",
+      "match": "category",
+      "role": "child",
+      "order": 60,
+      "icon": "minimal"
+    },
+    {
+      "id": "favorite",
+      "label": "我的收藏",
+      "kind": "system",
+      "match": "favorite",
+      "role": "child",
+      "order": 100,
+      "icon": "favorite"
+    }
+  ]
+}

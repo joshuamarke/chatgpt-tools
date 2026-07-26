@@ -11,9 +11,9 @@
 use super::http::{is_debug_port_open, is_renderer_ready};
 use parking_lot::Mutex;
 use serde_json::{json, Value};
-use std::collections::HashSet;
 use std::fs;
 use std::path::PathBuf;
+#[cfg(not(windows))]
 use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -75,9 +75,10 @@ pub fn append_diag(line: &str) {
             let _ = fs::rename(&log_path, &bak);
         }
     }
-    let ts = std::time::SystemTime::now()
+    // Millisecond timestamps so hot-path gaps are measurable (was whole seconds).
+    let ts_ms = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs())
+        .map(|d| d.as_millis())
         .unwrap_or(0);
     let _ = fs::OpenOptions::new()
         .create(true)
@@ -85,7 +86,7 @@ pub fn append_diag(line: &str) {
         .open(&log_path)
         .and_then(|mut f| {
             use std::io::Write;
-            writeln!(f, "[{ts}] {line}")
+            writeln!(f, "[{ts_ms}] {line}")
         });
 }
 
@@ -127,7 +128,10 @@ pub struct TimingBudget {
     pub wait_debug_port_ms: u64,
     pub wait_renderer_ms: u64,
     pub soft_once_timeout_ms: u64,
+    /// Deprecated: event-driven wait replaced fixed sleeps (kept for API compat).
+    #[allow(dead_code)]
     pub launch_settle_ms: u64,
+    #[allow(dead_code)]
     pub stop_settle_ms: u64,
     pub poll_ms: u64,
 }
@@ -145,12 +149,18 @@ fn slow_scale_env() -> f64 {
 }
 
 /// Adaptive apply/launch budgets (aligned with host-probe.resolveTimingBudget).
+///
+/// Production note: slow first paint must not fail the apply path. When the host
+/// is still starting (or just relaunched), scale waits so soft verify / renderer
+/// readiness can absorb Store cold starts without killing a healthy session.
 pub fn resolve_timing_budget(seed: Option<&HostLifecycle>) -> TimingBudget {
     let env_scale = slow_scale_env();
     let starting = seed.map(|s| s.lifecycle == "starting").unwrap_or(false);
+    let offline = seed.map(|s| s.lifecycle == "offline").unwrap_or(false);
     let scale = if env_scale > 0.0 {
         env_scale.clamp(1.0, 3.0)
-    } else if starting {
+    } else if starting || offline {
+        // Cold / first paint: slightly more patient than a hot ready host.
         1.6
     } else {
         1.0
@@ -158,53 +168,22 @@ pub fn resolve_timing_budget(seed: Option<&HostLifecycle>) -> TimingBudget {
     TimingBudget {
         scale,
         wait_debug_port_ms: (28_000.0 * scale).round() as u64,
+        // Up to ~72s at scale 1.6 — pairs with ensure_debug_port verify window (≥90s).
         wait_renderer_ms: (45_000.0 * scale).round() as u64,
-        soft_once_timeout_ms: (8_000.0 * scale).round() as u64,
-        launch_settle_ms: (900.0 * scale).round() as u64,
-        stop_settle_ms: (700.0 * scale).round() as u64,
-        poll_ms: if scale > 1.3 { 500 } else { 350 },
+        // Soft inject verify on cold path needs room for SPA hydrate (not just 8s).
+        soft_once_timeout_ms: if starting || offline {
+            (14_000.0 * scale).round() as u64
+        } else {
+            (8_000.0 * scale).round() as u64
+        },
+        // Legacy fields kept for TimingBudget shape; settle is event-driven now.
+        launch_settle_ms: 0,
+        stop_settle_ms: 0,
+        poll_ms: if scale > 1.3 { 280 } else { 180 },
     }
 }
 
-fn powershell_exe() -> PathBuf {
-    let root = std::env::var("SystemRoot").unwrap_or_else(|_| r"C:\Windows".into());
-    for c in [
-        PathBuf::from(&root).join(r"System32\WindowsPowerShell\v1.0\powershell.exe"),
-        PathBuf::from(&root).join(r"SysWOW64\WindowsPowerShell\v1.0\powershell.exe"),
-        PathBuf::from("powershell.exe"),
-    ] {
-        if c.as_os_str() == "powershell.exe" || c.is_file() {
-            return c;
-        }
-    }
-    PathBuf::from("powershell.exe")
-}
-
-/// Run a short PowerShell -Command and return stdout (best-effort).
-pub fn run_powershell(script: &str, timeout_hint_ms: u64) -> Option<String> {
-    let _ = timeout_hint_ms;
-    let mut cmd = Command::new(powershell_exe());
-    cmd.args([
-        "-NoProfile",
-        "-NonInteractive",
-        "-ExecutionPolicy",
-        "Bypass",
-        "-Command",
-        script,
-    ]);
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-        cmd.creation_flags(CREATE_NO_WINDOW);
-    }
-    let output = cmd.output().ok()?;
-    if !output.status.success() && output.stdout.is_empty() {
-        return None;
-    }
-    Some(String::from_utf8_lossy(&output.stdout).to_string())
-}
-
+#[cfg(not(windows))]
 fn parse_pid_lines(text: &str) -> Vec<u32> {
     let mut out = Vec::new();
     for line in text.lines() {
@@ -221,92 +200,37 @@ fn parse_pid_lines(text: &str) -> Vec<u32> {
     out
 }
 
-/// Best-effort main process PIDs (Windows: tasklist first; Get-Process/CIM only if empty).
+/// Best-effort main process PIDs.
+/// Windows: Toolhelp32 + path filter (no PowerShell / tasklist).
+/// macOS: pgrep. Other: empty.
 pub fn find_host_main_pids() -> Vec<u32> {
-    let mut pids: HashSet<u32> = HashSet::new();
-
-    if cfg!(target_os = "macos") {
-        if let Ok(output) = Command::new("pgrep")
-            .args([
-                "-f",
-                r"/Applications/ChatGPT\.app/Contents/MacOS/ChatGPT|/Applications/Codex\.app/Contents/MacOS/(ChatGPT|Codex)|/ChatGPT\.app/Contents/MacOS/ChatGPT",
-            ])
-            .output()
-        {
-            if output.status.success() {
-                for id in parse_pid_lines(&String::from_utf8_lossy(&output.stdout)) {
-                    pids.insert(id);
-                }
-            }
-        }
-        return pids.into_iter().collect();
-    }
-
-    if !cfg!(windows) {
-        return Vec::new();
-    }
-
-    // 1) tasklist — fast
+    #[cfg(windows)]
     {
-        let mut cmd = Command::new("tasklist");
-        cmd.args(["/FO", "CSV", "/NH"]);
-        #[cfg(windows)]
-        {
-            use std::os::windows::process::CommandExt;
-            const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-            cmd.creation_flags(CREATE_NO_WINDOW);
-        }
-        if let Ok(output) = cmd.output() {
-            let text = String::from_utf8_lossy(&output.stdout);
-            for line in text.lines() {
-                if !line.to_ascii_lowercase().contains("chatgpt.exe")
-                    && !line.to_ascii_lowercase().contains("codex.exe")
-                {
-                    continue;
-                }
-                // CSV: "name","pid","session","session#","mem"
-                let parts: Vec<&str> = line.split("\",\"").collect();
-                if parts.len() >= 2 {
-                    let id_s = parts[1].trim_matches('"').trim();
-                    if let Ok(id) = id_s.parse::<u32>() {
-                        if id > 0 {
-                            pids.insert(id);
+        return super::win_native::find_host_pids_toolhelp();
+    }
+
+    #[cfg(not(windows))]
+    {
+        let mut pids: Vec<u32> = Vec::new();
+        if cfg!(target_os = "macos") {
+            if let Ok(output) = Command::new("pgrep")
+                .args([
+                    "-f",
+                    r"/Applications/ChatGPT\.app/Contents/MacOS/ChatGPT|/Applications/Codex\.app/Contents/MacOS/(ChatGPT|Codex)|/ChatGPT\.app/Contents/MacOS/ChatGPT",
+                ])
+                .output()
+            {
+                if output.status.success() {
+                    for id in parse_pid_lines(&String::from_utf8_lossy(&output.stdout)) {
+                        if !pids.contains(&id) {
+                            pids.push(id);
                         }
                     }
                 }
             }
         }
+        pids
     }
-
-    // 2) Get-Process only when tasklist missed (Store / slow list)
-    if pids.is_empty() {
-        if let Some(stdout) = run_powershell(
-            "Get-Process -Name ChatGPT,Codex -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Id",
-            12_000,
-        ) {
-            for id in parse_pid_lines(&stdout) {
-                pids.insert(id);
-            }
-        }
-    }
-
-    // 3) CIM by path when list still empty
-    if pids.is_empty() {
-        let script = r#"
-Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
-  Where-Object {
-    $_.Name -match '^(ChatGPT|Codex)\.exe$' -or
-    ($_.ExecutablePath -and $_.ExecutablePath -match 'OpenAI\.(Codex|ChatGPT)|\\ChatGPT\.exe$|\\Codex\.exe$')
-  } | Select-Object -ExpandProperty ProcessId
-"#;
-        if let Some(stdout) = run_powershell(script, 15_000) {
-            for id in parse_pid_lines(&stdout) {
-                pids.insert(id);
-            }
-        }
-    }
-
-    pids.into_iter().collect()
 }
 
 fn classify_raw(process_running: bool, debug_port_open: bool, renderer_ready: bool) -> &'static str {
@@ -725,6 +649,23 @@ pub fn invalidate_host_probe_cache() {
     svc.last = None;
 }
 
+/// Clear lifecycle sticky/hysteresis (call on forced restart so offline is not
+/// reported as ready while the host is dying).
+pub fn invalidate_host_lifecycle_sticky() {
+    let mut svc = PROBE.lock();
+    svc.cdp = None;
+    svc.process = None;
+    svc.last = None;
+    svc.hyst = HysteresisState::default();
+    // Also clear boot appearance snap so next engage re-reads config.
+    {
+        let mut boot = BOOT_APPEARANCE.lock();
+        boot.theme = None;
+        boot.pids.clear();
+        boot.engaged = false;
+    }
+}
+
 /// Publish a known-good ready snapshot (after successful ensure_debug_port).
 pub fn note_host_ready(port: u16) {
     let mut svc = PROBE.lock();
@@ -766,6 +707,52 @@ pub fn wait_until_renderer_ready(port: u16, timeout_ms: u64, poll_ms: u64) -> bo
     snap.renderer_ready || snap.lifecycle == "ready"
 }
 
+/// Snapshot of config.toml appearanceTheme as observed when the host process
+/// first became engaged. Codex only reloads [desktop] on process start, so
+/// comparing skin desktopTheme.appearanceTheme against this value tells the
+/// GUI whether a restart is required for chrome theme to take effect.
+struct BootAppearanceSnap {
+    theme: Option<String>,
+    pids: Vec<u32>,
+    engaged: bool,
+}
+
+static BOOT_APPEARANCE: Mutex<BootAppearanceSnap> = Mutex::new(BootAppearanceSnap {
+    theme: None,
+    pids: Vec::new(),
+    engaged: false,
+});
+
+fn pids_changed(a: &[u32], b: &[u32]) -> bool {
+    if a.len() != b.len() {
+        return true;
+    }
+    let mut sa = a.to_vec();
+    let mut sb = b.to_vec();
+    sa.sort_unstable();
+    sb.sort_unstable();
+    sa != sb
+}
+
+/// Track host boot appearance: capture config when process engages; reset on offline / PID flip.
+fn sync_boot_appearance_theme(life: &HostLifecycle) -> Option<String> {
+    let mut snap = BOOT_APPEARANCE.lock();
+    let engaged = life.host_engaged() || life.process_running;
+    if !engaged {
+        snap.engaged = false;
+        snap.theme = None;
+        snap.pids.clear();
+        return None;
+    }
+    let restart_cycle = !snap.engaged || pids_changed(&snap.pids, &life.pids);
+    if restart_cycle {
+        snap.theme = super::theme::read_appearance_theme();
+        snap.pids = life.pids.clone();
+        snap.engaged = true;
+    }
+    snap.theme.clone()
+}
+
 /// Compact JSON for GUI polling (`host_status` command).
 pub fn host_status_json(port: u16, force: bool, keep_alive: bool) -> Value {
     let life = if force {
@@ -777,6 +764,11 @@ pub fn host_status_json(port: u16, force: bool, keep_alive: bool) -> Value {
 }
 
 pub fn host_lifecycle_to_json(life: &HostLifecycle, keep_alive: bool) -> Value {
+    let boot_theme = sync_boot_appearance_theme(life);
+    let config_theme = super::theme::read_appearance_theme();
+    // Lightweight session art/shell flags so GUI host polls can clear
+    // 「立绘加载中」 without a full status/catalog refresh.
+    let session = read_session_art_flags();
     json!({
         "ok": true,
         "port": life.port,
@@ -795,6 +787,13 @@ pub fn host_lifecycle_to_json(life: &HostLifecycle, keep_alive: bool) -> Value {
         "keepAlive": keep_alive,
         "probeAgeMs": life.probe_age_ms,
         "probedAt": now_unix_ms(),
+        "hostBootAppearanceTheme": boot_theme,
+        "configAppearanceTheme": config_theme,
+        "shellOk": session.shell_ok,
+        "artOk": session.art_ok,
+        "artPending": session.art_pending,
+        "skinId": session.skin_id,
+        "phase": session.phase,
         "signals": {
             "process": life.process_running,
             "port": life.debug_port_open,
@@ -802,4 +801,48 @@ pub fn host_lifecycle_to_json(life: &HostLifecycle, keep_alive: bool) -> Value {
         },
         "engine": "native-rust",
     })
+}
+
+struct SessionArtFlags {
+    shell_ok: bool,
+    art_ok: bool,
+    art_pending: bool,
+    skin_id: Value,
+    phase: Value,
+}
+
+/// Read session art/shell flags from state.json without importing native
+/// (avoids host ↔ native module cycle).
+fn read_session_art_flags() -> SessionArtFlags {
+    let st = fs::read_to_string(state_root().join("state.json"))
+        .ok()
+        .and_then(|t| serde_json::from_str::<Value>(&t).ok());
+    let shell_ok = st
+        .as_ref()
+        .and_then(|s| s.get("shellOk").and_then(|v| v.as_bool()))
+        .unwrap_or(false);
+    let art_ok = st
+        .as_ref()
+        .and_then(|s| s.get("artOk").and_then(|v| v.as_bool()))
+        .unwrap_or(false);
+    // Only treat as pending when explicitly true AND art not already ok.
+    // Stale state with artPending=true + artOk=true must not show loading.
+    let raw_pending = st
+        .as_ref()
+        .and_then(|s| s.get("artPending").and_then(|v| v.as_bool()))
+        .unwrap_or(false);
+    let art_pending = raw_pending && !art_ok;
+    SessionArtFlags {
+        shell_ok,
+        art_ok,
+        art_pending,
+        skin_id: st
+            .as_ref()
+            .and_then(|s| s.get("skinId").cloned())
+            .unwrap_or(Value::Null),
+        phase: st
+            .as_ref()
+            .and_then(|s| s.get("phase").cloned())
+            .unwrap_or(Value::Null),
+    }
 }

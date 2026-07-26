@@ -21,9 +21,11 @@ export const MAX_IMAGE_PIXELS = 50_000_000;
 export const MAX_ART_BYTES = 16 * 1024 * 1024;
 /**
  * Soft advisory target for list previews / inspect hints only — not a hard limit.
- * High-fidelity skins may exceed this; use assets/screenshot.* for UI thumbnails.
+ * High-fidelity wallpapers are first-class up to MAX_ART_BYTES; use
+ * assets/screenshot.* for UI thumbnails when art is large.
+ * Raised from 1.5 MB so multi-MB backgrounds are not treated as "should compress".
  */
-export const RECOMMENDED_ART_BYTES = 1_500_000;
+export const RECOMMENDED_ART_BYTES = 8 * 1024 * 1024;
 
 function uint16be(bytes, offset) {
   return bytes[offset] * 256 + bytes[offset + 1];
@@ -232,7 +234,7 @@ export function assertArtBytes(size, label = "Theme image") {
   }
   if (size > MAX_ART_BYTES) {
     throw new Error(
-      `${label} exceeds the ${MAX_ART_BYTES / 1024 / 1024} MB inject limit; compress to JPEG ≤ ${RECOMMENDED_ART_BYTES / 1024 / 1024} MB`
+      `${label} exceeds the ${MAX_ART_BYTES / 1024 / 1024} MB inject limit; please use PNG/JPEG/WebP ≤ ${MAX_ART_BYTES / 1024 / 1024} MB (high-quality originals are supported within this cap)`
     );
   }
 }

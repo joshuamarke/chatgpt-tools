@@ -317,6 +317,8 @@ function listSkins() {
     if (!fs.existsSync(dirRoot)) continue;
     for (const d of fs.readdirSync(dirRoot, { withFileTypes: true })) {
       if (!d.isDirectory()) continue;
+      // `_template` and other author scaffolding — not installable skins
+      if (d.name.startsWith(".") || d.name.startsWith("_")) continue;
       const skin = readSkinFromDir(path.join(dirRoot, d.name), source);
       if (skin?.id) map.set(skin.id, skin);
     }
@@ -330,12 +332,26 @@ function getSkin(id) {
   return skin;
 }
 
+/**
+ * art.mode: wallpaper | token-only | none
+ * - none → assets.art optional (pure style skin)
+ * - wallpaper / token-only → assets.art required
+ */
+function resolveArtModeFromManifest(manifest) {
+  const art = manifest?.art && typeof manifest.art === "object" ? manifest.art : {};
+  const themeArt =
+    manifest?.theme?.art && typeof manifest.theme.art === "object" ? manifest.theme.art : {};
+  const raw = String(themeArt.mode ?? art.mode ?? "wallpaper").trim().toLowerCase();
+  if (raw === "none" || raw === "token-only" || raw === "wallpaper") return raw;
+  return "wallpaper";
+}
+
 function validateSkinManifest(manifest, skinDir) {
   if (!manifest || typeof manifest !== "object") throw new Error("skin.json 无效");
   if (!manifest.id) throw new Error("skin.json 缺少 id");
   if (!manifest.name) throw new Error("skin.json 缺少 name");
-  if (!manifest.assets?.css || !manifest.assets?.art) {
-    throw new Error("skin.json 缺少 assets.css / art");
+  if (!manifest.assets?.css) {
+    throw new Error("skin.json 缺少 assets.css");
   }
   // v2: shared renderer-core only — per-skin inject scripts are not used
   if (!manifest.assets?.plugin) {
@@ -344,7 +360,19 @@ function validateSkinManifest(manifest, skinDir) {
   if (!manifest.markers?.rootClass || !manifest.markers?.styleId || !manifest.markers?.stateKey) {
     throw new Error("skin.json 缺少 markers 字段");
   }
-  const required = [manifest.assets.css, manifest.assets.art, manifest.assets.plugin];
+  const artMode = resolveArtModeFromManifest(manifest);
+  const needsArt = artMode !== "none";
+  const artRel =
+    typeof manifest.assets.art === "string" && manifest.assets.art.trim()
+      ? manifest.assets.art.trim()
+      : null;
+  if (needsArt && !artRel) {
+    throw new Error(
+      'skin.json 缺少 assets.art（纯样式皮肤请设 art.mode 为 "none"）'
+    );
+  }
+  const required = [manifest.assets.css, manifest.assets.plugin];
+  if (needsArt && artRel) required.push(artRel);
   for (const rel of required) {
     const abs = path.join(skinDir, rel);
     if (!fs.existsSync(abs)) throw new Error(`缺少资源文件：${rel}`);
@@ -361,18 +389,20 @@ function validateSkinManifest(manifest, skinDir) {
     if (e.message && e.message.includes("chromeHtml")) throw e;
     throw new Error(`plugin.json 无效：${e.message || e}`);
   }
-  const artAbs = path.join(skinDir, manifest.assets.art);
-  try {
-    const size = fs.statSync(artAbs).size;
-    if (size < 1) throw new Error("立绘文件为空");
-    if (size > MAX_ART_BYTES) {
-      throw new Error(
-        `立绘超过 ${MAX_ART_BYTES / 1024 / 1024} MB 注入上限，请压缩为 JPEG 后再导入`
-      );
+  if (needsArt && artRel) {
+    const artAbs = path.join(skinDir, artRel);
+    try {
+      const size = fs.statSync(artAbs).size;
+      if (size < 1) throw new Error("立绘文件为空");
+      if (size > MAX_ART_BYTES) {
+        throw new Error(
+          `立绘超过 ${MAX_ART_BYTES / 1024 / 1024} MB 注入上限；请使用 ≤ ${MAX_ART_BYTES / 1024 / 1024} MB 的 PNG/JPEG/WebP（上限内支持高质量原图）`
+        );
+      }
+    } catch (e) {
+      if (e.message && e.message.includes("注入上限")) throw e;
+      if (e.message && e.message.includes("为空")) throw e;
     }
-  } catch (e) {
-    if (e.message && e.message.includes("注入上限")) throw e;
-    if (e.message && e.message.includes("为空")) throw e;
   }
   return true;
 }
@@ -746,9 +776,9 @@ function inspectSkinPackage(packagePath) {
       const artBytes = fs.statSync(artPath).size;
       if (artBytes > MAX_ART_BYTES) {
         risks.push(`立绘超过 ${MAX_ART_BYTES / 1024 / 1024} MB 注入上限`);
-      } else if (artBytes > 1_500_000) {
+      } else if (artBytes > 8 * 1024 * 1024) {
         risks.push(
-          "立绘较大（>1.5MB）：引擎支持高质量原图，但 shell 后贴图会更慢；请为列表提供 assets/screenshot"
+          "立绘较大（>8MB）：引擎支持高质量原图，但 shell 后贴图会更慢；请为列表提供 assets/screenshot"
         );
       }
     }
@@ -888,13 +918,14 @@ function createWallpaperSkin({
   taskMode = "auto",
 } = {}) {
   ensureStateDir();
+  if (!baseSkinId) throw new Error("请选择目标皮肤模板");
   const base = getSkin(baseSkinId);
   if (!imagePath || !fs.existsSync(imagePath)) throw new Error("请选择一张壁纸");
   const stat = fs.statSync(imagePath);
-  if (!stat.isFile() || stat.size < 1 || stat.size > 50 * 1024 * 1024) {
-    throw new Error("壁纸必须小于 50 MB");
+  if (!stat.isFile() || stat.size < 1) {
+    throw new Error("请选择有效的壁纸文件");
   }
-  // Inject path still enforces 16 MB; warn via hard fail if over inject cap after copy
+  // Hard cap aligned with inject path (MAX_ART_BYTES = 16 MB)
   const ext = path.extname(imagePath).toLowerCase();
   const mime = {
     ".png": "image/png",
@@ -905,15 +936,15 @@ function createWallpaperSkin({
   if (!mime) throw new Error("仅支持 PNG、JPEG 或 WebP 壁纸");
   if (stat.size > MAX_ART_BYTES) {
     throw new Error(
-      `壁纸超过 ${MAX_ART_BYTES / 1024 / 1024} MB 注入硬上限；请压缩后再导入（高质量原图在上限内可用）`
+      `壁纸必须不超过 ${MAX_ART_BYTES / 1024 / 1024} MB（当前 ${(stat.size / 1024 / 1024).toFixed(1)} MB）`
     );
   }
   const safeName =
-    String(name || `${base.name} · 壁纸版`).trim().slice(0, 80) || `${base.name} · 壁纸版`;
-  let id = safeSkinId(`${base.id}-${safeName}`) || `wallpaper-${Date.now()}`;
-  if (id === base.id) id = `${base.id}-wallpaper-${Date.now()}`;
+    String(name || `${base.name} · 自定义`).trim().slice(0, 80) || `${base.name} · 自定义`;
+  let id = safeSkinId(`${base.id}-${safeName}`) || `custom-${Date.now()}`;
+  if (id === base.id) id = `${base.id}-custom-${Date.now()}`;
   const targetDir = path.join(USER_SKINS_DIR, id);
-  if (fs.existsSync(targetDir)) throw new Error(`主题「${safeName}」已存在，请换一个名称`);
+  if (fs.existsSync(targetDir)) throw new Error(`皮肤「${safeName}」已存在，请换一个名称`);
   const validPosition = /^(left|center|right)(?:\s+(top|center|bottom))?$/.test(position)
     ? position
     : "right center";
@@ -952,33 +983,59 @@ function createWallpaperSkin({
     manifest.id = id;
     manifest.name = safeName;
     manifest.nameEn = safeName;
-    manifest.description = "自定义壁纸主题，可自由调整颜色、字体与自适应构图。";
+    manifest.description = `基于「${base.name}」模板的自定义皮肤，可调整壁纸、颜色、字体与自适应构图。`;
     manifest.version = String(manifest.version || "2.0.0");
-    manifest.tags = [...new Set([...(manifest.tags || []), "自定义壁纸", "自适应"])];
+    manifest.tags = [...new Set([...(manifest.tags || []), "自定义皮肤", "自适应"])];
+    // Preserve template categories when present; otherwise land in art (custom designs)
+    const baseCats = Array.isArray(manifest.categories)
+      ? manifest.categories.map((c) => String(c || "").trim()).filter(Boolean)
+      : [];
+    manifest.categories = baseCats.length ? [...new Set(baseCats)] : ["art"];
     manifest.assets.art = artRel;
     manifest.assets.artMime = mime;
     if (!manifest.assets.plugin) manifest.assets.plugin = "assets/plugin.json";
-    manifest.appearance = appearanceChoice;
+    // Preserve template appearance unless user explicitly chose light/dark
+    if (appearanceChoice !== "auto") {
+      manifest.appearance = appearanceChoice;
+    } else if (!manifest.appearance) {
+      manifest.appearance = "auto";
+    }
+    // Merge art layout onto template defaults; position select drives focusX
+    const baseArt = manifest.art && typeof manifest.art === "object" ? manifest.art : {};
+    const resolvedSafeArea =
+      safeAreaChoice !== "auto"
+        ? safeAreaChoice
+        : posX === "left"
+          ? "right"
+          : posX === "right"
+            ? "left"
+            : baseArt.safeArea || "center";
+    const resolvedTaskMode =
+      taskModeChoice !== "auto" ? taskModeChoice : baseArt.taskMode || "auto";
     manifest.art = {
       focusX: inferredFocusX,
-      focusY: inferredFocusY,
-      safeArea: safeAreaChoice,
-      taskMode: taskModeChoice,
+      focusY:
+        focusY != null && Number.isFinite(Number(focusY))
+          ? inferredFocusY
+          : baseArt.focusY ?? inferredFocusY,
+      safeArea: resolvedSafeArea,
+      taskMode: resolvedTaskMode,
+      fit: validFit,
+      position: validPosition,
     };
-    manifest.accent = /^#[0-9a-f]{6}$/i.test(String(accent)) ? String(accent) : manifest.accent;
-    // Desktop chrome: do not force light — follow auto unless user chose light/dark tokens
+    if (/^#[0-9a-f]{6}$/i.test(String(accent))) {
+      manifest.accent = String(accent);
+    }
+    // Desktop chrome: keep template tokens; only force when user chose light/dark
     if (!manifest.desktopTheme) manifest.desktopTheme = {};
     if (appearanceChoice === "dark") {
       manifest.desktopTheme.appearanceTheme = "dark";
     } else if (appearanceChoice === "light") {
       manifest.desktopTheme.appearanceTheme = "light";
-    } else {
-      // leave or set light chrome tokens only; host appearance can stay user preference
-      if (!manifest.desktopTheme.appearanceTheme) {
-        manifest.desktopTheme.appearanceTheme = "light";
-      }
     }
+    // else: leave template desktopTheme.appearanceTheme untouched
     const root = manifest.markers.rootClass;
+    const artVar = manifest.markers.artVar || "--skins-art";
     const cssPath = path.join(tmp, manifest.assets.css);
     const css = fs.readFileSync(cssPath, "utf8");
     const hex = (value, fallback) =>
@@ -993,48 +1050,61 @@ function createWallpaperSkin({
       mono: '"SF Mono", "Cascadia Code", monospace',
     };
     const fontStack = fonts[font] || fonts.system;
+    // Designer overlay: token + fit/position only.
+    // Do NOT repaint main.main-surface with cover art — that breaks template
+    // full-window wallpaper (framework paints body; skins like jiuyi own main).
     const customCss = `
 
-/* Wallpaper Designer: user-authored visual settings. */
+/* Custom Skin Designer: overrides on top of template «${base.id}». */
 html.${root} {
-  --designer-accent: ${hex(accent, "#8b7cff")};
+  --designer-accent: ${hex(accent, manifest.accent || "#8b7cff")};
   --designer-bg: ${hex(background, "#f7f8fc")};
   --designer-text: ${hex(text, "#202536")};
   --designer-panel: ${hex(panel, "#ffffff")};
   --designer-panel-alpha: ${safeOpacity / 100};
   --designer-radius: ${safeRadius}px;
+  --designer-overlay: ${safeOverlay / 100};
+  --skins-art-position: ${validPosition};
+  --skins-accent: var(--designer-accent);
+  --skins-text: var(--designer-text);
+  --skins-canvas: var(--designer-bg);
+  --skins-surface-raised: color-mix(in srgb, var(--designer-panel) calc(var(--designer-panel-alpha) * 100%), transparent);
 }
 html.${root} body {
   color: var(--designer-text) !important;
   font-family: ${fontStack} !important;
   background-color: var(--designer-bg) !important;
+  background-size: ${validFit} !important;
+  background-position: var(--skins-art-position, ${validPosition}) !important;
+  background-repeat: no-repeat !important;
 }
+/* Dim layer over wallpaper without replacing template layout */
 html.${root} body::after {
   content: "";
   position: fixed;
   inset: 0;
-  z-index: -1;
+  z-index: 0;
   pointer-events: none;
   background: rgba(0,0,0,${safeOverlay / 100}) !important;
 }
+/* Soften panels; keep template background-image / framework wide-art rules */
 html.${root} main.main-surface {
-  background-color: color-mix(in srgb, var(--designer-panel) calc(var(--designer-panel-alpha) * 100%), transparent) !important;
   border-radius: var(--designer-radius) !important;
-  background-image: linear-gradient(rgba(0,0,0,${safeOverlay / 100}), rgba(0,0,0,${safeOverlay / 100})), var(${manifest.markers.artVar}) !important;
-  background-position: var(--dream-art-position, ${validPosition}) !important;
+}
+html.${root}.skins-art-wide main.main-surface {
+  background-color: color-mix(in srgb, var(--designer-panel) calc(var(--designer-panel-alpha) * 100%), transparent) !important;
+}
+html.${root}.skins-art-standard main.main-surface {
+  background-color: color-mix(in srgb, var(--designer-panel) calc(var(--designer-panel-alpha) * 100%), transparent) !important;
   background-size: ${validFit} !important;
+  background-position: var(--skins-art-position, ${validPosition}) !important;
   background-repeat: no-repeat !important;
 }
 html.${root} button, html.${root} [role="button"] { border-radius: var(--designer-radius) !important; }
 html.${root} a, html.${root} [data-state="active"], html.${root} [aria-current="page"] {
   color: var(--designer-accent) !important;
 }
-html.${root} .${manifest.markers.homeClass} > div:first-child > div:first-child > div:first-child {
-  background-image: linear-gradient(rgba(0,0,0,${safeOverlay / 100}), rgba(0,0,0,${safeOverlay / 100})), var(${manifest.markers.artVar}) !important;
-  background-position: var(--dream-art-position, ${validPosition}) !important;
-  background-size: ${validFit} !important;
-  background-repeat: no-repeat !important;
-}
+/* Runtime injects art via ${artVar} (and --skins-art alias). */
 `;
     fs.writeFileSync(cssPath, `${css}${customCss}`);
     // Ensure plugin.json exists (copy from base or minimal)
@@ -1045,7 +1115,7 @@ html.${root} .${manifest.markers.homeClass} > div:first-child > div:first-child 
         JSON.stringify(
           {
             version: "2.0.0",
-            chromeHtml: `<div class="skin-brand"><b>${safeName.replace(/[<>&]/g, "")}</b><small>Custom Wallpaper</small></div>`,
+            chromeHtml: `<div class="skin-brand"><b>${safeName.replace(/[<>&]/g, "")}</b><small>自定义皮肤 · ${String(base.name || base.id).replace(/[<>&]/g, "")}</small></div>`,
             skipAnalysis: false,
           },
           null,
@@ -2293,6 +2363,7 @@ async function getStatus() {
         nameEn: s.nameEn,
         description: s.description,
         tags: s.tags,
+        categories: Array.isArray(s.categories) ? s.categories : [],
         previewGradient: s.previewGradient,
         accent: s.accent,
         active: Boolean(

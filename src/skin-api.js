@@ -62,6 +62,11 @@
       invoke("resume", {
         restart: opts.restart === true,
       }),
+    /**
+     * Launch ChatGPT when offline.
+     * Re-applies last session skin if present; otherwise cold-starts host only.
+     */
+    startHost: () => invoke("start_host"),
     openPath: (p) => invoke("open_path", { target: p }),
     openExternal: (url) => invoke("open_external", { url }),
     exportSkin: (skinId) => invoke("export_skin", { skinId }),
@@ -74,6 +79,19 @@
     clearAppPath: () => invoke("clear_app_path"),
     enginePaths: () => invoke("engine_paths"),
     engineVersion: () => invoke("engine_version"),
+    /**
+     * Local environment probe (ChatGPT/Codex desktop, Codex CLI, Grok Build, npm/node).
+     * @param {{ force?: boolean }} [opts]
+     */
+    envCheck: (opts = {}) =>
+      invoke("env_check", { force: opts.force === true }),
+    /**
+     * Open the OS default terminal and run an allow-listed npm install command.
+     * Windows: cmd /K via start; macOS: Terminal.app via osascript.
+     * @param {string} command
+     */
+    openInstallTerminal: (command) =>
+      invoke("open_install_terminal", { command: String(command || "") }),
     /** Open or focus the independent Skin DevTools window. */
     openDevtools: () => invoke("open_devtools"),
 
@@ -93,5 +111,24 @@
       invoke("inspect_select_node", { nodeId: Number(nodeId) }),
     inspectHighlight: (nodeId) =>
       invoke("inspect_highlight", { nodeId: Number(nodeId) }),
+
+    // ── Cloud CDN (catalog / announcements / secure download — Rust only) ──
+    cloudStatus: (opts = {}) =>
+      invoke("cloud_status", { force: opts.force === true }),
+    /** Soft CDN sync (TTL + disk cache). force:true bypasses soft TTL. */
+    cloudRefresh: (opts = {}) =>
+      invoke("cloud_refresh", { force: opts.force === true }),
+    cloudAnnouncements: (opts = {}) =>
+      invoke("cloud_announcements", { refresh: opts.refresh === true }),
+    cloudMarkAnnouncementRead: (id) =>
+      invoke("cloud_mark_announcement_read", { id }),
+    /** Download by catalog skin id only — never pass arbitrary URLs. */
+    cloudDownloadSkin: (skinId) =>
+      invoke("cloud_download_skin", { skinId }),
+    cloudCheckUpdate: () => invoke("cloud_check_update"),
+    cloudClearSkinCache: (skinId) =>
+      invoke("cloud_clear_skin_cache", {
+        skinId: skinId == null || skinId === "" ? null : String(skinId),
+      }),
   };
 })();

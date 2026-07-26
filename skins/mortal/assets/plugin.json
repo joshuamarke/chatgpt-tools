@@ -1,5 +1,5 @@
 {
-  "version": "2.0.0",
-  "chromeHtml": "<div class=\"mortal-brand\"><span class=\"mortal-seal\">仙</span><span><b>凡人修仙专属皮肤</b><small>Codex · 仙风翠玉</small></span></div>\n<div class=\"mortal-signature\">御剑乘风 · 乾坤道法</div>\n<div class=\"mortal-clouds\"><i></i><i></i><i></i><i></i><i></i><i></i></div>\n<div class=\"mortal-ornament\"><span>☯</span>修真<span>☯</span>问道<span>☯</span></div>\n<div class=\"mortal-scroll\"></div>",
+  "version": "3.1.0",
+  "chromeHtml": "<div class=\"mortal-brand\"><span class=\"mortal-seal\">婉</span><span><b>南宫婉 · 凡尘渡</b><small>一念成道 · 一行成诗</small></span></div>\n<div class=\"mortal-mists\"><i></i><i></i><i></i><i></i><i></i><i></i></div>",
   "skipAnalysis": false
 }

@@ -13,7 +13,9 @@
  *      plugins / scheduled / PR share one continuous surface)
  *   2) Native-control defaults (header color/legibility, pointer-events on
  *      real buttons; chrome decorations pointer-events: none by default)
- *   3) Suggestion cards follow theme text tokens by default
+ *   3) Suggestion CARD vs LIST: separate tokens; never bare-button under
+ *      home-suggestions. LIST has NO engine defaults (host-native until skin
+ *      sets --skins-suggest-list-*); CARD has readable baseline + --skins-suggest-card-*
  *   4) Single composer readability surface (no double native gradients)
  *
  * Personalization (skins/<id>/assets/*.css + plugin.json) is free-form:
@@ -23,48 +25,128 @@
  *     want to keep native controls / suggestions / full-window wallpaper intact
  *
  * Runtime class/vars (renderer-core):
- *   dream-art-wide | dream-art-standard
- *   dream-theme-light | dream-theme-dark
- *   dream-task-ambient | dream-task-banner | dream-task-off
- *   dream-safe-* , dream-focus-*
- *   --dream-art , --dream-art-position , --dream-accent , --dream-text , …
+ *   skins-art-wide | skins-art-standard | skins-art-none
+ *   skins-theme-light | skins-theme-dark
+ *   skins-task-ambient | skins-task-banner | skins-task-off
+ *   skins-safe-* , skins-focus-*
+ *   --skins-art , --skins-art-position , --skins-accent , --skins-text , …
+ *   data-skins-art-mode = wallpaper | token-only | none
+ *   data-skins-art-paint = body | none | custom
+ *     body   — framework paints full-window wallpaper on body (default)
+ *     none   — pure style, no image token
+ *     custom — engine only sets --skins-art; skin paints main/chrome/any selector
+ *
+ * Host element names (do not invent hashes): engine/runtime/selectors.json
+ * Skin author map: docs/development/create-skin.md · skins/_template/
  */
 
-/* ---- Shared readability tokens (skins override via --dream-* on :root) ---- */
-html:is(.dream-art-wide, .dream-art-standard) {
-  --cg-immersive-edge: color-mix(in srgb, var(--dream-canvas, #f7f8fc) 46%, transparent);
-  --cg-immersive-mid: color-mix(in srgb, var(--dream-canvas, #f7f8fc) 28%, transparent);
-  --cg-immersive-far: color-mix(in srgb, var(--dream-canvas, #f7f8fc) 14%, transparent);
-  --cg-immersive-sidebar: color-mix(in srgb, var(--dream-sidebar, #f0f1f6) 50%, transparent);
-  --cg-task-immersive-sidebar: color-mix(in srgb, var(--dream-sidebar, #f0f1f6) 72%, transparent);
-  --cg-task-immersive-edge: color-mix(in srgb, var(--dream-canvas, #f7f8fc) 86%, transparent);
-  --cg-task-immersive-mid: color-mix(in srgb, var(--dream-canvas, #f7f8fc) 78%, transparent);
-  --cg-task-immersive-far: color-mix(in srgb, var(--dream-canvas, #f7f8fc) 66%, transparent);
+/* ---- Shared readability tokens (skins override via --skins-* on :root) ---- */
+html:is(.skins-art-wide, .skins-art-standard) {
+  /* Solid primary buttons (创建 / send): always light ink on filled bg */
+  --cg-primary-button-ink: #ffffff;
+  --cg-immersive-edge: color-mix(in srgb, var(--skins-canvas, #f7f8fc) 46%, transparent);
+  --cg-immersive-mid: color-mix(in srgb, var(--skins-canvas, #f7f8fc) 28%, transparent);
+  --cg-immersive-far: color-mix(in srgb, var(--skins-canvas, #f7f8fc) 14%, transparent);
+  --cg-immersive-sidebar: color-mix(in srgb, var(--skins-sidebar, #f0f1f6) 50%, transparent);
+  --cg-task-immersive-sidebar: color-mix(in srgb, var(--skins-sidebar, #f0f1f6) 72%, transparent);
+  --cg-task-immersive-edge: color-mix(in srgb, var(--skins-canvas, #f7f8fc) 86%, transparent);
+  --cg-task-immersive-mid: color-mix(in srgb, var(--skins-canvas, #f7f8fc) 78%, transparent);
+  --cg-task-immersive-far: color-mix(in srgb, var(--skins-canvas, #f7f8fc) 66%, transparent);
   --cg-immersive-composer: color-mix(
     in srgb,
-    var(--dream-surface-raised, #ffffff) 88%,
-    var(--dream-accent, #8b7cff) 4%
+    var(--skins-surface-raised, #ffffff) 88%,
+    var(--skins-accent, #8b7cff) 4%
   );
-  --cg-immersive-line: color-mix(in srgb, var(--dream-line, #c8cad4) 76%, transparent);
-  --cg-text: var(--dream-text, var(--dream-ink, #202536));
-  --cg-surface-raised: var(--dream-surface-raised, #ffffff);
+  --cg-immersive-line: color-mix(in srgb, var(--skins-line, #c8cad4) 76%, transparent);
+  --cg-text: var(--skins-text, var(--skins-ink, #202536));
+  --cg-surface-raised: var(--skins-surface-raised, #ffffff);
+
+  /*
+   * Home suggestions — two modes, two token families (never share names):
+   *   CARD  --skins-suggest-card-*   (engine sets readable defaults below)
+   *   LIST  --skins-suggest-list-*   (engine does NOT set defaults; host-native
+   *                                  until the skin defines them on :root)
+   * Host: section.group/home-suggestions holds both tile buttons and expanded
+   * list rows (button.group/home-suggestion-list-item — select-like menu rows).
+   */
+  --skins-suggest-card-color: var(--cg-text);
+  --skins-suggest-card-bg: color-mix(in srgb, var(--cg-surface-raised) 28%, transparent);
+  --skins-suggest-card-radius: 14px;
+  --skins-suggest-card-border: var(--cg-immersive-line);
+  --skins-suggest-card-shadow:
+    0 8px 22px color-mix(in srgb, var(--skins-canvas, #f7f8fc) 18%, transparent),
+    inset 0 0 0 1px var(--skins-suggest-card-border);
+  /* LIST tokens: intentionally unset here. Documented names for skin authors:
+   *   --skins-suggest-list-color
+   *   --skins-suggest-list-color-hover
+   *   --skins-suggest-list-bg
+   *   --skins-suggest-list-bg-hover
+   *   --skins-suggest-list-radius
+   *   --skins-suggest-list-panel-bg
+   *   --skins-suggest-list-panel-border
+   *   --skins-suggest-list-panel-radius
+   *   --skins-suggest-list-panel-padding
+   *   --skins-suggest-list-panel-shadow
+   */
 }
 
-html.dream-theme-dark:is(.dream-art-wide, .dream-art-standard) {
-  --cg-immersive-edge: color-mix(in srgb, var(--dream-canvas, #1a1c24) 43%, transparent);
-  --cg-immersive-mid: color-mix(in srgb, var(--dream-canvas, #1a1c24) 27%, transparent);
-  --cg-immersive-far: color-mix(in srgb, var(--dream-canvas, #1a1c24) 16%, transparent);
-  --cg-immersive-sidebar: color-mix(in srgb, var(--dream-sidebar, #12141a) 48%, transparent);
-  --cg-task-immersive-sidebar: color-mix(in srgb, var(--dream-sidebar, #12141a) 70%, transparent);
-  --cg-task-immersive-edge: color-mix(in srgb, var(--dream-canvas, #1a1c24) 82%, transparent);
-  --cg-task-immersive-mid: color-mix(in srgb, var(--dream-canvas, #1a1c24) 74%, transparent);
-  --cg-task-immersive-far: color-mix(in srgb, var(--dream-canvas, #1a1c24) 60%, transparent);
+html.skins-theme-dark:is(.skins-art-wide, .skins-art-standard) {
+  --cg-immersive-edge: color-mix(in srgb, var(--skins-canvas, #1a1c24) 43%, transparent);
+  --cg-immersive-mid: color-mix(in srgb, var(--skins-canvas, #1a1c24) 27%, transparent);
+  --cg-immersive-far: color-mix(in srgb, var(--skins-canvas, #1a1c24) 16%, transparent);
+  --cg-immersive-sidebar: color-mix(in srgb, var(--skins-sidebar, #12141a) 48%, transparent);
+  --cg-task-immersive-sidebar: color-mix(in srgb, var(--skins-sidebar, #12141a) 70%, transparent);
+  --cg-task-immersive-edge: color-mix(in srgb, var(--skins-canvas, #1a1c24) 82%, transparent);
+  --cg-task-immersive-mid: color-mix(in srgb, var(--skins-canvas, #1a1c24) 74%, transparent);
+  --cg-task-immersive-far: color-mix(in srgb, var(--skins-canvas, #1a1c24) 60%, transparent);
   --cg-immersive-composer: color-mix(
     in srgb,
-    var(--dream-surface-raised, #252830) 90%,
-    var(--dream-accent, #8b7cff) 5%
+    var(--skins-surface-raised, #252830) 90%,
+    var(--skins-accent, #8b7cff) 5%
   );
-  --cg-text: var(--dream-text, #eef0f6);
+  --cg-text: var(--skins-text, #eef0f6);
+}
+
+/* --------------------------------------------------------------------------
+ * Native dropdown / popover tokens (defense in depth for appearance pin)
+ * Codex resolves --color-token-dropdown-* from its own appearanceTheme.
+ * When a fixed dark/light skin runs against a mismatched system shell, remap
+ * the dropdown family onto skin surface tokens so popovers stay readable.
+ * Fixed skins should also pin config.toml appearanceTheme (engine theme.rs).
+ * -------------------------------------------------------------------------- */
+html:is(.skins-art-wide, .skins-art-standard, .skins-theme-light, .skins-theme-dark) {
+  --color-token-dropdown-background: var(
+    --skins-surface-raised,
+    var(--skins-sidebar, var(--cg-surface-raised, #ffffff))
+  );
+  --color-token-dropdown-background-hover: color-mix(
+    in srgb,
+    var(--skins-surface-raised, #ffffff) 88%,
+    var(--skins-accent, #8b7cff) 12%
+  );
+  --color-token-dropdown-foreground: var(--skins-text, var(--cg-text, #202536));
+  --color-token-dropdown-border: color-mix(
+    in srgb,
+    var(--skins-line, #c8cad4) 70%,
+    transparent
+  );
+}
+html.skins-theme-dark {
+  --color-token-dropdown-background: var(
+    --skins-surface-raised,
+    var(--skins-sidebar, #252830)
+  );
+  --color-token-dropdown-background-hover: color-mix(
+    in srgb,
+    var(--skins-surface-raised, #252830) 88%,
+    var(--skins-accent, #8b7cff) 12%
+  );
+  --color-token-dropdown-foreground: var(--skins-text, #eef0f6);
+  --color-token-dropdown-border: color-mix(
+    in srgb,
+    var(--skins-line, #3a3f4d) 70%,
+    transparent
+  );
 }
 
 /* ==========================================================================
@@ -73,100 +155,188 @@ html.dream-theme-dark:is(.dream-art-wide, .dream-art-standard) {
  * header position/top/z-index so side-panel close keeps working.
  * ========================================================================== */
 
-html:is(.dream-art-wide, .dream-art-standard) main.main-surface > header.app-header-tint {
+html:is(.skins-art-wide, .skins-art-standard) main.main-surface > header.app-header-tint {
   /* position / top / z-index not set here — leave native fixed header geometry */
   color: var(--cg-text) !important;
 }
 
-html:is(.dream-art-wide, .dream-art-standard) main.main-surface > header.app-header-tint button,
-html:is(.dream-art-wide, .dream-art-standard) main.main-surface > header.app-header-tint a,
-html:is(.dream-art-wide, .dream-art-standard) main.main-surface > header.app-header-tint [role="button"],
-html:is(.dream-art-wide, .dream-art-standard) main.main-surface > header.app-header-tint [data-state] {
+html:is(.skins-art-wide, .skins-art-standard) main.main-surface > header.app-header-tint button,
+html:is(.skins-art-wide, .skins-art-standard) main.main-surface > header.app-header-tint a,
+html:is(.skins-art-wide, .skins-art-standard) main.main-surface > header.app-header-tint [role="button"],
+html:is(.skins-art-wide, .skins-art-standard) main.main-surface > header.app-header-tint [data-state] {
   pointer-events: auto !important;
 }
 
 /* Sidebar nav stays clickable even when immersed */
-html:is(.dream-art-wide, .dream-art-standard) aside.app-shell-left-panel button,
-html:is(.dream-art-wide, .dream-art-standard) aside.app-shell-left-panel a,
-html:is(.dream-art-wide, .dream-art-standard) aside.app-shell-left-panel [role="button"] {
+html:is(.skins-art-wide, .skins-art-standard) aside.app-shell-left-panel button,
+html:is(.skins-art-wide, .skins-art-standard) aside.app-shell-left-panel a,
+html:is(.skins-art-wide, .skins-art-standard) aside.app-shell-left-panel [role="button"] {
   pointer-events: auto !important;
 }
 
 /* Skin chrome decorations must never capture clicks (core also sets this; reinforce). */
-html:is(.dream-art-wide, .dream-art-standard) [id$="-skin-chrome"],
-html:is(.dream-art-wide, .dream-art-standard) [id*="-skin-chrome"] {
+html:is(.skins-art-wide, .skins-art-standard) [id$="-skin-chrome"],
+html:is(.skins-art-wide, .skins-art-standard) [id*="-skin-chrome"] {
   pointer-events: none !important;
 }
 
 /* Dark application menu bar (outside main-surface) */
-html.dream-theme-dark [class~="group/application-menu-top-bar"] {
+html.skins-theme-dark [class~="group/application-menu-top-bar"] {
   color: var(--cg-text) !important;
-  background: color-mix(in srgb, var(--dream-sidebar, #12141a) 90%, transparent) !important;
+  background: color-mix(in srgb, var(--skins-sidebar, #12141a) 90%, transparent) !important;
   border-bottom: 1px solid var(--cg-immersive-line) !important;
 }
 
-html.dream-theme-dark [class~="group/application-menu-top-bar"] button,
-html.dream-theme-dark [class~="group/application-menu-top-bar"] [role="button"] {
+html.skins-theme-dark [class~="group/application-menu-top-bar"] button,
+html.skins-theme-dark [class~="group/application-menu-top-bar"] [role="button"] {
   color: inherit !important;
   pointer-events: auto !important;
 }
 
 /* ==========================================================================
- * SUGGESTION CARDS (all aspect modes) — framework baseline text tokens
- * Skins may restyle cards; prefer var(--dream-text) / --cg-text for contrast.
+ * HOME SUGGESTIONS — CARD vs LIST (all aspect modes)
+ *
+ * Host DOM (Codex) — same section, two modes (list rows are select-like):
+ *   section.group/home-suggestions
+ *     · CARD tiles:  button without home-suggestion-list-item
+ *     · LIST rows:   button.group/home-suggestion-list-item
+ *
+ * Framework:
+ *   · CARD: baseline readability + --skins-suggest-card-* (defaults set above)
+ *   · LIST: NO default paint/layout. Host-native until skin defines
+ *     --skins-suggest-list-* (opt-in rules below; unset var → declaration
+ *     invalid → ignored → host wins).
+ *   · Never style bare `button` under home-suggestions (poisons list rows).
  * ========================================================================== */
 
-html:is(.dream-art-wide, .dream-art-standard) .dream-home .group\/home-suggestions button,
-html:is(.dream-art-wide, .dream-art-standard) [class*="home-suggestions"] button,
-html:is(.dream-art-wide, .dream-art-standard) [class*="HomeSuggestions"] button {
-  color: var(--cg-text) !important;
+/* --- CARD tiles only --- */
+html:is(.skins-art-wide, .skins-art-standard)
+  [class*="home-suggestions"]
+  button:not([class*="home-suggestion-list-item"]),
+html:is(.skins-art-wide, .skins-art-standard)
+  [class*="HomeSuggestions"]
+  button:not([class*="home-suggestion-list-item"]),
+html:is(.skins-art-wide, .skins-art-standard)
+  main.main-surface[class*="home-shell"]
+  [class*="home-suggestions"]
+  button:not([class*="home-suggestion-list-item"]) {
+  color: var(--skins-suggest-card-color, var(--cg-text)) !important;
 }
 
-html:is(.dream-art-wide, .dream-art-standard) .dream-home .group\/home-suggestions button span,
-html:is(.dream-art-wide, .dream-art-standard) [class*="home-suggestions"] button span,
-html:is(.dream-art-wide, .dream-art-standard) .dream-home .group\/home-suggestions button p,
-html:is(.dream-art-wide, .dream-art-standard) [class*="home-suggestions"] button p {
+html:is(.skins-art-wide, .skins-art-standard)
+  [class*="home-suggestions"]
+  button:not([class*="home-suggestion-list-item"])
+  span,
+html:is(.skins-art-wide, .skins-art-standard)
+  [class*="home-suggestions"]
+  button:not([class*="home-suggestion-list-item"])
+  p,
+html:is(.skins-art-wide, .skins-art-standard)
+  main.main-surface[class*="home-shell"]
+  [class*="home-suggestions"]
+  button:not([class*="home-suggestion-list-item"])
+  span,
+html:is(.skins-art-wide, .skins-art-standard)
+  main.main-surface[class*="home-shell"]
+  [class*="home-suggestions"]
+  button:not([class*="home-suggestion-list-item"])
+  p {
   color: inherit !important;
+}
+
+/*
+ * --- LIST opt-in (select-like rows, not HTML <select>) ---
+ * Engine does NOT assign --skins-suggest-list-* defaults on :root.
+ * Each property is `var(--name) !important` with NO fallback:
+ *   skin unset  → invalid declaration → discarded → host native wins
+ *   skin set    → !important themed value
+ * Layout (flex/min-height/icon size/::after) stays host-native unless the
+ * skin writes its own rules; do not force list layout in the framework.
+ */
+html:is(.skins-art-wide, .skins-art-standard) .group\/home-suggestion-list-item,
+html:is(.skins-art-wide, .skins-art-standard) button.group\/home-suggestion-list-item,
+html:is(.skins-art-wide, .skins-art-standard)
+  [class*="home-suggestions"]
+  button[class*="home-suggestion-list-item"] {
+  color: var(--skins-suggest-list-color) !important;
+  background: var(--skins-suggest-list-bg) !important;
+  background-image: var(--skins-suggest-list-bg-image) !important;
+  border-radius: var(--skins-suggest-list-radius) !important;
+  border: var(--skins-suggest-list-border) !important;
+  box-shadow: var(--skins-suggest-list-shadow) !important;
+}
+
+html:is(.skins-art-wide, .skins-art-standard) .group\/home-suggestion-list-item:hover,
+html:is(.skins-art-wide, .skins-art-standard) button.group\/home-suggestion-list-item:hover,
+html:is(.skins-art-wide, .skins-art-standard)
+  [class*="home-suggestions"]
+  button[class*="home-suggestion-list-item"]:hover {
+  color: var(--skins-suggest-list-color-hover) !important;
+  background: var(--skins-suggest-list-bg-hover) !important;
+  background-image: var(--skins-suggest-list-bg-image-hover) !important;
+  box-shadow: var(--skins-suggest-list-shadow-hover) !important;
+}
+
+/* Expanded section panel — only properties whose list-panel tokens the skin set */
+html:is(.skins-art-wide, .skins-art-standard)
+  [class*="home-suggestions"]:has(.group\/home-suggestion-list-item),
+html:is(.skins-art-wide, .skins-art-standard)
+  [class*="home-suggestions"]:has([class*="home-suggestion-list-item"]) {
+  background: var(--skins-suggest-list-panel-bg) !important;
+  border: var(--skins-suggest-list-panel-border) !important;
+  border-radius: var(--skins-suggest-list-panel-radius) !important;
+  padding: var(--skins-suggest-list-panel-padding) !important;
+  box-shadow: var(--skins-suggest-list-panel-shadow) !important;
 }
 
 /* ==========================================================================
  * COMPOSER readability (all aspect modes)
  * ========================================================================== */
 
-html:is(.dream-art-wide, .dream-art-standard) .composer-surface-chrome {
+html:is(.skins-art-wide, .skins-art-standard) .composer-surface-chrome {
   color: var(--cg-text) !important;
 }
 
-html:is(.dream-art-wide, .dream-art-standard) .ProseMirror {
+html:is(.skins-art-wide, .skins-art-standard) .ProseMirror {
   color: var(--cg-text) !important;
-  caret-color: var(--dream-accent, currentColor) !important;
+  caret-color: var(--skins-accent, currentColor) !important;
 }
 
 /* ==========================================================================
- * FULL-WINDOW WALLPAPER (wide art / dream-art-wide) — framework baseline layout
- * Skins supply --dream-art + tokens and may refine; contract recommends one
+ * FULL-WINDOW WALLPAPER (wide art / skins-art-wide) — framework baseline layout
+ * Skins supply --skins-art + tokens and may refine; contract recommends one
  * continuous body wallpaper instead of per-panel cover crops.
+ *
+ * Gate: only when data-skins-art-paint="body" (default for art.mode=wallpaper).
+ * art.mode=token-only / paint=custom|none → engine does NOT paint body; skin
+ * may place var(--skins-art) on main / chrome / any selector.
  * ========================================================================== */
 
-html.dream-art-wide:has(main.main-surface.dream-home-shell) body,
-html.dream-art-wide:is(.dream-task-ambient, .dream-task-banner):has(main.main-surface:not(.dream-home-shell)) body {
-  background-color: var(--dream-canvas, #f7f8fc) !important;
-  background-image: var(--dream-art) !important;
-  background-position: var(--dream-art-position, 50% 50%) !important;
+/* Any skin's *-home-shell, or task routes without home shell — one body wallpaper */
+html.skins-art-wide[data-skins-art-paint="body"]:has(main.main-surface[class*="home-shell"]) body,
+html.skins-art-wide[data-skins-art-paint="body"]:is(.skins-task-ambient, .skins-task-banner):has(
+    main.main-surface:not([class*="home-shell"])
+  )
+  body {
+  background-color: var(--skins-canvas, #f7f8fc) !important;
+  background-image: var(--skins-art) !important;
+  background-position: var(--skins-art-position, 50% 50%) !important;
   background-size: cover !important;
   background-repeat: no-repeat !important;
   background-attachment: fixed !important;
 }
 
 /* Hide decorative body::before overlays skins may use in standard mode */
-html.dream-art-wide body::before {
+html.skins-art-wide[data-skins-art-paint="body"] body::before {
   opacity: 0 !important;
   background-image: none !important;
   content: none !important;
 }
 
-html.dream-art-wide:has(main.main-surface.dream-home-shell) aside.app-shell-left-panel,
-html.dream-art-wide:is(.dream-task-ambient, .dream-task-banner):has(main.main-surface:not(.dream-home-shell))
+html.skins-art-wide[data-skins-art-paint="body"]:has(main.main-surface[class*="home-shell"]) aside.app-shell-left-panel,
+html.skins-art-wide[data-skins-art-paint="body"]:is(.skins-task-ambient, .skins-task-banner):has(
+    main.main-surface:not([class*="home-shell"])
+  )
   aside.app-shell-left-panel {
   background: linear-gradient(90deg, var(--cg-immersive-sidebar), var(--cg-immersive-edge)) !important;
   border: 0 !important;
@@ -175,7 +345,9 @@ html.dream-art-wide:is(.dream-task-ambient, .dream-task-banner):has(main.main-su
   backdrop-filter: none !important;
 }
 
-html.dream-art-wide:is(.dream-task-ambient, .dream-task-banner):has(main.main-surface:not(.dream-home-shell))
+html.skins-art-wide[data-skins-art-paint="body"]:is(.skins-task-ambient, .skins-task-banner):has(
+    main.main-surface:not([class*="home-shell"])
+  )
   aside.app-shell-left-panel {
   background: linear-gradient(
     90deg,
@@ -185,12 +357,14 @@ html.dream-art-wide:is(.dream-task-ambient, .dream-task-banner):has(main.main-su
 }
 
 /* Sidebar collapse resize hot-zone: do not paint opaque strip into main */
-html.dream-art-wide aside.app-shell-left-panel::after {
+html.skins-art-wide[data-skins-art-paint="body"] aside.app-shell-left-panel::after {
   background: transparent !important;
 }
 
-html.dream-art-wide main.main-surface.dream-home-shell,
-html.dream-art-wide:is(.dream-task-ambient, .dream-task-banner) main.main-surface:not(.dream-home-shell) {
+/* Main paints scrim only — never a second full-bleed art crop (body owns wallpaper) */
+html.skins-art-wide[data-skins-art-paint="body"] main.main-surface[class*="home-shell"],
+html.skins-art-wide[data-skins-art-paint="body"]:is(.skins-task-ambient, .skins-task-banner)
+  main.main-surface:not([class*="home-shell"]) {
   background: linear-gradient(
     90deg,
     var(--cg-immersive-edge),
@@ -202,7 +376,8 @@ html.dream-art-wide:is(.dream-task-ambient, .dream-task-banner) main.main-surfac
   box-shadow: none !important;
 }
 
-html.dream-art-wide:is(.dream-task-ambient, .dream-task-banner) main.main-surface:not(.dream-home-shell) {
+html.skins-art-wide[data-skins-art-paint="body"]:is(.skins-task-ambient, .skins-task-banner)
+  main.main-surface:not([class*="home-shell"]) {
   background: linear-gradient(
     90deg,
     var(--cg-task-immersive-edge),
@@ -212,92 +387,131 @@ html.dream-art-wide:is(.dream-task-ambient, .dream-task-banner) main.main-surfac
 }
 
 /* Transparent continuous top bar over full-window art */
-html.dream-art-wide main.main-surface > header.app-header-tint {
+html.skins-art-wide main.main-surface > header.app-header-tint {
   background: transparent !important;
   border-bottom: 0 !important;
   box-shadow: none !important;
   backdrop-filter: none !important;
   text-shadow:
-    0 1px 2px color-mix(in srgb, var(--dream-canvas, #f7f8fc) 86%, transparent),
-    0 0 8px color-mix(in srgb, var(--dream-canvas, #f7f8fc) 58%, transparent) !important;
+    0 1px 2px color-mix(in srgb, var(--skins-canvas, #f7f8fc) 86%, transparent),
+    0 0 8px color-mix(in srgb, var(--skins-canvas, #f7f8fc) 58%, transparent) !important;
 }
 
-html.dream-art-wide main.main-surface > header.app-header-tint svg {
-  filter: drop-shadow(0 1px 2px color-mix(in srgb, var(--dream-canvas, #f7f8fc) 72%, transparent));
+html.skins-art-wide main.main-surface > header.app-header-tint svg {
+  filter: drop-shadow(0 1px 2px color-mix(in srgb, var(--skins-canvas, #f7f8fc) 72%, transparent));
 }
 
-html.dream-art-wide main.main-surface [role="main"] {
+html.skins-art-wide main.main-surface [role="main"] {
   background: transparent !important;
 }
 
-/* Home hero: no second cropped wallpaper panel */
-html.dream-art-wide main.main-surface.dream-home-shell
-  .dream-home > div:first-child > div:first-child > div:first-child {
+/* Home hero: no second cropped wallpaper panel under any skin's *-home */
+html.skins-art-wide main.main-surface[class*="home-shell"]
+  [class$="-home"] > div:first-child > div:first-child > div:first-child {
   border: 0 !important;
   border-radius: 0 !important;
   background: transparent !important;
   box-shadow: none !important;
 }
 
-html.dream-art-wide main.main-surface.dream-home-shell
-  .dream-home > div:first-child > div:first-child > div:first-child::before {
+html.skins-art-wide main.main-surface[class*="home-shell"]
+  [class$="-home"] > div:first-child > div:first-child > div:first-child::before {
   content: none !important;
 }
 
-/* Suggestion cards on immersive wallpaper (surface + text) */
-html.dream-art-wide main.main-surface.dream-home-shell .dream-home .group\/home-suggestions button,
-html.dream-art-wide main.main-surface.dream-home-shell [class*="home-suggestions"] button {
-  color: var(--cg-text) !important;
-  background: color-mix(in srgb, var(--cg-surface-raised) 58%, transparent) !important;
-  box-shadow:
-    0 8px 22px color-mix(in srgb, var(--dream-canvas, #f7f8fc) 18%, transparent),
-    inset 0 0 0 1px var(--cg-immersive-line) !important;
-  backdrop-filter: blur(8px) saturate(1.04) !important;
+/* Hero title remains readable on wallpaper even if skin homeClass is mid-remount */
+html.skins-art-wide main.main-surface[class*="home-shell"] [data-feature="game-source"] {
+  color: var(--cg-text, var(--skins-text, inherit)) !important;
 }
 
-/* Composer: one solid readability surface */
-html.dream-art-wide .composer-surface-chrome {
+/*
+ * Suggestion CARD tiles on immersive wallpaper (surface + text).
+ * Must exclude list-item rows — same pitfall as bare `button` under home-suggestions.
+ * No backdrop-filter: host cards are opaque/semi-opaque without blur; skins may override.
+ */
+html.skins-art-wide
+  main.main-surface[class*="home-shell"]
+  [class*="home-suggestions"]
+  button:not([class*="home-suggestion-list-item"]) {
+  color: var(--skins-suggest-card-color, var(--cg-text)) !important;
+  background: var(--skins-suggest-card-bg) !important;
+  border-radius: var(--skins-suggest-card-radius, 14px) !important;
+  box-shadow: var(--skins-suggest-card-shadow) !important;
+  backdrop-filter: none !important;
+}
+
+/*
+ * Header primary actions (创建 on 已安排/插件).
+ * Ink must stay light on solid primary fills — never use --skins-surface-raised
+ * (dark skins set that to a dark panel color, which made Create unreadable).
+ */
+html:is(.skins-art-wide, .skins-art-standard)
+  main.main-surface
+  > header.app-header-tint
+  button[class~="bg-token-foreground"] {
+  color: var(--cg-primary-button-ink, #ffffff) !important;
+  pointer-events: auto !important;
+}
+
+html:is(.skins-art-wide, .skins-art-standard)
+  main.main-surface
+  > header.app-header-tint
+  button[class~="bg-token-foreground"]
+  * {
+  color: inherit !important;
+}
+
+html:is(.skins-art-wide, .skins-art-standard)
+  main.main-surface
+  > header.app-header-tint
+  button[class~="bg-token-foreground"]
+  svg {
+  color: inherit !important;
+  opacity: 1 !important;
+}
+
+/* Composer: one solid readability surface; full host radius (not squared top) */
+html.skins-art-wide .composer-surface-chrome {
   color: var(--cg-text) !important;
   background: var(--cg-immersive-composer) !important;
   border: 0 !important;
+  border-radius: var(--composer-border-radius, 1.25rem) !important;
   box-shadow:
-    0 10px 30px color-mix(in srgb, var(--dream-canvas, #f7f8fc) 20%, transparent),
+    0 10px 30px color-mix(in srgb, var(--skins-canvas, #f7f8fc) 20%, transparent),
     inset 0 0 0 1px var(--cg-immersive-line) !important;
   backdrop-filter: none !important;
 }
 
-html.dream-art-wide .composer-surface-chrome::before {
+html.skins-art-wide .composer-surface-chrome::before {
   content: none !important;
 }
 
-/* Home utility bar + composer merge into one control */
-html:is(.dream-art-wide, .dream-art-standard) .dream-home-utility,
-html:is(.dream-art-wide, .dream-art-standard) [class*="homeUtilityBar"],
-html:is(.dream-art-wide, .dream-art-standard) [class*="_homeUtilityBar_"] {
+/*
+ * Home utility bar: independent surface. Do NOT square composer top corners —
+ * host keeps .composer-surface-chrome fully rounded even when project/utility sits above.
+ */
+/* Utility bar: host modules + any skin's *-home-utility marker */
+html:is(.skins-art-wide, .skins-art-standard) [class*="home-utility"],
+html:is(.skins-art-wide, .skins-art-standard) [class*="homeUtilityBar"],
+html:is(.skins-art-wide, .skins-art-standard) [class*="_homeUtilityBar_"] {
   border: 1px solid var(--cg-immersive-line) !important;
-  border-bottom: 0 !important;
-  border-radius: 18px 18px 0 0 !important;
+  border-radius: 18px !important;
   background: var(--cg-immersive-composer) !important;
   box-shadow: none !important;
 }
 
-html.dream-art-wide .dream-home:has(.dream-home-utility) .composer-surface-chrome,
-html.dream-art-wide .dream-home:has([class*="homeUtilityBar"]) .composer-surface-chrome {
-  border-radius: 0 0 18px 18px !important;
-}
-
 /* Plugins / scheduled / PR / search: clear opaque sticky route chrome only */
-html.dream-art-wide:is(.dream-task-ambient, .dream-task-banner)
-  main.main-surface:not(.dream-home-shell)
+html.skins-art-wide:is(.skins-task-ambient, .skins-task-banner)
+  main.main-surface:not([class*="home-shell"])
   div.sticky:has(input[type="text"]),
-html.dream-art-wide:is(.dream-task-ambient, .dream-task-banner)
-  main.main-surface:not(.dream-home-shell)
+html.skins-art-wide:is(.skins-task-ambient, .skins-task-banner)
+  main.main-surface:not([class*="home-shell"])
   div.sticky:has(input[type="text"])::after {
   background: transparent !important;
 }
 
-html.dream-art-wide:is(.dream-task-ambient, .dream-task-banner)
-  main.main-surface:not(.dream-home-shell)
+html.skins-art-wide:is(.skins-task-ambient, .skins-task-banner)
+  main.main-surface:not([class*="home-shell"])
   div.no-drag:has(> input[type="text"]) {
   background: var(--cg-immersive-composer) !important;
   border: 0 !important;
@@ -305,33 +519,33 @@ html.dream-art-wide:is(.dream-task-ambient, .dream-task-banner)
   backdrop-filter: none !important;
 }
 
-html.dream-art-wide:is(.dream-task-ambient, .dream-task-banner)
-  main.main-surface:not(.dream-home-shell)
+html.skins-art-wide:is(.skins-task-ambient, .skins-task-banner)
+  main.main-surface:not([class*="home-shell"])
   [class~="bg-token-main-surface-primary"][class~="h-full"][class~="w-full"] {
   background: transparent !important;
 }
 
 /* Kill native double fades that stack with theme surfaces */
-html.dream-art-wide main.main-surface .app-shell-main-content-frame {
+html.skins-art-wide main.main-surface .app-shell-main-content-frame {
   border-top: 0 !important;
 }
 
-html.dream-art-wide main.main-surface .app-shell-main-content-top-fade {
+html.skins-art-wide main.main-surface .app-shell-main-content-top-fade {
   display: none !important;
   background: transparent !important;
 }
 
-html.dream-art-wide main.main-surface
+html.skins-art-wide main.main-surface
   .thread-scroll-container
   .bg-gradient-to-t.from-token-main-surface-primary {
   background: transparent !important;
 }
 
 /* Task route residual solid panels */
-html.dream-art-wide:is(.dream-task-ambient, .dream-task-banner) .dream-task {
+html.skins-art-wide:is(.skins-task-ambient, .skins-task-banner) .skins-task {
   background: transparent !important;
 }
 
-html.dream-art-wide:is(.dream-task-ambient, .dream-task-banner) .dream-task::before {
+html.skins-art-wide:is(.skins-task-ambient, .skins-task-banner) .skins-task::before {
   content: none !important;
 }

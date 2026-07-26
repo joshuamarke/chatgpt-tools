@@ -1,20 +1,23 @@
 {
   "id": "mortal",
-  "name": "凡人修仙 · 银姬",
-  "nameEn": "Mortal Jade",
-  "description": "仙雾缭绕，翠玉描金，御剑乘风去，乾坤道法中",
+  "name": "凡人修仙 · 南宫婉",
+  "nameEn": "Mortal Jade · Nangong Wan",
+  "description": "紫霞仙雾全屏自适应；南宫婉紫衣立绘铺满窗口，半透明毛玻璃控件",
+  "categories": ["game", "art"],
   "tags": [
-    "修仙",
-    "翠玉",
-    "御剑",
-    "仙侠"
+    "仙侠",
+    "紫霞",
+    "南宫婉",
+    "浅色",
+    "Light",
+    "全屏"
   ],
-  "previewGradient": "linear-gradient(135deg, #edf7f2 0%, #10b981 50%, #fef08a 100%)",
-  "accent": "#10B981",
+  "previewGradient": "linear-gradient(135deg, #f3eef8 0%, #8b6fd4 45%, #f9d0e8 100%)",
+  "accent": "#8B6FD4",
   "port": 9337,
   "assets": {
     "css": "assets/mortal-skin.css",
-    "art": "assets/mortal-reference.jpg",
+    "art": "assets/mortal-bg.jpg",
     "artMime": "image/jpeg",
     "plugin": "assets/plugin.json"
   },
@@ -30,14 +33,14 @@
   "desktopTheme": {
     "appearanceTheme": "light",
     "appearanceLightCodeThemeId": "codex",
-    "appearanceLightChromeTheme": "{ accent = \"#10B981\", contrast = 62, fonts = { code = \"SF Mono\", ui = \"Kaiti SC\" }, ink = \"#0f2c20\", opaqueWindows = true, semanticColors = { diffAdded = \"#bbf7d0\", diffRemoved = \"#fecaca\", skill = \"#fbbf24\" }, surface = \"#edf7f2\" }"
+    "appearanceLightChromeTheme": "{ accent = \"#8B6FD4\", contrast = 60, fonts = { code = \"SF Mono\", ui = \"PingFang SC\" }, ink = \"#2a2040\", opaqueWindows = true, semanticColors = { diffAdded = \"#ddd6fe\", diffRemoved = \"#fecaca\", skill = \"#d4a017\" }, surface = \"#f3eef8\" }"
   },
-  "appearance": "auto",
+  "appearance": "light",
   "art": {
     "focusX": 0.72,
     "focusY": 0.45,
     "safeArea": "left",
     "taskMode": "ambient"
   },
-  "version": "2.0.0"
+  "version": "3.1.0"
 }

@@ -22,9 +22,47 @@ import {
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const CORE_PATH = path.join(here, "runtime", "renderer-core.js");
+const IMMERSIVE_CSS_PATH = path.join(here, "runtime", "immersive-skin.css");
 
 const payloadCache = new Map();
 const PAYLOAD_CACHE_MAX = 8;
+
+/** Path to framework baseline CSS (authors should not copy into skins). */
+export function immersiveContractPath() {
+  return IMMERSIVE_CSS_PATH;
+}
+
+/**
+ * Prepend framework baseline before skin personalization.
+ * Engine does not force-override author rules — later rules win at equal specificity.
+ */
+export function mergeSkinCss(baselineCss, skinCss) {
+  const base = typeof baselineCss === "string" ? baselineCss.trim() : "";
+  const skin = typeof skinCss === "string" ? skinCss.trim() : "";
+  const parts = [];
+  if (base) {
+    parts.push(
+      "/* ===== framework baseline (engine/runtime/immersive-skin.css) ===== */",
+      "/* Capability only — author-owned skin CSS follows; engine does not restrict. */",
+      base
+    );
+  }
+  if (skin) {
+    parts.push(
+      "/* ===== skin personalization (skins/<id>/assets) ===== */",
+      skin
+    );
+  }
+  return parts.join("\n\n");
+}
+
+async function loadImmersiveBaseline() {
+  try {
+    return await fs.readFile(IMMERSIVE_CSS_PATH, "utf8");
+  } catch {
+    return "";
+  }
+}
 
 /** Tokens replaced in renderer-core.js IIFE arguments (must use replaceAll). */
 const PLACEHOLDERS = [
@@ -40,7 +78,40 @@ const THEME_CHOICES = {
   appearance: new Set(["auto", "light", "dark"]),
   safeArea: new Set(["auto", "left", "right", "center", "none"]),
   taskMode: new Set(["auto", "ambient", "banner", "off"]),
+  /** wallpaper = inject + framework may paint body; token-only = inject vars only; none = no art */
+  artMode: new Set(["wallpaper", "token-only", "none"]),
+  /** body = immersive paints body; none/custom = skin paints (main/chrome/any selector) */
+  artPaint: new Set(["body", "none", "custom"]),
 };
+
+/**
+ * Resolve art.mode / art.paint from skin.json.
+ * Defaults keep legacy behaviour: mode=wallpaper, paint=body.
+ * - none → no assets.art required; hasArt=false
+ * - token-only → art required; paint defaults to custom (engine does not paint body)
+ * - wallpaper → art required; paint defaults to body
+ */
+export function resolveArtPolicy(manifest = {}) {
+  const art = manifest.art && typeof manifest.art === "object" ? manifest.art : {};
+  const themeBlock = manifest.theme && typeof manifest.theme === "object" ? manifest.theme : {};
+  const mergedArt = {
+    ...art,
+    ...(themeBlock.art && typeof themeBlock.art === "object" ? themeBlock.art : {}),
+  };
+  const mode = normalizedChoice(
+    mergedArt.mode,
+    "art.mode",
+    THEME_CHOICES.artMode,
+    "wallpaper"
+  );
+  let paintRaw = mergedArt.paint;
+  if (paintRaw == null || paintRaw === "") {
+    paintRaw = mode === "none" ? "none" : mode === "token-only" ? "custom" : "body";
+  }
+  const paint = normalizedChoice(paintRaw, "art.paint", THEME_CHOICES.artPaint, "body");
+  const needsArt = mode !== "none";
+  return { mode, paint, needsArt };
+}
 
 function normalizedChoice(value, field, allowed, fallback) {
   if (value == null || value === "") return fallback;
@@ -70,6 +141,7 @@ export function normalizeThemeConfig(manifest = {}) {
     ...art,
     ...(themeBlock.art && typeof themeBlock.art === "object" ? themeBlock.art : {}),
   };
+  const artPolicy = resolveArtPolicy(manifest);
   const appearance = normalizedChoice(
     themeBlock.appearance ?? manifest.appearance,
     "appearance",
@@ -85,6 +157,8 @@ export function normalizeThemeConfig(manifest = {}) {
     palette:
       themeBlock.palette && typeof themeBlock.palette === "object" ? themeBlock.palette : {},
     art: {
+      mode: artPolicy.mode,
+      paint: artPolicy.paint,
       focusX: normalizedUnit(mergedArt.focusX, "art.focusX"),
       focusY: normalizedUnit(mergedArt.focusY, "art.focusY"),
       safeArea: normalizedChoice(
@@ -100,7 +174,10 @@ export function normalizeThemeConfig(manifest = {}) {
         "auto"
       ),
     },
-    skipAnalysis: themeBlock.skipAnalysis === true || manifest.skipAnalysis === true,
+    skipAnalysis:
+      themeBlock.skipAnalysis === true ||
+      manifest.skipAnalysis === true ||
+      artPolicy.mode === "none",
   };
 }
 
@@ -187,6 +264,7 @@ export function assertPayloadSyntax(payload) {
 }
 
 export function artDataUrlFromBundle(bundle) {
+  if (!bundle?.artBytes?.length) return "";
   return `data:${bundle.mime};base64,${bundle.artBytes.toString("base64")}`;
 }
 
@@ -257,45 +335,78 @@ export function assembleDeltaShellPayload({ css, markers, theme, plugin, revisio
   return payload;
 }
 
+/** Placeholder metadata when art.mode=none (no wallpaper file). */
+function noArtMetadata() {
+  return {
+    width: 1920,
+    height: 1080,
+    ratio: 16 / 9,
+    wide: true,
+    aspect: "wide",
+    taskMode: "ambient",
+  };
+}
+
 export async function loadSkinBundle(skinDir) {
   const manifestPath = path.join(skinDir, "skin.json");
   const manifestText = await fs.readFile(manifestPath, "utf8");
   const manifest = JSON.parse(manifestText);
-  if (!manifest.assets?.css || !manifest.assets?.art) {
-    throw new Error("skin.json requires assets.css and assets.art");
+  if (!manifest.assets?.css) {
+    throw new Error("skin.json requires assets.css");
   }
   if (!manifest.assets?.plugin) {
     throw new Error("skin.json requires assets.plugin (shared renderer-core)");
   }
+  const artPolicy = resolveArtPolicy(manifest);
+  const artRel =
+    typeof manifest.assets.art === "string" && manifest.assets.art.trim()
+      ? manifest.assets.art.trim()
+      : null;
+  if (artPolicy.needsArt && !artRel) {
+    throw new Error(
+      "skin.json requires assets.art unless art.mode is \"none\" (pure style skin)"
+    );
+  }
   const markers = normalizeMarkers(manifest);
   const theme = normalizeThemeConfig(manifest);
   const cssPath = path.join(skinDir, manifest.assets.css);
-  const artPath = path.join(skinDir, manifest.assets.art);
-  const [css, artBytes, coreTemplate, plugin, cssStat, artStat] = await Promise.all([
+  const artPath = artRel ? path.join(skinDir, artRel) : null;
+
+  const [skinCss, coreTemplate, plugin, cssStat, baselineCss] = await Promise.all([
     fs.readFile(cssPath, "utf8"),
-    fs.readFile(artPath),
     fs.readFile(CORE_PATH, "utf8"),
     loadPlugin(skinDir, manifest),
     fs.stat(cssPath),
-    fs.stat(artPath),
+    loadImmersiveBaseline(),
   ]);
+  const css = mergeSkinCss(baselineCss, skinCss);
 
-  assertArtBytes(artBytes.length, `Art for ${manifest.id || skinDir}`);
-  const extension = path.extname(artPath).toLowerCase();
-  const artMetadata = readImageMetadata(artBytes, extension);
-  if (!artMetadata) {
-    throw new Error(
-      `Art metadata is invalid or exceeds the 16384px / 50MP safety limit (${manifest.id || artPath})`
-    );
+  let artBytes = Buffer.alloc(0);
+  let artStat = { size: 0, mtimeMs: 0 };
+  let artMetadata = noArtMetadata();
+  let mime = "image/png";
+  let artKey = "no-art";
+
+  if (artPolicy.needsArt && artPath) {
+    artBytes = await fs.readFile(artPath);
+    artStat = await fs.stat(artPath);
+    assertArtBytes(artBytes.length, `Art for ${manifest.id || skinDir}`);
+    const extension = path.extname(artPath).toLowerCase();
+    artMetadata = readImageMetadata(artBytes, extension);
+    if (!artMetadata) {
+      throw new Error(
+        `Art metadata is invalid or exceeds the 16384px / 50MP safety limit (${manifest.id || artPath})`
+      );
+    }
+    // Prefer real file magic — several bundled arts are JPEG stored as .png
+    mime =
+      detectMimeFromBytes(artBytes, extension) ||
+      manifest.assets.artMime ||
+      mimeFromExtension(extension) ||
+      "image/png";
+    artKey = createHash("sha256").update(artBytes).digest("hex").slice(0, 20);
   }
 
-  // Prefer real file magic — several bundled arts are JPEG stored as .png
-  const mime =
-    detectMimeFromBytes(artBytes, extension) ||
-    manifest.assets.artMime ||
-    mimeFromExtension(extension) ||
-    "image/png";
-  const artKey = createHash("sha256").update(artBytes).digest("hex").slice(0, 20);
   const styleRevision = createHash("sha256").update(css, "utf8").digest("hex").slice(0, 16);
   const coreRevision = createHash("sha256")
     .update(coreTemplate, "utf8")
@@ -307,7 +418,7 @@ export async function loadSkinBundle(skinDir) {
     .update("\0")
     .update(css, "utf8")
     .update("\0")
-    .update(artBytes)
+    .update(artBytes.length ? artBytes : Buffer.from(artKey))
     .update("\0")
     .update(pluginJson, "utf8")
     .update("\0")
@@ -320,7 +431,9 @@ export async function loadSkinBundle(skinDir) {
   theme.version = plugin.version || theme.version;
   theme.coreRevision = coreRevision;
   if (plugin.skipAnalysis) theme.skipAnalysis = true;
+  if (artPolicy.mode === "none") theme.skipAnalysis = true;
 
+  const hasArt = artPolicy.needsArt && artBytes.length > 0;
   const fingerprint = revision;
   const sourceStamp = `${cssStat.size}:${cssStat.mtimeMs}:${artStat.size}:${artStat.mtimeMs}:${revision}`;
 
@@ -341,7 +454,10 @@ export async function loadSkinBundle(skinDir) {
     revision,
     fingerprint,
     sourceStamp,
-    recommended: artBytes.length <= RECOMMENDED_ART_BYTES,
+    hasArt,
+    artMode: artPolicy.mode,
+    artPaint: artPolicy.paint,
+    recommended: !hasArt || artBytes.length <= RECOMMENDED_ART_BYTES,
     payloadBytesEstimate: Math.ceil(artBytes.length * 1.37) + css.length + coreTemplate.length,
     shellBytesEstimate: css.length + coreTemplate.length + pluginJson.length + 256,
     deltaShellBytesEstimate: css.length + pluginJson.length + 512,
@@ -404,6 +520,7 @@ export async function buildShellPayload(skinDir, preloaded = null) {
 
 /**
  * Phase-2 art patch only (applyArt). Call after shell is verified.
+ * When art.mode=none (or no bytes), returns empty art payload — caller skips CDP.
  */
 export async function buildArtPayload(skinDir, preloaded = null) {
   const bundle = preloaded || (await loadSkinBundle(skinDir));
@@ -411,8 +528,11 @@ export async function buildArtPayload(skinDir, preloaded = null) {
   const hit = cacheGet(cacheKey);
   if (hit) return hit;
 
-  const artDataUrl = artDataUrlFromBundle(bundle);
-  const artPayload = assembleArtPayload(bundle.markers, artDataUrl, bundle.revision);
+  const hasArt = Boolean(bundle.hasArt && bundle.artBytes?.length);
+  const artDataUrl = hasArt ? artDataUrlFromBundle(bundle) : "";
+  const artPayload = hasArt
+    ? assembleArtPayload(bundle.markers, artDataUrl, bundle.revision)
+    : "";
 
   const result = {
     payload: artPayload,
@@ -427,6 +547,7 @@ export async function buildArtPayload(skinDir, preloaded = null) {
     sourceStamp: bundle.sourceStamp,
     payloadBytes: Buffer.byteLength(artPayload, "utf8"),
     artBytes: bundle.artBytes.length,
+    hasArt,
     recommended: bundle.recommended,
     phase: "art",
     cacheHit: false,
@@ -488,6 +609,7 @@ export async function buildStagedPayload(skinDir, preloaded = null) {
   const art = await buildArtPayload(skinDir, bundle);
   const delta = await buildDeltaShellPayload(skinDir, bundle);
 
+  const hasArt = Boolean(bundle.hasArt && bundle.artBytes?.length);
   const result = {
     // Default "payload" is shell for soft-verify / early document inject.
     payload: shell.shellPayload || shell.payload,
@@ -511,7 +633,10 @@ export async function buildStagedPayload(skinDir, preloaded = null) {
     totalBytes: shell.payloadBytes + art.payloadBytes,
     recommended: bundle.recommended,
     phase: "staged",
-    deferredArt: true,
+    deferredArt: hasArt,
+    hasArt,
+    artMode: bundle.artMode,
+    artPaint: bundle.artPaint,
     supportsDelta: true,
     cacheHit: false,
   };
@@ -529,7 +654,8 @@ export async function buildPayload(skinDir, preloaded = null) {
   const hit = cacheGet(cacheKey);
   if (hit) return hit;
 
-  const artDataUrl = artDataUrlFromBundle(bundle);
+  const hasArt = Boolean(bundle.hasArt && bundle.artBytes?.length);
+  const artDataUrl = hasArt ? artDataUrlFromBundle(bundle) : "";
   const finalPayload = assemblePayload(bundle.coreTemplate, {
     __SKIN_CSS_JSON__: JSON.stringify(bundle.css),
     __SKIN_ART_JSON__: JSON.stringify(artDataUrl),
@@ -553,6 +679,9 @@ export async function buildPayload(skinDir, preloaded = null) {
     recommended: bundle.recommended,
     phase: "full",
     deferredArt: false,
+    hasArt,
+    artMode: bundle.artMode,
+    artPaint: bundle.artPaint,
     cacheHit: false,
   };
 
@@ -580,13 +709,16 @@ export async function checkSkinPayload(skinDir) {
     artPayloadBytes: staged.artPayloadBytes,
     totalStagedBytes: staged.totalBytes,
     artBytes: bundle.artBytes.length,
+    hasArt: Boolean(bundle.hasArt),
+    artMode: bundle.artMode,
+    artPaint: bundle.artPaint,
     recommended: bundle.recommended,
     artMetadata: bundle.artMetadata,
     appearance: bundle.theme.appearance,
     art: bundle.theme.art,
     mime: bundle.mime,
     pluginVersion: bundle.plugin.version,
-    deferredArt: true,
+    deferredArt: Boolean(bundle.hasArt),
     supportsDelta: true,
     phase: "staged",
   };

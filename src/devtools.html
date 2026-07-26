@@ -8,17 +8,35 @@
 </head>
 <body>
   <div class="dt-shell">
-    <header class="dt-header">
-      <div class="dt-brand">
-        <span class="dt-logo" aria-hidden="true">{ }</span>
-        <div>
-          <div class="dt-title">Skin DevTools</div>
-          <div class="dt-sub">宿主点选审查 · DOM / Styles · 生命周期</div>
+    <!-- 自定义标题栏：与主窗口一致，隐藏原生 decorations -->
+    <header class="dt-titlebar" data-tauri-drag-region>
+      <div class="dt-titlebar-brand" data-tauri-drag-region>
+        <span class="dt-logo" aria-hidden="true" data-tauri-drag-region">{ }</span>
+        <div class="dt-titlebar-titles" data-tauri-drag-region>
+          <div class="dt-title" data-tauri-drag-region>Skin DevTools</div>
+          <div class="dt-sub" data-tauri-drag-region>宿主点选审查 · DOM / Styles · 生命周期</div>
         </div>
       </div>
-      <div class="dt-actions">
+
+      <div class="dt-titlebar-actions" data-no-drag>
         <button type="button" id="btnRefresh" class="dt-btn primary">刷新</button>
-        <button type="button" id="btnClose" class="dt-btn">关闭</button>
+        <div class="win-controls">
+          <button type="button" id="btnWinMin" class="win-btn" title="最小化" aria-label="最小化">
+            <svg viewBox="0 0 12 12" width="12" height="12"><rect x="1" y="5.5" width="10" height="1.2" fill="currentColor"/></svg>
+          </button>
+          <button type="button" id="btnWinMax" class="win-btn" title="最大化" aria-label="最大化">
+            <svg id="icoMax" viewBox="0 0 12 12" width="12" height="12"><rect x="1.5" y="1.5" width="9" height="9" rx="1" fill="none" stroke="currentColor" stroke-width="1.2"/></svg>
+            <svg id="icoRestore" class="hidden" viewBox="0 0 12 12" width="12" height="12">
+              <rect x="3" y="1.5" width="7.5" height="7.5" rx="0.8" fill="none" stroke="currentColor" stroke-width="1.2"/>
+              <path d="M1.5 3.5h6.5v6.5H1.5z" fill="none" stroke="currentColor" stroke-width="1.2"/>
+            </svg>
+          </button>
+          <button type="button" id="btnWinClose" class="win-btn win-close" title="关闭" aria-label="关闭">
+            <svg viewBox="0 0 12 12" width="12" height="12">
+              <path d="M2 2l8 8M10 2L2 10" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
+            </svg>
+          </button>
+        </div>
       </div>
     </header>
 
@@ -43,16 +61,17 @@
           <span class="el-conn" id="elConnStatus">未连接</span>
         </div>
 
-        <div class="el-crumbs" id="elCrumbs" title="祖先路径">—</div>
+        <div class="el-crumbs" id="elCrumbs" title="祖先路径 — 点击可在 DOM 树中定位并选中">—</div>
 
-        <div class="el-split">
-          <div class="el-tree-pane">
+        <div class="el-split" id="elSplit">
+          <div class="el-tree-pane" id="elTreePane">
             <div class="el-pane-title">DOM</div>
             <div class="el-tree" id="elTree" tabindex="0">
               <div class="el-empty">连接宿主后加载 DOM 树，或点选元素后在此展开路径。</div>
             </div>
           </div>
-          <div class="el-styles-pane">
+          <div class="el-splitter" id="elSplitter" role="separator" aria-orientation="vertical" aria-label="调整 DOM / Styles 宽度" title="拖动调整宽度" tabindex="0"></div>
+          <div class="el-styles-pane" id="elStylesPane">
             <div class="el-pane-title-row">
               <div class="el-pane-title">Styles</div>
               <div class="el-style-tabs">
@@ -125,9 +144,10 @@
           <h2>关于 Skin DevTools</h2>
         </div>
         <div class="dt-about">
-          <p>独立调试窗口：主窗口标题栏「DevTools」按钮打开（不占用 F12）。</p>
+          <p>独立调试窗口：主窗口「自定义皮肤」弹窗顶部「DevTools」按钮打开（不占用 F12）。</p>
           <ul>
-            <li><b>Elements</b>：在真实宿主窗口点选（CDP Overlay），左侧层级 DOM 树，右侧 Styles / Computed</li>
+            <li><b>Elements</b>：在真实宿主窗口点选（CDP Overlay），左侧层级 DOM 树，右侧 Styles / Computed；中间可拖动调整宽度</li>
+            <li><b>面包屑</b>：点击祖先节点可在 DOM 树中定位并选中</li>
             <li><b>关闭窗口</b>：自动断开 inspect CDP（结束点选、释放 Overlay/DOM 会话与轮询）</li>
             <li><b>Host / Runtime / Skins</b>：生命周期与换肤会话诊断</li>
             <li>Tauri 自带 F12 只能审查本工具窗口，宿主审查必须走 CDP</li>

@@ -1,0 +1,49 @@
+{
+  "id": "bengong",
+  "name": "本宫 · 哼就不",
+  "nameEn": "Her Highness · Hmph No",
+  "description": "唐风红衣小宫主：暖杏底不画 body；宿主标题壳占位 + 伪元素大 banner（立绘+梅花），文案右上，建议卡 overflow 可见",
+  "categories": ["anime", "nature"],
+  "tags": [
+    "国风",
+    "唐风",
+    "漫画",
+    "浅色",
+    "Light",
+    "本宫"
+  ],
+  "previewGradient": "linear-gradient(135deg, #faf6f2 0%, #f3e4dc 48%, #c4786e 100%)",
+  "accent": "#c4786e",
+  "port": 9339,
+  "assets": {
+    "css": "assets/bengong-skin.css",
+    "art": "assets/tf-bg.jpg",
+    "artMime": "image/jpeg",
+    "plugin": "assets/plugin.json",
+    "screenshot": "assets/screenshot.jpg"
+  },
+  "markers": {
+    "rootClass": "codex-bengong-skin",
+    "homeClass": "bengong-home",
+    "styleId": "codex-bengong-skin-style",
+    "chromeId": "codex-bengong-skin-chrome",
+    "stateKey": "__CODEX_BENGONG_SKIN_STATE__",
+    "disabledKey": "__CODEX_BENGONG_SKIN_DISABLED__",
+    "artVar": "--bengong-art"
+  },
+  "desktopTheme": {
+    "appearanceTheme": "light",
+    "appearanceLightCodeThemeId": "codex",
+    "appearanceLightChromeTheme": "{ accent = \"#C4786E\", contrast = 54, fonts = { code = \"SF Mono\", ui = \"PingFang SC\" }, ink = \"#4a3834\", opaqueWindows = true, semanticColors = { diffAdded = \"#c8e6d4\", diffRemoved = \"#f0d0cc\", skill = \"#c9a08e\" }, surface = \"#faf6f2\" }"
+  },
+  "appearance": "light",
+  "art": {
+    "mode": "token-only",
+    "paint": "custom",
+    "focusX": 0.32,
+    "focusY": 0.48,
+    "safeArea": "right",
+    "taskMode": "off"
+  },
+  "version": "2.0.4"
+}

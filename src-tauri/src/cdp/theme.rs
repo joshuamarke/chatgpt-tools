@@ -32,6 +32,12 @@ pub fn backup_path(state_root: &Path) -> PathBuf {
 
 fn is_our_theme_line(line: &str) -> bool {
     let t = line.trim_start();
+    // Managed pin marker (v1/v2) — strip on restore so we do not leave stale comments.
+    if t.starts_with("# chatgpt-tools:appearance-pin")
+        || t.starts_with("# codex-dream-skin:appearance-pin")
+    {
+        return true;
+    }
     // Support optional quotes: appearanceTheme / "appearanceTheme"
     let bare = t.trim_start_matches('"').trim_start_matches('\'');
     bare.starts_with("appearanceTheme")
@@ -61,14 +67,62 @@ fn theme_str_field(theme: &Value, key: &str) -> Option<String> {
     })
 }
 
+/// Normalize skin-declared appearance to `light` | `dark` | `auto`.
+/// Fixed light/dark pins Codex `appearanceTheme` so native dropdown/popover tokens
+/// match the skin; `auto` restores the pre-install user preference on apply/restore.
+fn normalize_appearance_token(raw: &str) -> &'static str {
+    match raw.trim().to_ascii_lowercase().as_str() {
+        "dark" => "dark",
+        "light" => "light",
+        "auto" | "system" | "" => "auto",
+        other if other.contains("dark") => "dark",
+        other if other.contains("light") => "light",
+        _ => "auto",
+    }
+}
+
+/// Resolve pin mode from desktopTheme JSON (appearanceTheme preferred, then appearance).
+pub fn resolve_appearance_pin(theme: &Value) -> &'static str {
+    let from_desktop = theme
+        .get("appearanceTheme")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    if !from_desktop.is_empty() {
+        return normalize_appearance_token(from_desktop);
+    }
+    let from_skin = theme
+        .get("appearance")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    normalize_appearance_token(from_skin)
+}
+
+/// Marker written into managed config so restore can distinguish pin generations.
+const APPEARANCE_PIN_MARKER_V2: &str = "# chatgpt-tools:appearance-pin=v2";
+
 /// Build `[desktop]` appearance lines for Codex.
 /// Dark skins must emit `appearanceDark*` — otherwise the host keeps light
 /// dialogs/settings and OS caption chrome even when `appearanceTheme = "dark"`.
+///
+/// Pin discipline:
+/// - `appearanceTheme = light|dark` when the skin declares a fixed shell
+/// - `auto` / missing → restore pre-install appearanceTheme when backup exists;
+///   otherwise omit forcing a new appearanceTheme (keep user's current line)
 fn build_desktop_theme_settings(theme: &Value) -> Vec<String> {
-    let appearance = theme
-        .get("appearanceTheme")
-        .and_then(|v| v.as_str())
-        .unwrap_or("light");
+    let pin = resolve_appearance_pin(theme);
+    let appearance = match pin {
+        "dark" => "dark",
+        "light" => "light",
+        _ => {
+            // auto: prefer explicit theme field if author still set light/dark chrome only
+            theme
+                .get("appearanceTheme")
+                .and_then(|v| v.as_str())
+                .map(normalize_appearance_token)
+                .filter(|a| *a == "light" || *a == "dark")
+                .unwrap_or("auto")
+        }
+    };
 
     let light_code = theme
         .get("appearanceLightCodeThemeId")
@@ -87,16 +141,25 @@ fn build_desktop_theme_settings(theme: &Value) -> Vec<String> {
     let dark_chrome = theme_str_field(theme, "appearanceDarkChromeTheme")
         .or_else(|| theme_str_field(theme, "appearanceLightChromeTheme"));
 
-    let mut lines = vec![
-        format!("appearanceTheme = \"{appearance}\""),
-        format!("appearanceLightCodeThemeId = \"{light_code}\""),
-        format!(
-            "appearanceLightChromeTheme = {}",
-            light_chrome.as_deref().unwrap_or("{}")
-        ),
-    ];
+    let mut lines = Vec::new();
+    // Pin marker (comment) for restore discipline — harmless to Codex TOML parsers.
+    lines.push(APPEARANCE_PIN_MARKER_V2.to_string());
+
+    if appearance == "auto" {
+        // Do not force appearanceTheme for auto skins: restore path / user preference wins.
+        // If author explicitly left a light/dark chrome pack, still write chrome keys only.
+    } else {
+        lines.push(format!("appearanceTheme = \"{appearance}\""));
+    }
+
+    lines.push(format!("appearanceLightCodeThemeId = \"{light_code}\""));
+    lines.push(format!(
+        "appearanceLightChromeTheme = {}",
+        light_chrome.as_deref().unwrap_or("{}")
+    ));
 
     let has_dark = appearance == "dark"
+        || appearance == "auto"
         || theme.get("appearanceDarkCodeThemeId").is_some()
         || theme.get("appearanceDarkChromeTheme").is_some();
     if has_dark {
@@ -108,6 +171,34 @@ fn build_desktop_theme_settings(theme: &Value) -> Vec<String> {
     }
 
     lines
+}
+
+/// When applying an auto skin, put the user's original appearanceTheme back if we
+/// have a pre-install backup (so fixed-theme pins do not stick after switching).
+fn restore_user_appearance_theme_line(state_root: &Path) -> Option<String> {
+    let backup = backup_path(state_root);
+    if !backup.is_file() {
+        return None;
+    }
+    let bytes = fs::read(&backup).ok()?;
+    if bytes.contains(&0) {
+        return None;
+    }
+    let text = if bytes.starts_with(&[0xEF, 0xBB, 0xBF]) {
+        String::from_utf8_lossy(&bytes[3..]).into_owned()
+    } else {
+        String::from_utf8(bytes).ok()?
+    };
+    let header = find_desktop_header(&text)?;
+    let rest = &text[header.end..];
+    let next = find_next_section(rest).unwrap_or(rest.len());
+    let section = &rest[..next];
+    for line in section.lines() {
+        if line_starts_with_key(line, "appearanceTheme") {
+            return Some(line.trim().to_string());
+        }
+    }
+    None
 }
 
 /// Read config as strict UTF-8 without BOM preference; reject NUL / invalid sequences.
@@ -261,9 +352,23 @@ fn atomic_write_config(path: &Path, original: &[u8], new_text: &str) -> Result<(
 /// Best-effort patch of ~/.codex/config.toml [desktop] section.
 /// On validation failure returns Err — callers should treat as non-fatal for CSS skins
 /// but must not claim config was written.
+///
+/// Pin discipline (production):
+/// - Fixed light/dark skins write `appearanceTheme` so native dropdown tokens match
+/// - Auto skins restore the pre-install appearanceTheme line from backup when present
+/// - Prefer calling while the host is closed/restarting (Codex reloads [desktop] on boot)
 pub fn apply_desktop_theme(theme: &Value, state_root: &Path) -> Result<Value, EngineError> {
     let path = config_path();
-    let settings = build_desktop_theme_settings(theme);
+    let pin = resolve_appearance_pin(theme);
+    let mut settings = build_desktop_theme_settings(theme);
+    if pin == "auto" {
+        if let Some(user_line) = restore_user_appearance_theme_line(state_root) {
+            // Insert after pin marker so appearanceTheme is present for auto→user restore.
+            if !settings.iter().any(|l| line_starts_with_key(l, "appearanceTheme")) {
+                settings.insert(1, user_line);
+            }
+        }
+    }
     if !path.is_file() {
         if let Some(parent) = path.parent() {
             let _ = fs::create_dir_all(parent);
@@ -579,6 +684,56 @@ fn line_starts_with_key(line: &str, key: &str) -> bool {
     false
 }
 
+/// Parse a simple TOML string scalar: `"dark"` / `'light'` / unquoted.
+fn parse_toml_string_value(raw: &str) -> Option<String> {
+    let t = raw.trim();
+    if t.is_empty() {
+        return None;
+    }
+    // Double-quoted
+    if let Some(rest) = t.strip_prefix('"') {
+        let end = rest.find('"')?;
+        return Some(rest[..end].to_string());
+    }
+    // Single-quoted
+    if let Some(rest) = t.strip_prefix('\'') {
+        let end = rest.find('\'')?;
+        return Some(rest[..end].to_string());
+    }
+    // Unquoted: strip trailing comment / take first token.
+    let no_comment = t.split('#').next().unwrap_or(t).trim();
+    let token = no_comment.split_whitespace().next().unwrap_or(no_comment);
+    if token.is_empty() {
+        None
+    } else {
+        Some(token.to_string())
+    }
+}
+
+/// Read `[desktop].appearanceTheme` from config.toml (best-effort).
+/// Returns `"light"` / `"dark"` when present; `None` if missing or unreadable.
+pub fn read_appearance_theme() -> Option<String> {
+    let path = config_path();
+    let text = fs::read_to_string(&path).ok()?;
+    let header = find_desktop_header(&text)?;
+    let rest = &text[header.end..];
+    let next = find_next_section(rest).unwrap_or(rest.len());
+    let section = &rest[..next];
+    for line in section.lines() {
+        if !line_starts_with_key(line, "appearanceTheme") {
+            continue;
+        }
+        let after_eq = line.split_once('=')?.1;
+        let val = parse_toml_string_value(after_eq)?.to_ascii_lowercase();
+        if val == "light" || val == "dark" {
+            return Some(val);
+        }
+        // Unknown value — still surface raw lowercased token for diagnostics.
+        return Some(val);
+    }
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -586,6 +741,81 @@ mod tests {
 
     /// Serialize tests that touch process-wide `CODEX_CONFIG_PATH`.
     static ENV_LOCK: Mutex<()> = Mutex::new(());
+
+    #[test]
+    fn resolves_appearance_pin_fixed_and_auto() {
+        let dark = serde_json::json!({ "appearanceTheme": "dark" });
+        assert_eq!(resolve_appearance_pin(&dark), "dark");
+        let light = serde_json::json!({ "appearance": "light" });
+        assert_eq!(resolve_appearance_pin(&light), "light");
+        let auto = serde_json::json!({ "appearance": "auto" });
+        assert_eq!(resolve_appearance_pin(&auto), "auto");
+        let empty = serde_json::json!({});
+        assert_eq!(resolve_appearance_pin(&empty), "auto");
+    }
+
+    #[test]
+    fn fixed_pin_writes_appearance_theme_line() {
+        let theme = serde_json::json!({
+            "appearanceTheme": "dark",
+            "appearanceDarkCodeThemeId": "codex",
+            "appearanceDarkChromeTheme": "{}"
+        });
+        let lines = build_desktop_theme_settings(&theme);
+        assert!(
+            lines.iter().any(|l| l.contains("appearanceTheme = \"dark\"")),
+            "lines={lines:?}"
+        );
+        assert!(
+            lines.iter().any(|l| l.contains("appearance-pin=v2")),
+            "expected pin marker lines={lines:?}"
+        );
+    }
+
+    #[test]
+    fn auto_pin_omits_forced_appearance_theme() {
+        let theme = serde_json::json!({
+            "appearance": "auto",
+            "appearanceLightCodeThemeId": "codex",
+            "appearanceLightChromeTheme": "{}"
+        });
+        let lines = build_desktop_theme_settings(&theme);
+        assert!(
+            !lines.iter().any(|l| line_starts_with_key(l, "appearanceTheme")),
+            "auto must not force appearanceTheme lines={lines:?}"
+        );
+    }
+
+    #[test]
+    fn reads_appearance_theme_from_config() {
+        let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let dir = std::env::temp_dir().join(format!(
+            "cgtools-theme-read-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        ));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let cfg = dir.join("config.toml");
+        fs::write(
+            &cfg,
+            "[desktop]\nappearanceTheme = \"dark\"\nother = 1\n",
+        )
+        .unwrap();
+        std::env::set_var("CODEX_CONFIG_PATH", &cfg);
+        assert_eq!(read_appearance_theme().as_deref(), Some("dark"));
+        fs::write(
+            &cfg,
+            "[desktop]\n\"appearanceTheme\" = \"light\"\n",
+        )
+        .unwrap();
+        assert_eq!(read_appearance_theme().as_deref(), Some("light"));
+        let _ = fs::remove_dir_all(&dir);
+        std::env::remove_var("CODEX_CONFIG_PATH");
+    }
 
     #[test]
     fn strips_and_patches_desktop_section() {

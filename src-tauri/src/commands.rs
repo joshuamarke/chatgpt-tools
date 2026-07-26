@@ -2,14 +2,29 @@
 
 use crate::engine::{self, EngineError};
 use base64::{engine::general_purpose::STANDARD as B64, Engine as _};
+use parking_lot::Mutex;
 use serde::Deserialize;
 use serde_json::{json, Value};
+use std::sync::OnceLock;
 use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindowBuilder, WindowEvent};
 use tauri_plugin_dialog::{DialogExt, FilePath, MessageDialogButtons, MessageDialogKind};
 use tauri_plugin_opener::OpenerExt;
 
 /// Secondary window label for the skin / host DevTools UI.
 pub const DEVTOOLS_WINDOW_LABEL: &str = "devtools";
+
+/// Serializes open/focus so rapid clicks cannot race-create multiple windows.
+static OPEN_DEVTOOLS_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+
+fn focus_devtools_window(app: &AppHandle) -> bool {
+    let Some(win) = app.get_webview_window(DEVTOOLS_WINDOW_LABEL) else {
+        return false;
+    };
+    let _ = win.unminimize();
+    let _ = win.show();
+    let _ = win.set_focus();
+    true
+}
 
 fn map_err(e: EngineError) -> String {
     e.to_string()
@@ -60,9 +75,10 @@ fn enrich_previews(mut status: Value) -> Result<Value, EngineError> {
     };
 
     // 单次 status 总预览体积上限，避免 WebView IPC 撑爆导致界面卡死/白屏
-    const MAX_TOTAL_PREVIEW: usize = 8_000_000;
-    // screenshot 通常 <1MB；art 回退时仍限制，防止超大立绘塞进 IPC
-    const MAX_SINGLE_PREVIEW: usize = 1_500_000;
+    const MAX_TOTAL_PREVIEW: usize = 12_000_000;
+    // Prefer assets/screenshot.*; art fallback still capped so multi-MB wallpapers
+    // do not flood IPC (full art inject uses staged path, not this preview path).
+    const MAX_SINGLE_PREVIEW: usize = 4_000_000;
     let mut total = 0usize;
 
     for skin in skins.iter_mut() {
@@ -119,10 +135,19 @@ fn enrich_previews(mut status: Value) -> Result<Value, EngineError> {
 #[tauri::command]
 pub async fn status() -> Result<Value, String> {
     let raw = run_cli_async(vec!["status".into()]).await?;
-    tauri::async_runtime::spawn_blocking(move || enrich_previews(raw))
-        .await
-        .map_err(|e| e.to_string())?
-        .map_err(map_err)
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut status = enrich_previews(raw)?;
+        // Merge disk catalog (network refresh is explicit via cloud_refresh).
+        let cfg = crate::cloud::load_cloud_config();
+        if cfg.enabled {
+            let cat = crate::cloud::load_catalog_disk();
+            crate::cloud::merge_remote_into_status(&mut status, cat.as_ref(), &cfg);
+        }
+        Ok(status)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+    .map_err(map_err)
 }
 
 /// Lightweight ChatGPT/Codex lifecycle for GUI polling (no skin list / previews).
@@ -181,6 +206,12 @@ pub async fn resume(restart: Option<bool>) -> Result<Value, String> {
         bool_str(restart).into(),
     ])
     .await
+}
+
+/// Launch ChatGPT/Codex; re-apply last session skin when available.
+#[tauri::command]
+pub async fn start_host() -> Result<Value, String> {
+    run_cli_async(vec!["start-host".into()]).await
 }
 
 #[tauri::command]
@@ -397,21 +428,41 @@ pub async fn clear_app_path() -> Result<Value, String> {
 
 #[tauri::command]
 pub async fn choose_wallpaper(app: AppHandle) -> Result<Value, String> {
+    /// Match engine MAX_ART_BYTES — wallpaper selection hard cap.
+    const MAX_WALLPAPER_BYTES: u64 = 16 * 1024 * 1024;
     let file = app
         .dialog()
         .file()
-        .set_title("选择主题壁纸")
+        .set_title("选择自定义皮肤壁纸")
         .add_filter("图片", &["png", "jpg", "jpeg", "webp"])
         .blocking_pick_file();
     let Some(path) = file else {
         return Ok(json!({ "canceled": true }));
     };
     let p = file_path_to_string(path)?;
+    let meta = std::fs::metadata(&p).map_err(|e| format!("无法读取壁纸文件：{e}"))?;
+    if !meta.is_file() || meta.len() < 1 {
+        return Ok(json!({
+            "canceled": false,
+            "error": "请选择有效的图片文件"
+        }));
+    }
+    if meta.len() > MAX_WALLPAPER_BYTES {
+        return Ok(json!({
+            "canceled": false,
+            "error": format!(
+                "壁纸必须不超过 {} MB（当前 {:.1} MB）",
+                MAX_WALLPAPER_BYTES / 1024 / 1024,
+                meta.len() as f64 / 1024.0 / 1024.0
+            ),
+            "size": meta.len(),
+        }));
+    }
     let name = std::path::Path::new(&p)
         .file_name()
         .map(|s| s.to_string_lossy().to_string())
         .unwrap_or_default();
-    Ok(json!({ "path": p, "name": name }))
+    Ok(json!({ "path": p, "name": name, "size": meta.len() }))
 }
 
 #[tauri::command]
@@ -454,18 +505,21 @@ pub async fn engine_version() -> Result<Value, String> {
 }
 
 /// Open (or focus) the independent Skin DevTools window.
-/// Reuses a single window labeled `devtools` so the toolbar button stays idempotent.
+/// Reuses a single window labeled `devtools` so the button stays idempotent.
+/// A process-wide lock prevents concurrent creates from rapid repeated clicks.
 /// Closing the window tears down the dedicated inspect CDP session (Overlay/DOM/CSS).
 #[tauri::command]
 pub async fn open_devtools(app: AppHandle) -> Result<Value, String> {
-    if let Some(win) = app.get_webview_window(DEVTOOLS_WINDOW_LABEL) {
-        let _ = win.unminimize();
-        let _ = win.show();
-        let _ = win.set_focus();
+    let _guard = OPEN_DEVTOOLS_LOCK
+        .get_or_init(|| Mutex::new(()))
+        .lock();
+
+    if focus_devtools_window(&app) {
         return Ok(json!({ "ok": true, "reused": true, "label": DEVTOOLS_WINDOW_LABEL }));
     }
 
-    let win = WebviewWindowBuilder::new(
+    // Match main window chrome: undecorated + custom titlebar (see devtools.html).
+    let win = match WebviewWindowBuilder::new(
         &app,
         DEVTOOLS_WINDOW_LABEL,
         WebviewUrl::App("devtools.html".into()),
@@ -475,9 +529,22 @@ pub async fn open_devtools(app: AppHandle) -> Result<Value, String> {
     .min_inner_size(960.0, 640.0)
     .resizable(true)
     .center()
-    .decorations(true)
+    .decorations(false)
     .build()
-    .map_err(|e| e.to_string())?;
+    {
+        Ok(w) => w,
+        Err(e) => {
+            // Label already registered (race / half-closed): focus existing if present.
+            if focus_devtools_window(&app) {
+                return Ok(json!({
+                    "ok": true,
+                    "reused": true,
+                    "label": DEVTOOLS_WINDOW_LABEL
+                }));
+            }
+            return Err(e.to_string());
+        }
+    };
 
     // Title-bar close / Alt+F4 / OS destroy: always release inspect CDP resources.
     win.on_window_event(|event| {
@@ -488,6 +555,9 @@ pub async fn open_devtools(app: AppHandle) -> Result<Value, String> {
             let _ = crate::cdp::inspect::disconnect();
         }
     });
+
+    let _ = win.show();
+    let _ = win.set_focus();
 
     Ok(json!({
         "ok": true,
@@ -572,6 +642,109 @@ pub async fn inspect_select_node(node_id: i64) -> Result<Value, String> {
 pub async fn inspect_highlight(node_id: i64) -> Result<Value, String> {
     tauri::async_runtime::spawn_blocking(move || {
         crate::cdp::inspect::highlight(node_id).map_err(map_inspect)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+// ── Cloud CDN (catalog / announcements / secure download) ───────────────────
+
+#[tauri::command]
+pub async fn cloud_status(force: Option<bool>) -> Result<Value, String> {
+    let force = force.unwrap_or(false);
+    tauri::async_runtime::spawn_blocking(move || crate::cloud::cloud_status_snapshot(force))
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// Soft-refresh catalog + announcements (TTL + disk cache).
+/// Pass `force: true` to bypass soft TTL (e.g. user clicked 刷新).
+#[tauri::command]
+pub async fn cloud_refresh(force: Option<bool>) -> Result<Value, String> {
+    let force = force.unwrap_or(false);
+    tauri::async_runtime::spawn_blocking(move || {
+        let cfg = crate::cloud::load_cloud_config();
+        if !cfg.enabled {
+            return Ok::<Value, String>(json!({
+                "ok": false,
+                "enabled": false,
+                "error": "云端已关闭",
+            }));
+        }
+        let sync = crate::cloud::soft_network_sync(&cfg, force);
+        let snap = crate::cloud::cloud_status_snapshot(false);
+        let ok = sync.get("ok").and_then(|v| v.as_bool()).unwrap_or(false)
+            || snap.get("catalog").is_some();
+        Ok(json!({
+            "ok": ok,
+            "snapshot": snap,
+            "sync": sync,
+            "catalogError": sync.get("catalogError").cloned().unwrap_or(Value::Null),
+            "announcementsError": sync.get("announcementsError").cloned().unwrap_or(Value::Null),
+        }))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub async fn cloud_announcements(refresh: Option<bool>) -> Result<Value, String> {
+    let refresh = refresh.unwrap_or(false);
+    tauri::async_runtime::spawn_blocking(move || {
+        let cfg = crate::cloud::load_cloud_config();
+        // Prefer disk; only hit network when explicitly refresh=true and TTL expired.
+        if refresh {
+            let _ = crate::cloud::soft_network_sync(&cfg, false);
+        }
+        crate::cloud::get_announcements(&cfg, false).map_err(map_err)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub async fn cloud_mark_announcement_read(id: String) -> Result<Value, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        crate::cloud::mark_announcement_read(&id).map_err(map_err)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Download skin **by catalog id only** — never accepts arbitrary URL from frontend.
+#[tauri::command]
+pub async fn cloud_download_skin(skin_id: String) -> Result<Value, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let cfg = crate::cloud::load_cloud_config();
+        crate::cloud::download_skin(&cfg, &skin_id).map_err(map_err)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub async fn cloud_check_update() -> Result<Value, String> {
+    tauri::async_runtime::spawn_blocking(|| {
+        let cfg = crate::cloud::load_cloud_config();
+        // Manual user action: allow soft network (still uses TTL unless cache empty).
+        if cfg.enabled {
+            let _ = crate::cloud::soft_network_sync(&cfg, false);
+        }
+        let cat = crate::cloud::load_catalog_disk();
+        Ok::<Value, String>(crate::cloud::check_app_version_opts(
+            &cfg,
+            cat.as_ref(),
+            true,
+        ))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub async fn cloud_clear_skin_cache(skin_id: Option<String>) -> Result<Value, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        crate::cloud::clear_skin_cache(skin_id.as_deref()).map_err(map_err)
     })
     .await
     .map_err(|e| e.to_string())?

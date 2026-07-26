@@ -2,6 +2,7 @@
  * Skin DevTools — host inspect (Scheme A) + status tabs.
  * - Closing the window disconnects CDP inspect (releases Overlay/DOM session).
  * - DOM tree: hierarchical expand/collapse, lazy children, reveal on pick.
+ * - Custom undecorated titlebar; DOM|Styles resizable splitter; crumbs ↔ tree.
  */
 const hostCards = document.getElementById("hostCards");
 const hostJson = document.getElementById("hostJson");
@@ -14,6 +15,9 @@ const footerTime = document.getElementById("footerTime");
 
 const elTree = document.getElementById("elTree");
 const elCrumbs = document.getElementById("elCrumbs");
+const elSplit = document.getElementById("elSplit");
+const elSplitter = document.getElementById("elSplitter");
+const elTreePane = document.getElementById("elTreePane");
 const elConnStatus = document.getElementById("elConnStatus");
 const elSelHead = document.getElementById("elSelHead");
 const elSelHint = document.getElementById("elSelHint");
@@ -25,6 +29,8 @@ const btnPick = document.getElementById("btnPick");
 const btnPickLabel = document.getElementById("btnPickLabel");
 const btnConnect = document.getElementById("btnConnect");
 const btnReloadTree = document.getElementById("btnReloadTree");
+
+const SPLIT_STORAGE_KEY = "devtools.el-tree-w";
 
 /** @type {boolean} */
 let inspectConnected = false;
@@ -50,6 +56,8 @@ let lastSelection = null;
 let tearingDown = false;
 /** tree events bound once */
 let treeEventsBound = false;
+/** scroll/flash target after next tree paint */
+let pendingRevealId = null;
 
 function escapeHtml(s) {
   return String(s ?? "")
@@ -423,11 +431,18 @@ function renderDomTree() {
 
   elTree.innerHTML = lines.join("") || '<div class="el-empty">无节点</div>';
 
-  // Scroll selected into view
-  if (selectedNodeId != null) {
-    const el = elTree.querySelector(`.el-node[data-node-id="${selectedNodeId}"]`);
+  // Scroll selected / pending reveal into view and flash
+  const focusId = pendingRevealId ?? selectedNodeId;
+  pendingRevealId = null;
+  if (focusId != null) {
+    const el = elTree.querySelector(`.el-node[data-node-id="${focusId}"]`);
     if (el) {
-      el.scrollIntoView({ block: "nearest", behavior: "smooth" });
+      el.scrollIntoView({ block: "center", behavior: "smooth" });
+      el.classList.remove("reveal-flash");
+      // reflow so animation restarts
+      void el.offsetWidth;
+      el.classList.add("reveal-flash");
+      window.setTimeout(() => el.classList.remove("reveal-flash"), 900);
     }
   }
 }
@@ -492,8 +507,11 @@ function mergeChildrenIntoRoot(parentId, children) {
 
 /**
  * After pick/select: expand ancestor chain and re-render full document tree.
+ * @param {any} selection
+ * @param {{ focus?: boolean }} [opts]
  */
-async function revealInTree(selection) {
+async function revealInTree(selection, opts = {}) {
+  const focus = opts.focus !== false;
   const ancestors = Array.isArray(selection?.ancestors) ? selection.ancestors : [];
   const leafId = selection?.nodeId ?? selection?.node?.nodeId ?? null;
 
@@ -507,13 +525,13 @@ async function revealInTree(selection) {
     }
   }
 
-  // Expand every ancestor with nodeId
+  // Expand every ancestor with nodeId (not the leaf itself as "closed parent")
   for (const a of ancestors) {
     if (a?.nodeId != null) expanded.add(Number(a.nodeId));
   }
   if (leafId != null) {
     selectedNodeId = Number(leafId);
-    expanded.add(Number(leafId));
+    if (focus) pendingRevealId = Number(leafId);
   }
 
   // Ensure we have a document tree; if not, load one
@@ -524,12 +542,36 @@ async function revealInTree(selection) {
     for (const a of ancestors) {
       const id = a?.nodeId != null ? Number(a.nodeId) : null;
       if (id == null) continue;
-      if (!childrenCache.has(id)) {
+      if (!childrenCache.has(id) || childrenCache.get(id).length === 0) {
         try {
           const res = await window.skinAPI.inspectGetChildren(id);
           if (res?.children) mergeChildrenIntoRoot(id, res.children);
         } catch {
           /* ignore partial failures */
+        }
+      }
+    }
+    // Also ensure parent of leaf has children so the leaf row is visible
+    if (leafId != null && ancestors.length) {
+      // chain includes leaf as last entry → parent is second-to-last; else last is parent
+      let parentId = null;
+      const last = ancestors[ancestors.length - 1];
+      if (ancestors.length >= 2 && Number(last?.nodeId) === Number(leafId)) {
+        parentId = Number(ancestors[ancestors.length - 2].nodeId);
+      } else if (Number(last?.nodeId) !== Number(leafId) && last?.nodeId != null) {
+        parentId = Number(last.nodeId);
+      }
+      if (
+        parentId != null &&
+        (!childrenCache.has(parentId) ||
+          !childrenCache.get(parentId).some((c) => Number(c.nodeId) === Number(leafId)))
+      ) {
+        try {
+          const res = await window.skinAPI.inspectGetChildren(parentId);
+          if (res?.children) mergeChildrenIntoRoot(parentId, res.children);
+          expanded.add(parentId);
+        } catch {
+          /* ignore */
         }
       }
     }
@@ -548,8 +590,15 @@ function renderCrumbs(ancestors) {
     .map((a, i) => {
       const last = i === list.length - 1;
       const label = escapeHtml(a.label || a.localName || a.nodeName || "?");
-      const nid = a.nodeId != null ? Number(a.nodeId) : "";
-      return `${i ? '<span class="sep">›</span>' : ""}<span class="crumb${last ? " sel" : ""}" data-crumb-id="${nid}">${label}</span>`;
+      const nid =
+        a.nodeId != null && a.nodeId !== "" && !Number.isNaN(Number(a.nodeId))
+          ? Number(a.nodeId)
+          : "";
+      const title =
+        nid !== ""
+          ? `点击在 DOM 树中定位并选中 #${nid}`
+          : "此节点暂无 nodeId";
+      return `${i ? '<span class="sep">›</span>' : ""}<span class="crumb${last ? " sel" : ""}" data-crumb-id="${nid}" title="${escapeHtml(title)}" role="${nid !== "" ? "button" : "text"}" tabindex="${nid !== "" ? "0" : "-1"}">${label}</span>`;
     })
     .join("");
 }
@@ -621,19 +670,59 @@ async function renderSelection(selection) {
   }
 }
 
-async function selectNode(nodeId) {
+async function selectNode(nodeId, opts = {}) {
+  const fromCrumb = opts.fromCrumb === true;
   try {
-    setStatus(`加载节点 ${nodeId}…`);
+    setStatus(fromCrumb ? `面包屑定位 #${nodeId}…` : `加载节点 ${nodeId}…`);
+    // Optimistic highlight while network loads
+    selectedNodeId = Number(nodeId);
+    pendingRevealId = Number(nodeId);
+    // Expand known ancestors locally so the node is visible ASAP
+    if (lastSelection?.ancestors) {
+      for (const a of lastSelection.ancestors) {
+        if (a?.nodeId != null) expanded.add(Number(a.nodeId));
+      }
+    }
+    if (lastDocRoot) renderDomTree();
+
     const res = await window.skinAPI.inspectSelectNode(nodeId);
     if (res?.selection) {
+      pendingRevealId = Number(nodeId);
       await renderSelection(res.selection);
-      setStatus(`已选择 #${nodeId}`);
+      // Keep Elements tab visible when jumping from crumbs
+      if (fromCrumb) activateElementsTab();
+      // Flash the crumb that was clicked
+      if (fromCrumb && elCrumbs) {
+        const crumb = elCrumbs.querySelector(`[data-crumb-id="${nodeId}"]`);
+        if (crumb) {
+          crumb.classList.remove("flash");
+          void crumb.offsetWidth;
+          crumb.classList.add("flash");
+          window.setTimeout(() => crumb.classList.remove("flash"), 800);
+          crumb.scrollIntoView({ block: "nearest", inline: "center", behavior: "smooth" });
+        }
+      }
+      // Ensure tree scrolls again after styles/crumbs re-render
+      requestAnimationFrame(() => {
+        const el = elTree?.querySelector(`.el-node[data-node-id="${nodeId}"]`);
+        if (el) {
+          el.scrollIntoView({ block: "center", behavior: "smooth" });
+          el.classList.add("reveal-flash");
+          window.setTimeout(() => el.classList.remove("reveal-flash"), 900);
+        }
+      });
+      setStatus(fromCrumb ? `已定位祖先 #${nodeId}` : `已选择 #${nodeId}`);
     } else {
       setStatus(res?.error || "选择失败", true);
     }
   } catch (err) {
     setStatus(String(err?.message || err), true);
   }
+}
+
+function activateElementsTab() {
+  const tab = document.querySelector('.dt-tab[data-tab="elements"]');
+  if (tab && !tab.classList.contains("active")) tab.click();
 }
 
 async function connectInspect() {
@@ -749,13 +838,35 @@ document.querySelectorAll(".el-style-tab").forEach((tab) => {
   });
 });
 
-/* crumbs → select ancestor when it has nodeId */
-elCrumbs?.addEventListener("click", (e) => {
-  const c = e.target.closest("[data-crumb-id]");
+/* crumbs → select ancestor + reveal in DOM tree */
+function onCrumbActivate(c) {
   if (!c) return;
   const id = c.getAttribute("data-crumb-id");
   if (!id) return;
-  selectNode(Number(id));
+  const nid = Number(id);
+  if (Number.isNaN(nid)) return;
+  if (selectedNodeId === nid && lastSelection?.nodeId === nid) {
+    // Re-reveal already selected node in tree
+    pendingRevealId = nid;
+    renderDomTree();
+    setStatus(`已定位 #${nid}`);
+    return;
+  }
+  selectNode(nid, { fromCrumb: true });
+}
+
+elCrumbs?.addEventListener("click", (e) => {
+  const c = e.target.closest("[data-crumb-id]");
+  if (!c || !elCrumbs.contains(c)) return;
+  e.preventDefault();
+  onCrumbActivate(c);
+});
+elCrumbs?.addEventListener("keydown", (e) => {
+  if (e.key !== "Enter" && e.key !== " ") return;
+  const c = e.target.closest("[data-crumb-id]");
+  if (!c || !elCrumbs.contains(c)) return;
+  e.preventDefault();
+  onCrumbActivate(c);
 });
 
 btnPick?.addEventListener("click", () => togglePick());
@@ -769,6 +880,124 @@ btnReloadTree?.addEventListener("click", async () => {
     setStatus(String(err?.message || err), true);
   }
 });
+
+/* ── DOM | Styles resizable splitter ── */
+function applyTreeWidth(pxOrPercent) {
+  if (!elSplit) return;
+  const splitW = elSplit.getBoundingClientRect().width;
+  if (splitW <= 0) return;
+  let px;
+  if (typeof pxOrPercent === "string" && pxOrPercent.endsWith("%")) {
+    px = (parseFloat(pxOrPercent) / 100) * splitW;
+  } else {
+    px = Number(pxOrPercent);
+  }
+  if (!Number.isFinite(px)) return;
+  const minL = 200;
+  const minR = 220;
+  const splitterW = elSplitter?.getBoundingClientRect().width || 5;
+  const maxL = Math.max(minL, splitW - minR - splitterW);
+  px = Math.min(maxL, Math.max(minL, px));
+  const pct = `${((px / splitW) * 100).toFixed(2)}%`;
+  elSplit.style.setProperty("--el-tree-w", pct);
+  document.documentElement.style.setProperty("--el-tree-w", pct);
+  if (elTreePane) {
+    elTreePane.style.flexBasis = pct;
+    elTreePane.style.width = pct;
+  }
+  return pct;
+}
+
+function setupSplitter() {
+  if (!elSplitter || !elSplit) return;
+
+  // Restore saved width
+  try {
+    const saved = localStorage.getItem(SPLIT_STORAGE_KEY);
+    if (saved) applyTreeWidth(saved);
+  } catch {
+    /* ignore */
+  }
+
+  let dragging = false;
+
+  const onMove = (clientX) => {
+    if (!dragging) return;
+    const rect = elSplit.getBoundingClientRect();
+    const x = clientX - rect.left;
+    const pct = applyTreeWidth(x);
+    if (pct) {
+      try {
+        localStorage.setItem(SPLIT_STORAGE_KEY, pct);
+      } catch {
+        /* ignore */
+      }
+    }
+  };
+
+  const endDrag = () => {
+    if (!dragging) return;
+    dragging = false;
+    elSplit.classList.remove("resizing");
+    document.body.classList.remove("el-resizing");
+    window.removeEventListener("pointermove", onPointerMove);
+    window.removeEventListener("pointerup", endDrag);
+    window.removeEventListener("pointercancel", endDrag);
+  };
+
+  const onPointerMove = (e) => {
+    e.preventDefault();
+    onMove(e.clientX);
+  };
+
+  elSplitter.addEventListener("pointerdown", (e) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    dragging = true;
+    elSplit.classList.add("resizing");
+    document.body.classList.add("el-resizing");
+    try {
+      elSplitter.setPointerCapture(e.pointerId);
+    } catch {
+      /* ignore */
+    }
+    window.addEventListener("pointermove", onPointerMove);
+    window.addEventListener("pointerup", endDrag);
+    window.addEventListener("pointercancel", endDrag);
+  });
+
+  // Keyboard: left/right arrows nudge width
+  elSplitter.addEventListener("keydown", (e) => {
+    const rect = elSplit.getBoundingClientRect();
+    const current =
+      elTreePane?.getBoundingClientRect().width || rect.width * 0.42;
+    if (e.key === "ArrowLeft") {
+      e.preventDefault();
+      applyTreeWidth(current - 24);
+    } else if (e.key === "ArrowRight") {
+      e.preventDefault();
+      applyTreeWidth(current + 24);
+    } else if (e.key === "Home") {
+      e.preventDefault();
+      applyTreeWidth(200);
+    } else if (e.key === "End") {
+      e.preventDefault();
+      applyTreeWidth(rect.width - 220);
+    }
+  });
+
+  // Double-click reset to default 42%
+  elSplitter.addEventListener("dblclick", () => {
+    const pct = applyTreeWidth("42%");
+    if (pct) {
+      try {
+        localStorage.setItem(SPLIT_STORAGE_KEY, pct);
+      } catch {
+        /* ignore */
+      }
+    }
+  });
+}
 
 /* main tabs */
 document.querySelectorAll(".dt-tab").forEach((tab) => {
@@ -789,13 +1018,35 @@ document.querySelectorAll(".dt-tab").forEach((tab) => {
 
 document.getElementById("btnRefresh")?.addEventListener("click", () => refresh());
 
+/* ── Undecorated window controls (match main window) ── */
+function getCurrentWindow() {
+  const api = window.__TAURI__;
+  if (!api) return null;
+  try {
+    if (api.window?.getCurrentWindow) return api.window.getCurrentWindow();
+    if (api.webviewWindow?.getCurrentWebviewWindow) {
+      return api.webviewWindow.getCurrentWebviewWindow();
+    }
+  } catch {
+    /* ignore */
+  }
+  return null;
+}
+
+async function waitForWindow(timeoutMs = 5000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const w = getCurrentWindow();
+    if (w) return w;
+    await new Promise((r) => setTimeout(r, 40));
+  }
+  return getCurrentWindow();
+}
+
 async function closeDevtoolsWindow() {
   await teardownInspect("close");
   try {
-    const api = window.__TAURI__;
-    const win =
-      api?.webviewWindow?.getCurrentWebviewWindow?.() ||
-      api?.window?.getCurrentWindow?.();
+    const win = getCurrentWindow();
     if (win?.close) await win.close();
     else window.close();
   } catch {
@@ -803,18 +1054,81 @@ async function closeDevtoolsWindow() {
   }
 }
 
-document.getElementById("btnClose")?.addEventListener("click", () => {
-  closeDevtoolsWindow();
-});
+async function setupWindowControls() {
+  const appWindow = await waitForWindow();
+  if (!appWindow) {
+    const ctrl = document.querySelector(".win-controls");
+    if (ctrl) ctrl.style.display = "none";
+    return;
+  }
 
-// OS title-bar close / refresh / navigate away
+  const btnMin = document.getElementById("btnWinMin");
+  const btnMax = document.getElementById("btnWinMax");
+  const btnClose = document.getElementById("btnWinClose");
+  const icoMax = document.getElementById("icoMax");
+  const icoRestore = document.getElementById("icoRestore");
+
+  async function syncMaxIcon() {
+    try {
+      const maximized = await appWindow.isMaximized();
+      icoMax?.classList.toggle("hidden", maximized);
+      icoRestore?.classList.toggle("hidden", !maximized);
+      if (btnMax) btnMax.title = maximized ? "还原" : "最大化";
+    } catch {
+      /* ignore */
+    }
+  }
+
+  btnMin?.addEventListener("click", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    appWindow.minimize().catch(() => {});
+  });
+  btnMax?.addEventListener("click", async (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    try {
+      await appWindow.toggleMaximize();
+      await syncMaxIcon();
+    } catch {
+      /* ignore */
+    }
+  });
+  btnClose?.addEventListener("click", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    closeDevtoolsWindow();
+  });
+
+  document.querySelector(".dt-titlebar")?.addEventListener("dblclick", async (e) => {
+    if (e.target.closest("[data-no-drag], button, .win-controls, .dt-titlebar-actions")) {
+      return;
+    }
+    try {
+      await appWindow.toggleMaximize();
+      await syncMaxIcon();
+    } catch {
+      /* ignore */
+    }
+  });
+
+  try {
+    await appWindow.onResized(() => {
+      syncMaxIcon();
+    });
+  } catch {
+    /* ignore */
+  }
+
+  await syncMaxIcon();
+}
+
+// OS / navigate away teardown (Rust also hooks Destroyed)
 window.addEventListener("beforeunload", () => {
-  // sync best-effort: fire-and-forget disconnect (Rust also hooks Destroyed)
   try {
     stopPollLoop();
     stopHostPoll();
     if (inspectConnected) {
-      // navigator.sendBeacon cannot invoke Tauri; use async without await
       window.skinAPI.inspectDisconnect().catch(() => {});
     }
   } catch {
@@ -822,9 +1136,11 @@ window.addEventListener("beforeunload", () => {
   }
 });
 
-// Auto-connect
+// Boot
 (async () => {
   ensureTreeEvents();
+  setupSplitter();
+  setupWindowControls();
   await refresh();
   try {
     await connectInspect();

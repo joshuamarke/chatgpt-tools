@@ -13,6 +13,7 @@
     "verify:engine": "node scripts/verify-engine.mjs",
     "test:engine": "node --test engine/tests/*.test.mjs",
     "check:payloads": "node engine/cli.mjs list-skins && node --test engine/tests/injector-self.test.mjs",
+    "doctor:selectors": "node scripts/doctor-selectors.mjs",
     "postinstall": "node scripts/ensure-resources.mjs"
   },
   "dependencies": {

@@ -2,13 +2,23 @@
 //! Import/export/design-wallpaper still fall back to Node CLI.
 
 use super::host::{
-    self, append_diag, host_lifecycle_to_json, host_status_json, invalidate_host_probe_cache,
-    note_host_ready, probe_host_lifecycle, probe_host_lifecycle_force,
+    self, append_diag, host_lifecycle_to_json, host_status_json, invalidate_host_lifecycle_sticky,
+    invalidate_host_probe_cache, note_host_ready, probe_host_lifecycle, probe_host_lifecycle_force,
+    resolve_timing_budget, wait_until_renderer_ready,
 };
 use super::http::read_browser_identity;
-use super::inject::{inject_once, remove_once};
-use super::keep::{keep_armed, start_keep, stop_keep};
-use super::launch::{ensure_debug_port, inject_budget, stop_host};
+use super::inject::{
+    begin_apply_operation, dismiss_apply_operation, finish_apply_operation, inject_art_followup,
+    inject_once_with_staged, next_op_token, op_token_current, remove_once, restamp_apply_operation,
+    soft_shell_present, wait_until_injectable, InjectOnceOpts, OperationKind,
+};
+use super::keep::{
+    art_generation, art_job_still_valid, keep_armed, start_keep, stop_keep,
+};
+use super::launch::{
+    ensure_debug_port, inject_budget_from, read_last_store_package, restart_host_fire_and_forget,
+    store_package_status_json,
+};
 use super::payload::build_staged_payload;
 use super::theme::{self, apply_desktop_theme, restore_desktop_theme};
 use crate::engine::{self, EngineError};
@@ -19,8 +29,10 @@ use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 pub const ENGINE_NAME: &str = "chatgpt-tools-engine";
-pub const ENGINE_VERSION: &str = "2.3.2";
+pub const ENGINE_VERSION: &str = "2.4.1";
 pub const ENGINE_PROTOCOL: u32 = 2;
+/// state.json schema: 2 = native keep; 3 = + Store package identity fields
+pub const STATE_SCHEMA: u32 = 3;
 pub const SHARED_PORT: u16 = 9335;
 
 /// Serialize apply/restore so concurrent GUI clicks cannot interleave CDP ops.
@@ -106,6 +118,42 @@ pub fn write_state(state: &Value) -> Result<(), EngineError> {
         return Err(EngineError::msg(format!("write state.json: {e}")));
     }
     Ok(())
+}
+
+/// Patch art flags after background / keep art work finishes.
+///
+/// Contract for GUI:
+/// - `artPending` is true only while work is still in flight
+/// - when art settles (ok or failed), `artPending` must become false so the
+///   active-skin pill does not stick on 「立绘加载中」
+pub(crate) fn patch_state_art_flags(skin_id: &str, art_ok: bool) {
+    let Some(mut st) = read_state() else {
+        return;
+    };
+    let still = st
+        .get("skinId")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        == skin_id;
+    if !still {
+        return;
+    }
+    if let Some(obj) = st.as_object_mut() {
+        obj.insert("artOk".into(), json!(art_ok));
+        // Terminal: never leave pending=true after the art job ends.
+        obj.insert("artPending".into(), json!(false));
+        if art_ok {
+            obj.insert("phase".into(), json!("active"));
+        }
+        obj.insert("artSettledAt".into(), json!(iso_now()));
+    }
+    if let Err(e) = write_state(&st) {
+        append_diag(&format!("patch_state_art_flags write failed: {e}"));
+    } else {
+        append_diag(&format!(
+            "state art settled skin={skin_id} artOk={art_ok} artPending=false"
+        ));
+    }
 }
 
 /// Archive (not silently truncate) a state file that must leave the active path.
@@ -216,9 +264,11 @@ fn read_skin_from_dir(dir: &Path, source: &str) -> Option<Value> {
 
 pub fn list_skins() -> Vec<Value> {
     let _ = ensure_state_dir();
+    // Priority: user > cache > bundled (later insert overwrites earlier).
     let mut map: std::collections::BTreeMap<String, Value> = std::collections::BTreeMap::new();
     for (root, source) in [
         (bundled_skins_dir(), "bundled"),
+        (state_root().join("cache").join("skins"), "cache"),
         (user_skins_dir(), "user"),
     ] {
         let Ok(entries) = fs::read_dir(&root) else {
@@ -229,7 +279,34 @@ pub fn list_skins() -> Vec<Value> {
             if !path.is_dir() {
                 continue;
             }
-            if let Some(skin) = read_skin_from_dir(&path, source) {
+            // Skip staging / backup dirs used by cloud install
+            let name = path
+                .file_name()
+                .map(|s| s.to_string_lossy().to_string())
+                .unwrap_or_default();
+            if name.starts_with('.') || name.starts_with('_') {
+                // `_template` and other author scaffolding — not installable skins
+                continue;
+            }
+            if let Some(mut skin) = read_skin_from_dir(&path, source) {
+                if let Some(obj) = skin.as_object_mut() {
+                    if source == "cache" {
+                        obj.insert("installState".into(), json!("ready"));
+                        let meta_path = path.join(".cache-meta.json");
+                        if let Ok(t) = fs::read_to_string(meta_path) {
+                            if let Ok(meta) = serde_json::from_str::<Value>(&t) {
+                                if let Some(v) = meta.get("version").cloned() {
+                                    obj.insert("cacheVersion".into(), v);
+                                }
+                                if let Some(v) = meta.get("sha256").cloned() {
+                                    obj.insert("cacheSha256".into(), v);
+                                }
+                            }
+                        }
+                    } else if !obj.contains_key("installState") {
+                        obj.insert("installState".into(), json!("ready"));
+                    }
+                }
                 if let Some(id) = skin.get("id").and_then(|v| v.as_str()).map(|s| s.to_string()) {
                     map.insert(id, skin);
                 }
@@ -442,7 +519,7 @@ fn rm_dir_recursive(path: &Path) -> Result<(), EngineError> {
     Ok(())
 }
 
-/// Delete user skin (or user override of bundled). No Node.
+/// Delete user skin, cache skin, or user override of bundled. No Node.
 pub fn delete_skin_native(skin_id: &str) -> Result<Value, EngineError> {
     let skin = get_skin(skin_id)?;
     let source = skin
@@ -454,6 +531,20 @@ pub fn delete_skin_native(skin_id: &str) -> Result<Value, EngineError> {
         .and_then(|v| v.as_bool())
         .unwrap_or(source == "bundled");
     let user_dir = user_skins_dir().join(skin_id);
+    let cache_dir = state_root().join("cache").join("skins").join(safe_skin_id(skin_id));
+
+    if source == "cache" {
+        if cache_dir.is_dir() {
+            rm_dir_recursive(&cache_dir)?;
+            return Ok(json!({
+                "ok": true,
+                "skinId": skin_id,
+                "removed": "cache",
+                "engine": "native-rust",
+            }));
+        }
+        return Err(EngineError::msg("未找到可删除的云端缓存皮肤"));
+    }
 
     if builtin || source == "bundled" {
         if user_dir.is_dir() {
@@ -468,6 +559,10 @@ pub fn delete_skin_native(skin_id: &str) -> Result<Value, EngineError> {
         return Err(EngineError::msg("内置皮肤不能删除，只能导出"));
     }
     if !user_dir.is_dir() {
+        // remote-only cards have no dir
+        if source == "remote" {
+            return Err(EngineError::msg("云端皮肤尚未下载，无需删除"));
+        }
         return Err(EngineError::msg("未找到可删除的用户皮肤"));
     }
     rm_dir_recursive(&user_dir)?;
@@ -556,21 +651,588 @@ fn resolve_exe_quick() -> Option<String> {
     None
 }
 
-/// `restart`: force stop+relaunch host (GUI auto-restart / desktopTheme refresh).
-/// Full path: materialize → write desktopTheme → ensure debug port → staged CDP inject.
-/// Theme is written **before** host restart so relaunch reads the new config.toml.
-pub fn apply_skin_native_opts(skin_id: &str, restart: bool) -> Result<Value, EngineError> {
-    let _guard = ENGINE_LOCK.lock();
-    let port = shared_port();
-    invalidate_host_probe_cache();
-    let before = probe_host_lifecycle_force(port);
-    let was_ready = before.can_hot_apply && !restart;
+/// Merge cached Store identity from last-store-package.json / previous state.
+fn merge_store_identity(prev: Option<&Value>) -> Value {
+    let mut store_identity = read_last_store_package().unwrap_or(json!({}));
+    if let Some(prev_state) = prev {
+        if store_identity
+            .get("packageFullName")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .is_empty()
+        {
+            if let Some(obj) = store_identity.as_object_mut() {
+                for key in [
+                    "packageFullName",
+                    "packageFamilyName",
+                    "aumid",
+                    "version",
+                    "installLocation",
+                    "executable",
+                ] {
+                    if let Some(v) = prev_state.get(key) {
+                        obj.insert(key.into(), v.clone());
+                    }
+                }
+            }
+        }
+    }
+    store_identity
+}
 
+/// Spawn background art after shell_ready. Cancelled when art generation bumps.
+/// Waits for page stability again so SPA hydrate does not drop large images.
+/// `cold_path`: cold/restart needs a longer settle before heavy art evaluate.
+fn spawn_background_art(
+    skin_dir: PathBuf,
+    root: PathBuf,
+    port: u16,
+    skin_id: String,
+    art_gen: u64,
+    cold_path: bool,
+) {
+    let _ = std::thread::Builder::new()
+        .name("skin-art".into())
+        .spawn(move || {
+            // Yield so shell_ready / host toast can flush first.
+            // Cold/restart: host may still remount after shell; wait longer before heavy art.
+            std::thread::sleep(std::time::Duration::from_millis(if cold_path {
+                700
+            } else {
+                80
+            }));
+            if !art_job_still_valid(art_gen) {
+                append_diag("apply art deferred: generation cancelled before start");
+                return;
+            }
+
+            // Re-confirm page is injectable (host often re-navigates after first paint).
+            let art_wait = if cold_path { 30_000 } else { 10_000 };
+            let stable = wait_until_injectable(
+                port,
+                art_wait,
+                280,
+                if cold_path { 3 } else { 2 },
+                if cold_path { 900 } else { 200 },
+            );
+            append_diag(&format!(
+                "apply art wait_injectable stable={stable} cold={cold_path}"
+            ));
+            if !stable && cold_path {
+                // One more soft wait: target exists but document not complete yet.
+                let _ = wait_until_renderer_ready(port, 8_000, 250);
+                let _ = wait_until_injectable(port, 12_000, 300, 3, 700);
+            }
+            if !art_job_still_valid(art_gen) {
+                append_diag("apply art deferred: generation cancelled after settle");
+                return;
+            }
+
+            let mut guard = None;
+            for attempt in 0..10 {
+                if !art_job_still_valid(art_gen) {
+                    return;
+                }
+                match engine_try_lock() {
+                    Some(g) => {
+                        guard = Some(g);
+                        break;
+                    }
+                    None => {
+                        std::thread::sleep(std::time::Duration::from_millis(100 + attempt * 50));
+                    }
+                }
+            }
+            let Some(_g) = guard else {
+                append_diag("apply art deferred: engine busy after retries");
+                return;
+            };
+            if !art_job_still_valid(art_gen) {
+                append_diag("apply art deferred: generation cancelled after lock");
+                return;
+            }
+            if read_state()
+                .and_then(|s| s.get("skinId").and_then(|v| v.as_str()).map(|x| x.to_string()))
+                .as_deref()
+                != Some(skin_id.as_str())
+            {
+                append_diag("apply art deferred: skin changed");
+                return;
+            }
+
+            // Up to 3 attempts: early SPA swaps can invalidate the first evaluate mid-decode.
+            let mut ok = false;
+            for attempt in 0..3u32 {
+                if !art_job_still_valid(art_gen) {
+                    return;
+                }
+                if attempt > 0 {
+                    std::thread::sleep(std::time::Duration::from_millis(
+                        500u64 + u64::from(attempt) * 400,
+                    ));
+                    let _ = wait_until_injectable(port, 6_000, 250, 2, 300);
+                }
+                match inject_art_followup(&skin_dir, &root, port) {
+                    Ok(art_res) => {
+                        ok = art_res
+                            .get("artOk")
+                            .and_then(|v| v.as_bool())
+                            .unwrap_or(false);
+                        append_diag(&format!(
+                            "apply art attempt={attempt} ok={ok} id={skin_id}"
+                        ));
+                        if ok {
+                            break;
+                        }
+                    }
+                    Err(e) => {
+                        append_diag(&format!("apply art attempt={attempt} err: {e}"));
+                    }
+                }
+            }
+
+            if art_job_still_valid(art_gen) {
+                // Always clear artPending when the job ends (success or failure).
+                // Leaving artPending=true on failure stuck the GUI pill on 「立绘加载中」.
+                patch_state_art_flags(&skin_id, ok);
+            }
+            append_diag(&format!("apply art background done ok={ok} id={skin_id}"));
+        });
+}
+
+/// Soft-inject shell with retries. Soft-miss: wait **page stable** only (no stop/relaunch).
+/// Silent: never begins/finishes page OpUI (caller owns one begin/finish per apply).
+fn soft_inject_shell(
+    skin_dir: &Path,
+    root: &Path,
+    port: u16,
+    staged: &super::payload::StagedPayload,
+    was_ready: bool,
+) -> Result<(bool, String), EngineError> {
+    let budget = inject_budget_from(port, None);
+    let soft_timeout = if was_ready {
+        budget.soft_once_timeout_ms.min(6_000)
+    } else {
+        // Cold / just-started host: allow longer soft verify while SPA settles.
+        // Floor 14s so slow first paint is not mistaken for inject failure.
+        budget.soft_once_timeout_ms.max(14_000)
+    };
+    let inject_opts = InjectOnceOpts {
+        soft: true,
+        timeout_ms: soft_timeout,
+        attach_art: false,
+    };
+
+    // Overall soft-verify window (production): keep retrying without kill/disarm.
+    // Hot path stays short; cold path can absorb ~90s of hydrate (matches ensure window).
+    let soft_deadline = std::time::Instant::now()
+        + std::time::Duration::from_millis(if was_ready { 12_000 } else { 90_000 });
+
+    let mut last_err: Option<String> = None;
+    let max_soft = if was_ready { 2 } else { 6 };
+    for i in 0..max_soft {
+        if std::time::Instant::now() >= soft_deadline {
+            break;
+        }
+        // Between cold attempts, re-check injectability — early SPA route swaps wipe shell.
+        if !was_ready && i > 0 {
+            let remain = soft_deadline
+                .saturating_duration_since(std::time::Instant::now())
+                .as_millis() as u64;
+            let _ = wait_until_injectable(port, remain.min(8_000).max(2_000), 250, 2, 400);
+        }
+        match inject_once_with_staged(skin_dir, root, port, inject_opts, staged) {
+            Ok(parsed) => {
+                if parsed.get("ok").and_then(|v| v.as_bool()).unwrap_or(false)
+                    || parsed
+                        .get("shellOk")
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(false)
+                {
+                    let shell_mode = parsed
+                        .get("shellMode")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("full")
+                        .to_string();
+                    return Ok((true, shell_mode));
+                }
+                last_err = Some("soft once did not pass".into());
+            }
+            Err(e) => last_err = Some(e.to_string()),
+        }
+        std::thread::sleep(std::time::Duration::from_millis(180 + i * 80));
+    }
+
+    // Soft miss: wait for document stable, re-inject — DO NOT ensure_debug_port/kill.
+    // Intermediate failures never finish OpUI as error (Scheme B).
     append_diag(&format!(
-        "apply_skin_native id={skin_id} restart={restart} lifecycle={} canHot={}",
-        before.lifecycle, before.can_hot_apply
+        "apply soft miss wasReady={was_ready} → wait injectable + retry (no kill) err={}",
+        last_err.as_deref().unwrap_or("?")
+    ));
+    let wait_budget = resolve_timing_budget(None);
+    let remain = soft_deadline
+        .saturating_duration_since(std::time::Instant::now())
+        .as_millis() as u64;
+    let _ = wait_until_renderer_ready(
+        port,
+        remain
+            .min(wait_budget.wait_renderer_ms)
+            .max(if was_ready { 4_000 } else { 12_000 }),
+        200,
+    );
+    let remain = soft_deadline
+        .saturating_duration_since(std::time::Instant::now())
+        .as_millis() as u64;
+    let _ = wait_until_injectable(
+        port,
+        remain.max(if was_ready { 4_000 } else { 12_000 }),
+        250,
+        if was_ready { 2 } else { 3 },
+        if was_ready { 300 } else { 700 },
+    );
+    let retry_opts = InjectOnceOpts {
+        soft: true,
+        timeout_ms: soft_timeout.max(12_000),
+        attach_art: false,
+    };
+    // Keep retrying until soft_deadline — never stop_keep / kill on soft miss.
+    while std::time::Instant::now() < soft_deadline {
+        std::thread::sleep(std::time::Duration::from_millis(280));
+        match inject_once_with_staged(skin_dir, root, port, retry_opts, staged) {
+            Ok(parsed)
+                if parsed.get("ok").and_then(|v| v.as_bool()).unwrap_or(false)
+                    || parsed
+                        .get("shellOk")
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(false) =>
+            {
+                let shell_mode = parsed
+                    .get("shellMode")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("full")
+                    .to_string();
+                return Ok((true, shell_mode));
+            }
+            Ok(_) => {}
+            Err(e) => last_err = Some(e.to_string()),
+        }
+        // Re-probe injectability between attempts (SPA may still be swapping).
+        if !was_ready {
+            let remain = soft_deadline
+                .saturating_duration_since(std::time::Instant::now())
+                .as_millis() as u64;
+            if remain > 1_500 {
+                let _ = wait_until_injectable(port, remain.min(6_000), 280, 2, 400);
+            }
+        }
+    }
+
+    Err(EngineError::msg(format!(
+        "换肤未完成（native CDP）: {}",
+        last_err.unwrap_or_else(|| "unknown".into())
+    )))
+}
+
+/// Background worker: wait host **injectable** (not just app://) → shell → keep + art.
+/// Scheme B: one OpUI begin after page is injectable, one finish from final shell_ok.
+fn background_cold_apply(
+    skin_id: String,
+    skin_dir: PathBuf,
+    root: PathBuf,
+    port: u16,
+    restart: bool,
+    art_gen: u64,
+    theme_result: Value,
+    store_identity: Value,
+    started_at: String,
+    op_token: u64,
+) {
+    let t0 = std::time::Instant::now();
+    append_diag(&format!(
+        "background_cold_apply begin id={skin_id} restart={restart} gen={art_gen} op={op_token}"
     ));
 
+    let budget = resolve_timing_budget(None);
+    // Phase A: wait until CDP has an app:// target (process/port up).
+    // Wide window (≥90s) so slow Store first paint is not mistaken for failure.
+    let phase_a_ms = (budget.wait_renderer_ms + budget.wait_debug_port_ms)
+        .max(90_000)
+        .min(120_000);
+    let has_target = wait_until_renderer_ready(port, phase_a_ms, budget.poll_ms);
+    if !has_target {
+        // ensure_debug_port itself uses a wide verify window; do not disarm keep on soft path.
+        if let Err(e) = ensure_debug_port(port, false) {
+            append_diag(&format!("background_cold_apply ensure failed: {e}"));
+            finish_apply_operation(port, op_token, false, "应用未完成");
+            if let Some(mut st) = read_state() {
+                if let Some(obj) = st.as_object_mut() {
+                    obj.insert("phase".into(), json!("error"));
+                    obj.insert("lastError".into(), json!(e.to_string()));
+                }
+                let _ = write_state(&st);
+            }
+            return;
+        }
+    }
+
+    // Phase B: wait until document is actually stable (readyState + real DOM + chrome).
+    // Cold restart injects too early here used to fail shell + drop wallpaper/art.
+    // Restart needs a longer hold: host often remounts once after first paint.
+    let inject_timeout = budget
+        .wait_renderer_ms
+        .max(if restart { 45_000 } else { 35_000 })
+        .min(90_000);
+    let hold_ms = if restart { 1_400 } else { 1_000 };
+    let injectable = wait_until_injectable(
+        port,
+        inject_timeout,
+        budget.poll_ms.max(240),
+        3, // consecutive stable probes
+        hold_ms,
+    );
+    append_diag(&format!(
+        "background_cold_apply injectable={injectable} restart={restart} t={}ms",
+        t0.elapsed().as_millis()
+    ));
+    if !injectable {
+        // Soft fallback: wait more without killing the host or disarming keep.
+        let again = wait_until_injectable(port, 30_000, 300, 3, 1_000);
+        append_diag(&format!("background_cold_apply injectable retry={again}"));
+        if !again {
+            finish_apply_operation(
+                port,
+                op_token,
+                false,
+                "宿主尚未就绪",
+            );
+            if let Some(mut st) = read_state() {
+                if let Some(obj) = st.as_object_mut() {
+                    obj.insert("phase".into(), json!("error"));
+                    obj.insert(
+                        "lastError".into(),
+                        json!("宿主页面尚未完成启动，皮肤注入超时。请稍后再试或重新换肤。"),
+                    );
+                }
+                let _ = write_state(&st);
+            }
+            return;
+        }
+    }
+
+    if !art_job_still_valid(art_gen) {
+        append_diag("background_cold_apply cancelled (art gen)");
+        dismiss_apply_operation(port, op_token);
+        return;
+    }
+    note_host_ready(port);
+    // Single begin: after page is injectable so boot splash does not wipe the toast.
+    // Cold reserved `op_token` at fire-and-forget; restamp paints it without allocating.
+    if op_token_current(op_token) {
+        restamp_apply_operation(port, OperationKind::Apply, op_token);
+    }
+
+    let staged = match build_staged_payload(&skin_dir, &root) {
+        Ok(s) => s,
+        Err(e) => {
+            append_diag(&format!("background_cold_apply staged: {e}"));
+            finish_apply_operation(port, op_token, false, "应用未完成");
+            return;
+        }
+    };
+    let markers = staged.markers.clone();
+    let has_art = staged.has_art;
+
+    // Phase C: inject with soft retries (still no kill on soft-miss). Silent inject.
+    let inject = soft_inject_shell(&skin_dir, &root, port, &staged, false);
+    let (shell_ok, shell_mode) = match inject {
+        Ok(v) => v,
+        Err(e) => {
+            // One late retry after extra hydrate wait (common: first inject during route swap).
+            append_diag(&format!(
+                "background_cold_apply inject fail → hydrate wait + retry: {e}"
+            ));
+            let _ = wait_until_injectable(port, 15_000, 280, 3, 1_000);
+            if !art_job_still_valid(art_gen) {
+                dismiss_apply_operation(port, op_token);
+                return;
+            }
+            match soft_inject_shell(&skin_dir, &root, port, &staged, false) {
+                Ok(v) => v,
+                Err(e2) => {
+                    append_diag(&format!("background_cold_apply inject final fail: {e2}"));
+                    finish_apply_operation(port, op_token, false, "应用未完成");
+                    if let Some(mut st) = read_state() {
+                        if let Some(obj) = st.as_object_mut() {
+                            obj.insert("phase".into(), json!("error"));
+                            obj.insert("lastError".into(), json!(e2.to_string()));
+                            obj.insert("shellOk".into(), json!(false));
+                        }
+                        let _ = write_state(&st);
+                    }
+                    return;
+                }
+            }
+        }
+    };
+
+    if !art_job_still_valid(art_gen) {
+        append_diag("background_cold_apply cancelled after inject");
+        dismiss_apply_operation(port, op_token);
+        return;
+    }
+
+    // Phase D: brief settle, then **conditional** repair only if soft markers vanished.
+    // Unconditional second inject doubled host CDP cost on every cold success path.
+    std::thread::sleep(std::time::Duration::from_millis(if restart {
+        650
+    } else {
+        400
+    }));
+    let still_stable = wait_until_injectable(port, 6_000, 220, 2, 400);
+    let soft_still = soft_shell_present(port, &markers);
+    append_diag(&format!(
+        "background_cold_apply post-shell stable={still_stable} softPresent={soft_still}"
+    ));
+    if still_stable && !soft_still {
+        let repair = InjectOnceOpts {
+            soft: true,
+            timeout_ms: 6_000,
+            attach_art: false,
+        };
+        match inject_once_with_staged(&skin_dir, &root, port, repair, &staged) {
+            Ok(parsed) => {
+                let ok = parsed.get("ok").and_then(|v| v.as_bool()).unwrap_or(false)
+                    || parsed
+                        .get("shellOk")
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(false);
+                append_diag(&format!(
+                    "background_cold_apply post-shell conditional repair ok={ok}"
+                ));
+            }
+            Err(e) => {
+                append_diag(&format!(
+                    "background_cold_apply post-shell conditional repair err: {e}"
+                ));
+            }
+        }
+    } else if soft_still {
+        append_diag("background_cold_apply post-shell repair skipped (soft present)");
+    }
+
+    if !art_job_still_valid(art_gen) {
+        dismiss_apply_operation(port, op_token);
+        return;
+    }
+
+    let browser_id = read_browser_identity(port)
+        .ok()
+        .map(|b| b.browser_id);
+    let art_ok = !has_art;
+    let art_pending = has_art;
+    let apply_mode = if restart {
+        "native-restart-async"
+    } else {
+        "native-cold-async"
+    };
+
+    let state = json!({
+        "schema": STATE_SCHEMA,
+        "skinId": skin_id,
+        "port": port,
+        "browserId": browser_id,
+        "startedAt": started_at,
+        "platform": std::env::consts::OS,
+        "skinDir": skin_dir.to_string_lossy(),
+        "phase": "active",
+        "shellOk": shell_ok,
+        "artOk": art_ok,
+        "artPending": art_pending,
+        "applyMode": apply_mode,
+        "shellMode": shell_mode,
+        "verifiedAt": iso_now(),
+        "engineVersion": ENGINE_VERSION,
+        "nativeEngine": true,
+        "packageFullName": store_identity.get("packageFullName").cloned().unwrap_or(json!(null)),
+        "packageFamilyName": store_identity.get("packageFamilyName").cloned().unwrap_or(json!(null)),
+        "aumid": store_identity.get("aumid").cloned().unwrap_or(json!(null)),
+        "packageVersion": store_identity.get("version").cloned().unwrap_or(json!(null)),
+        "codexPackageRoot": store_identity.get("installLocation").cloned().unwrap_or(json!(null)),
+        "codexExecutable": store_identity.get("executable").cloned().unwrap_or(json!(null)),
+        "theme": theme_result,
+        "injectorPid": null,
+        "nodeRequired": false,
+    });
+    let _ = write_state(&state);
+    // Keep only after shell is verified — avoid re-inject storm during boot.
+    start_keep(port, &skin_id, skin_dir.clone(), markers, has_art);
+    append_diag(&format!(
+        "background_cold_apply shell_ready id={skin_id} mode={apply_mode} t={}ms",
+        t0.elapsed().as_millis()
+    ));
+
+    // Single finish from final shell_ok (Scheme B) — not intermediate soft-verify.
+    let op_done_msg = if shell_ok {
+        if has_art {
+            "样式已应用 · 壁纸加载中"
+        } else {
+            "皮肤已应用"
+        }
+    } else {
+        "应用未完成"
+    };
+    finish_apply_operation(port, op_token, shell_ok, op_done_msg);
+
+    if has_art && art_job_still_valid(art_gen) {
+        // Cold art: long settle + multi-retry so large images are not dropped mid-hydrate.
+        spawn_background_art(skin_dir, root, port, skin_id, art_gen, true);
+    }
+}
+
+/// `restart`: force stop+relaunch (fire-and-forget for cold/restart).
+/// Theme is written **before** host restart so relaunch reads the new config.toml.
+///
+/// - Hot path: sync shell inject, return shell_ready; art async
+/// - Cold/restart: stop+launch, return `phase=restarting` immediately; inject in background
+pub fn apply_skin_native_opts(skin_id: &str, restart: bool) -> Result<Value, EngineError> {
+    let apply_t0 = std::time::Instant::now();
+    let _guard = ENGINE_LOCK.lock();
+    let port = shared_port();
+
+    let cached = probe_host_lifecycle(port);
+    let before = if restart
+        || !cached.can_hot_apply
+        || cached.lifecycle != "ready"
+        || !cached.renderer_ready
+    {
+        if restart {
+            invalidate_host_lifecycle_sticky();
+        } else {
+            invalidate_host_probe_cache();
+        }
+        probe_host_lifecycle_force(port)
+    } else {
+        cached
+    };
+    let was_ready = before.can_hot_apply && !restart && before.renderer_ready;
+    let needs_async_restart = restart || !was_ready;
+
+    append_diag(&format!(
+        "apply_skin_native id={skin_id} restart={restart} lifecycle={} canHot={} wasReady={} async={} t={}ms",
+        before.lifecycle,
+        before.can_hot_apply,
+        was_ready,
+        needs_async_restart,
+        apply_t0.elapsed().as_millis()
+    ));
+
+    let op_kind = if was_ready {
+        OperationKind::Switch
+    } else {
+        OperationKind::Apply
+    };
+
+    // Resolve skin before any page OpUI (avoid loading toast on missing skin).
     let base = get_skin(skin_id)?;
     let skin = materialize_skin(&base)?;
     let skin_dir = PathBuf::from(
@@ -584,16 +1246,25 @@ pub fn apply_skin_native_opts(skin_id: &str, restart: bool) -> Result<Value, Eng
         .unwrap_or(skin_id)
         .to_string();
 
+    // Scheme B: one op token per user apply after skin is valid.
+    // Hot: begin now. Cold: reserve token; restamp after page is injectable.
+    let op_token = if was_ready {
+        begin_apply_operation(port, op_kind)
+    } else {
+        next_op_token()
+    };
+
     set_paused(false);
     let root = engine::project_root();
 
-    // Desktop chrome theme MUST be written before ensure_debug_port(restart):
-    // host only reloads ~/.codex/config.toml [desktop] on process start.
-    // Non-fatal for CSS skins, but surface result so UI/diag can show skip reason.
+    // Desktop chrome theme MUST be written before host restart.
     let theme_result = if let Some(dt) = skin.get("desktopTheme") {
         match apply_desktop_theme(dt, &state_root()) {
             Ok(v) => {
-                append_diag(&format!("apply_desktop_theme ok: {v}"));
+                append_diag(&format!(
+                    "apply_desktop_theme ok t={}ms: {v}",
+                    apply_t0.elapsed().as_millis()
+                ));
                 v
             }
             Err(e) => {
@@ -606,31 +1277,154 @@ pub fn apply_skin_native_opts(skin_id: &str, restart: bool) -> Result<Value, Eng
         json!({ "skipped": true, "reason": "no desktopTheme" })
     };
 
-    // Cold start / restart: bring host to injectable renderer without Node.
-    ensure_debug_port(port, restart)?;
+    let prev = read_state();
+    let started_at = prev
+        .as_ref()
+        .and_then(|p| p.get("startedAt").and_then(|v| v.as_str()))
+        .map(|s| s.to_string())
+        .unwrap_or_else(iso_now);
+    let store_identity = merge_store_identity(prev.as_ref());
 
-    let probe = probe_host_lifecycle_force(port);
-    if !probe.renderer_ready && !probe.can_hot_apply {
-        return Err(EngineError::msg(format!(
-            "调试端口已处理但渲染页未就绪（lifecycle={}）",
-            probe.lifecycle
-        )));
+    // ── Cold / restart: fire-and-forget ───────────────────────────────────
+    if needs_async_restart {
+        // Kill + launch only; do not wait for renderer on this thread.
+        // stop_host (inside restart) disarms keep + bumps art gen — capture gen AFTER kill.
+        let launch_res = if restart || before.process_running || before.debug_port_open {
+            restart_host_fire_and_forget(port)
+        } else {
+            stop_keep();
+            invalidate_host_lifecycle_sticky();
+            super::launch::launch_host(port)
+        };
+        if let Err(e) = launch_res {
+            dismiss_apply_operation(port, op_token);
+            return Err(e);
+        }
+        let art_gen = art_generation();
+
+        let apply_mode = if restart {
+            "native-restart-async"
+        } else {
+            "native-cold-async"
+        };
+        let state = json!({
+            "schema": STATE_SCHEMA,
+            "skinId": id,
+            "port": port,
+            "startedAt": started_at,
+            "platform": std::env::consts::OS,
+            "skinDir": skin_dir.to_string_lossy(),
+            "phase": "restarting",
+            "shellOk": false,
+            "artOk": false,
+            "artPending": true,
+            "applyMode": apply_mode,
+            "engineVersion": ENGINE_VERSION,
+            "nativeEngine": true,
+            "packageFullName": store_identity.get("packageFullName").cloned().unwrap_or(json!(null)),
+            "packageFamilyName": store_identity.get("packageFamilyName").cloned().unwrap_or(json!(null)),
+            "aumid": store_identity.get("aumid").cloned().unwrap_or(json!(null)),
+            "theme": theme_result,
+            "nodeRequired": false,
+        });
+        if let Err(e) = write_state(&state) {
+            dismiss_apply_operation(port, op_token);
+            return Err(e);
+        }
+
+        let bg_id = id.clone();
+        let bg_dir = skin_dir.clone();
+        let bg_root = root.clone();
+        let bg_theme = theme_result.clone();
+        let bg_store = store_identity.clone();
+        let bg_started = started_at.clone();
+        let bg_gen = art_gen;
+        let bg_op = op_token;
+        let _ = std::thread::Builder::new()
+            .name("skin-cold-apply".into())
+            .spawn(move || {
+                background_cold_apply(
+                    bg_id,
+                    bg_dir,
+                    bg_root,
+                    port,
+                    restart,
+                    bg_gen,
+                    bg_theme,
+                    bg_store,
+                    bg_started,
+                    bg_op,
+                );
+            });
+
+        append_diag(&format!(
+            "apply_skin_native fire-and-forget id={id} mode={apply_mode} t={}ms",
+            apply_t0.elapsed().as_millis()
+        ));
+
+        return Ok(json!({
+            "ok": true,
+            "skinId": id,
+            "port": port,
+            "verified": false,
+            "pending": true,
+            "phase": "restarting",
+            "message": if restart { "正在重启客户端…" } else { "正在启动客户端…" },
+            "applyMode": apply_mode,
+            "shellOk": false,
+            "artOk": false,
+            "artPending": true,
+            "lifecycle": "starting",
+            "engineVersion": ENGINE_VERSION,
+            "engine": "native-rust",
+            "native": true,
+            "nodeRequired": false,
+            "restarted": true,
+            "keepAlive": false,
+            "theme": theme_result,
+            "storePackage": store_identity,
+            "feedback": "gui",
+        }));
     }
-    note_host_ready(port);
 
-    // Preflight payload assembly (catches bad skins before CDP).
-    let staged = build_staged_payload(&skin_dir, &root)
-        .map_err(|e| EngineError::msg(e.to_string()))?;
+    // ── Hot path (sync shell) ─────────────────────────────────────────────
+    note_host_ready(port);
+    append_diag(&format!(
+        "apply skip ensure_debug_port (hot ready) t={}ms",
+        apply_t0.elapsed().as_millis()
+    ));
+
+    let staged = match build_staged_payload(&skin_dir, &root) {
+        Ok(s) => s,
+        Err(e) => {
+            finish_apply_operation(port, op_token, false, "应用未完成");
+            return Err(EngineError::msg(e.to_string()));
+        }
+    };
     let markers = staged.markers.clone();
+    let has_art = staged.has_art;
+    append_diag(&format!(
+        "apply staged shellOk cache={} hasArt={} shellBytes={} t={}ms",
+        staged.cache_hit,
+        has_art,
+        staged.shell_bytes,
+        apply_t0.elapsed().as_millis()
+    ));
+
+    let inject_result = soft_inject_shell(&skin_dir, &root, port, &staged, true);
+    let (shell_ok, shell_mode) = match inject_result {
+        Ok(v) => v,
+        Err(e) => {
+            // Final outcome only — intermediate soft-miss never finished as error.
+            finish_apply_operation(port, op_token, false, "应用未完成");
+            return Err(e);
+        }
+    };
 
     let browser_id = read_browser_identity(port)
         .ok()
         .map(|b| b.browser_id);
-
-    let prev = read_state();
-    let apply_mode = if restart || !was_ready {
-        "native-cold"
-    } else if prev
+    let apply_mode = if prev
         .as_ref()
         .and_then(|p| p.get("skinId").and_then(|v| v.as_str()))
         == Some(id.as_str())
@@ -639,91 +1433,18 @@ pub fn apply_skin_native_opts(skin_id: &str, restart: bool) -> Result<Value, Eng
     } else {
         "native-hot-switch"
     };
-
-    let budget = inject_budget(port);
-    let soft_timeout = budget.soft_once_timeout_ms;
-
-    let mut last_err: Option<String> = None;
-    let mut verified = false;
-    let mut shell_ok = false;
-    let mut art_ok = false;
-    let mut art_pending = true;
-    let mut shell_mode = "full".to_string();
-
-    for i in 0..5 {
-        match inject_once(&skin_dir, &root, port, true, soft_timeout) {
-            Ok(parsed) => {
-                if parsed.get("ok").and_then(|v| v.as_bool()).unwrap_or(false)
-                    || parsed
-                        .get("shellOk")
-                        .and_then(|v| v.as_bool())
-                        .unwrap_or(false)
-                {
-                    verified = true;
-                    shell_ok = true;
-                    art_ok = parsed
-                        .get("artOk")
-                        .and_then(|v| v.as_bool())
-                        .unwrap_or(false);
-                    art_pending = parsed
-                        .get("artPending")
-                        .and_then(|v| v.as_bool())
-                        .unwrap_or(!art_ok);
-                    shell_mode = parsed
-                        .get("shellMode")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("full")
-                        .to_string();
-                    break;
-                }
-                last_err = Some("soft once did not pass".into());
-            }
-            Err(e) => last_err = Some(e.to_string()),
-        }
-        std::thread::sleep(std::time::Duration::from_millis(250 + i * 100));
-    }
-
-    if !verified {
-        for _ in 0..4 {
-            std::thread::sleep(std::time::Duration::from_millis(300));
-            match inject_once(&skin_dir, &root, port, true, soft_timeout.max(12_000)) {
-                Ok(parsed)
-                    if parsed.get("ok").and_then(|v| v.as_bool()).unwrap_or(false)
-                        || parsed
-                            .get("shellOk")
-                            .and_then(|v| v.as_bool())
-                            .unwrap_or(false) =>
-                {
-                    verified = true;
-                    shell_ok = true;
-                    art_ok = parsed
-                        .get("artOk")
-                        .and_then(|v| v.as_bool())
-                        .unwrap_or(false);
-                    art_pending = !art_ok;
-                    break;
-                }
-                Ok(_) => {}
-                Err(e) => last_err = Some(e.to_string()),
-            }
-        }
-    }
-
-    if !verified {
-        return Err(EngineError::msg(format!(
-            "换肤未完成（native CDP）: {}",
-            last_err.unwrap_or_else(|| "unknown".into())
-        )));
-    }
-
-    let started_at = prev
-        .as_ref()
-        .and_then(|p| p.get("startedAt").and_then(|v| v.as_str()))
-        .map(|s| s.to_string())
-        .unwrap_or_else(iso_now);
+    let art_ok = !has_art;
+    let art_pending = has_art;
+    let message = if art_pending {
+        "样式已应用 · 壁纸加载中"
+    } else {
+        "皮肤已应用"
+    };
+    // Single finish from final shell_ok (Scheme B).
+    finish_apply_operation(port, op_token, shell_ok, message);
 
     let state = json!({
-        "schema": 2,
+        "schema": STATE_SCHEMA,
         "skinId": id,
         "port": port,
         "browserId": browser_id,
@@ -735,19 +1456,33 @@ pub fn apply_skin_native_opts(skin_id: &str, restart: bool) -> Result<Value, Eng
         "artOk": art_ok,
         "artPending": art_pending,
         "applyMode": apply_mode,
+        "shellMode": shell_mode,
         "verifiedAt": iso_now(),
         "engineVersion": ENGINE_VERSION,
         "nativeEngine": true,
-        // No Node injector process on pure native path
+        "packageFullName": store_identity.get("packageFullName").cloned().unwrap_or(json!(null)),
+        "packageFamilyName": store_identity.get("packageFamilyName").cloned().unwrap_or(json!(null)),
+        "aumid": store_identity.get("aumid").cloned().unwrap_or(json!(null)),
+        "packageVersion": store_identity.get("version").cloned().unwrap_or(json!(null)),
+        "codexPackageRoot": store_identity.get("installLocation").cloned().unwrap_or(json!(null)),
+        "codexExecutable": store_identity.get("executable").cloned().unwrap_or(json!(null)),
         "injectorPid": null,
         "injectorScript": null,
         "nodePath": null,
+        "nodeRequired": false,
     });
     write_state(&state)?;
-    // Keep skin across ChatGPT refresh / SPA navigation without Node watch injector.
-    start_keep(port, &id, skin_dir.clone(), markers);
+    start_keep(port, &id, skin_dir.clone(), markers, has_art);
+
+    let art_gen = art_generation();
+    if has_art {
+        // Hot path: host already painted — short settle only.
+        spawn_background_art(skin_dir.clone(), root, port, id.clone(), art_gen, false);
+    }
+
     append_diag(&format!(
-        "apply_skin_native ok id={id} mode={apply_mode} shellOk={shell_ok} artOk={art_ok} keep=1"
+        "apply_skin_native shell_ready id={id} mode={apply_mode} shellOk={shell_ok} artPending={art_pending} shellMode={shell_mode} feedback=host keep=1 t={}ms",
+        apply_t0.elapsed().as_millis()
     ));
 
     Ok(json!({
@@ -761,15 +1496,21 @@ pub fn apply_skin_native_opts(skin_id: &str, restart: bool) -> Result<Value, Eng
         "artOk": art_ok,
         "artPending": art_pending,
         "shellMode": shell_mode,
+        "deltaPreferred": shell_mode == "delta",
         "browserId": browser_id,
         "skinDir": skin_dir.to_string_lossy(),
         "lifecycle": "ready",
         "engineVersion": ENGINE_VERSION,
         "engine": "native-rust",
         "native": true,
-        "restarted": restart || !was_ready,
+        "nodeRequired": false,
+        "restarted": false,
         "keepAlive": true,
         "theme": theme_result,
+        "storePackage": store_identity,
+        "feedback": "host",
+        "message": message,
+        "phase": if art_pending { "art_pending" } else { "shell_ready" },
     }))
 }
 
@@ -883,6 +1624,50 @@ pub fn resume_skin_native(restart: bool) -> Result<Value, EngineError> {
     apply_skin_native_opts(&skin_id, restart)
 }
 
+/// GUI「启动 ChatGPT」: launch host with debug port.
+/// If last session has a skinId → apply that skin (cold path).
+/// Otherwise only bring the client up so later apply can hot-inject.
+pub fn start_host_native() -> Result<Value, EngineError> {
+    let port = shared_port();
+    let last_skin = read_state()
+        .as_ref()
+        .and_then(|s| s.get("skinId").and_then(|v| v.as_str()))
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string());
+
+    if let Some(skin_id) = last_skin {
+        // Clear pause so apply re-enables keep-alive after inject.
+        set_paused(false);
+        append_diag(&format!(
+            "start_host_native: apply last skin id={skin_id}"
+        ));
+        let mut result = apply_skin_native_opts(&skin_id, false)?;
+        if let Some(obj) = result.as_object_mut() {
+            obj.insert("started".into(), json!(true));
+            obj.insert("mode".into(), json!("apply-last-skin"));
+            obj.insert("skinId".into(), json!(skin_id));
+        }
+        return Ok(result);
+    }
+
+    append_diag("start_host_native: cold launch without skin session");
+    ensure_debug_port(port, false)?;
+    invalidate_host_probe_cache();
+    let life = probe_host_lifecycle_force(port);
+    Ok(json!({
+        "ok": true,
+        "started": true,
+        "mode": "launch-only",
+        "port": port,
+        "lifecycle": life.lifecycle,
+        "debugPortOpen": life.debug_port_open,
+        "rendererReady": life.renderer_ready,
+        "canHotApply": life.can_hot_apply,
+        "engine": "native-rust",
+        "native": true,
+    }))
+}
+
 /// Full native restore: CDP remove (if ready) + strip theme + clear state.
 /// Optional soft relaunch of host when it was running (desktop chrome refresh).
 /// Does not claim full success when a live remove failed (Dream restore honesty).
@@ -950,10 +1735,24 @@ pub fn restore_skin_native(restore_theme: bool) -> Result<Value, EngineError> {
     let mut relaunched = false;
     if was_running && restore_theme {
         append_diag("restore_skin_native: soft relaunch host for chrome theme");
-        stop_host();
-        std::thread::sleep(std::time::Duration::from_millis(700));
-        match ensure_debug_port(port, false) {
-            Ok(()) => relaunched = true,
+        stop_keep();
+        match restart_host_fire_and_forget(port) {
+            Ok(_) => {
+                let budget = resolve_timing_budget(None);
+                if wait_until_renderer_ready(
+                    port,
+                    budget.wait_renderer_ms.min(30_000),
+                    budget.poll_ms,
+                ) {
+                    note_host_ready(port);
+                    relaunched = true;
+                } else {
+                    match ensure_debug_port(port, false) {
+                        Ok(()) => relaunched = true,
+                        Err(e) => append_diag(&format!("restore relaunch soft-fail: {e}")),
+                    }
+                }
+            }
             Err(e) => append_diag(&format!("restore relaunch soft-fail: {e}")),
         }
     }
@@ -1039,6 +1838,24 @@ pub fn get_status_native() -> Result<Value, EngineError> {
         .collect();
 
     let keep = keep_armed();
+    // Reuse host_status fields so GUI gets boot appearance snapshot on full status too.
+    let host_extra = super::host::host_lifecycle_to_json(&life, keep);
+    let boot_theme = host_extra.get("hostBootAppearanceTheme").cloned();
+    let config_theme = host_extra.get("configAppearanceTheme").cloned();
+    let shell_ok = state
+        .as_ref()
+        .and_then(|s| s.get("shellOk").and_then(|v| v.as_bool()))
+        .unwrap_or(false);
+    let art_ok = state
+        .as_ref()
+        .and_then(|s| s.get("artOk").and_then(|v| v.as_bool()))
+        .unwrap_or(false);
+    let art_pending_raw = state
+        .as_ref()
+        .and_then(|s| s.get("artPending").and_then(|v| v.as_bool()))
+        .unwrap_or(false);
+    // Normalize: never report pending when art already ok (stale state safety).
+    let art_pending = art_pending_raw && !art_ok;
     Ok(json!({
         "platform": std::env::consts::OS,
         "configPath": theme::config_path().to_string_lossy(),
@@ -1056,14 +1873,16 @@ pub fn get_status_native() -> Result<Value, EngineError> {
         "canHotApply": life.can_hot_apply,
         "needsRestartForInject": life.needs_restart_for_inject,
         "hostPids": life.pids,
+        "hostBootAppearanceTheme": boot_theme.unwrap_or(Value::Null),
+        "configAppearanceTheme": config_theme.unwrap_or(Value::Null),
         "paused": paused,
         "protocol": ENGINE_PROTOCOL,
         "engineVersion": ENGINE_VERSION,
         "engineName": ENGINE_NAME,
         "ok": true,
-        "shellOk": state.as_ref().and_then(|s| s.get("shellOk").and_then(|v| v.as_bool())).unwrap_or(false),
-        "artOk": state.as_ref().and_then(|s| s.get("artOk").and_then(|v| v.as_bool())).unwrap_or(false),
-        "artPending": state.as_ref().and_then(|s| s.get("artPending").and_then(|v| v.as_bool())).unwrap_or(false),
+        "shellOk": shell_ok,
+        "artOk": art_ok,
+        "artPending": art_pending,
         "injectorAlive": false,
         "keepAlive": keep,
         "configuredAppPath": get_configured_app_path(),
@@ -1075,6 +1894,36 @@ pub fn get_status_native() -> Result<Value, EngineError> {
         },
         "nativeEngine": true,
         "engine": "native-rust",
+        "nodeRequired": false,
+        "shellMode": state
+            .as_ref()
+            .and_then(|s| s.get("shellMode").cloned())
+            .unwrap_or(Value::Null),
+        "applyMode": state
+            .as_ref()
+            .and_then(|s| s.get("applyMode").cloned())
+            .unwrap_or(Value::Null),
+        // Store package snapshot for GUI (PowerShell); not on apply hot path.
+        "storePackage": store_package_status_json(),
+        // Cheap stale hint: compare state full name vs last-store-package cache only.
+        // Full Get-AppxPackage re-check stays on detect/launch — avoid double PS on every status.
+        "storePackageStale": state
+            .as_ref()
+            .map(|s| {
+                let full = s.get("packageFullName").and_then(|v| v.as_str()).unwrap_or("");
+                if full.is_empty() {
+                    return false;
+                }
+                let cached = read_last_store_package()
+                    .and_then(|v| {
+                        v.get("packageFullName")
+                            .and_then(|x| x.as_str())
+                            .map(|s| s.to_string())
+                    })
+                    .unwrap_or_default();
+                !cached.is_empty() && cached != full
+            })
+            .unwrap_or(false),
         "skins": skins,
     }))
 }
@@ -1095,11 +1944,17 @@ pub fn detect_native() -> Result<Value, EngineError> {
     let exe = resolve_exe_quick();
     let configured = get_configured_app_path();
     let found = exe.is_some() || configured.is_some();
+    let store = store_package_status_json();
+    let aumid = store
+        .get("aumid")
+        .cloned()
+        .unwrap_or(Value::Null);
     let mut body = host_lifecycle_to_json(&life, keep_armed());
     if let Some(obj) = body.as_object_mut() {
         obj.insert("platform".into(), json!(std::env::consts::OS));
         obj.insert("exe".into(), json!(exe));
-        obj.insert("aumid".into(), Value::Null);
+        obj.insert("aumid".into(), aumid);
+        obj.insert("storePackage".into(), store);
         obj.insert("configuredAppPath".into(), json!(configured));
         obj.insert("configExists".into(), json!(theme::config_path().is_file()));
         obj.insert(
@@ -1112,6 +1967,8 @@ pub fn detect_native() -> Result<Value, EngineError> {
         );
         obj.insert("debugPort".into(), json!(port));
         obj.insert("found".into(), json!(found));
+        obj.insert("nodeRequired".into(), json!(false));
+        obj.insert("nativeEngine".into(), json!(true));
     }
     Ok(body)
 }

@@ -3,9 +3,9 @@
   "name": "烟雨客 · ᐝ久憶",
   "nameEn": "Rainy Jianghu jiuyi",
   "description": "烟雨巷陌，油纸伞下的江湖限定；暗色毛玻璃与朱砂印（Dark 模式）",
+  "categories": ["game", "nature", "art"],
   "tags": [
     "烟雨",
-    "江湖",
     "武侠",
     "暗色",
     "Dark",
@@ -16,8 +16,8 @@
   "port": 9336,
   "assets": {
     "css": "assets/jiuyi-skin.css",
-    "art": "assets/jiuyi.png",
-    "artMime": "image/png",
+    "art": "assets/bg-jiuyi.jpg",
+    "artMime": "image/jpeg",
     "plugin": "assets/plugin.json"
   },
   "markers": {
@@ -38,10 +38,12 @@
   },
   "appearance": "dark",
   "art": {
+    "mode": "token-only",
+    "paint": "custom",
     "focusX": 0.78,
     "focusY": 0.42,
     "safeArea": "left",
     "taskMode": "ambient"
   },
-  "version": "2.3.1"
+  "version": "2.3.17"
 }

@@ -1,13 +1,15 @@
 # ChatGPT Tools（Tauri 2）
 
-轻量、跨平台的 **ChatGPT / Codex 桌面端换肤工具箱**。
+轻量、跨平台的 **ChatGPT / Codex 桌面端工具箱**。
 
 - **产品名**：ChatGPT Tools  
 - **UI 壳**：Tauri 2（系统 WebView，体积与内存远低于 Electron）  
-- **业务引擎**：`engine/`（Node.js CDP 注入，**v2.2 共享 runtime**）  
-- **界面**：`src/` 皮肤卡片管理  
+- **功能域**：皮肤引擎 · 会话管理 ·（后续更多本机工具）  
+- **界面**：`src/` 侧栏多视图；皮肤卡片 + 会话列表  
 
-> 非 OpenAI 官方产品。不修改官方 `app.asar` / 安装包签名；仅通过本机 `127.0.0.1` CDP 注入样式与装饰层。
+> 非 OpenAI 官方产品。不修改官方 `app.asar` / 安装包签名。皮肤通过本机 `127.0.0.1` CDP 注入；会话管理读写本机 Codex 数据目录。
+
+皮肤是当前最完整的模块之一，但**不是**产品唯一主线。功能域规划见 [docs/architecture/features.md](docs/architecture/features.md)。
 
 ---
 
@@ -15,15 +17,21 @@
 
 | 功能 | 说明 |
 |------|------|
+| **会话管理** | 侧栏入口：分页浏览、Markdown 导出、删除可撤销、历史 provider 修复、session_index 清理 |
 | 多皮肤浏览 | 内置多套皮肤卡片预览 |
 | 一键应用 / 还原 | 自动处理调试端口与可选重启；慢启动 lifecycle 探测 |
 | 大图立绘 | 允许高质量原图；shell 先成功，立绘异步贴入 |
-| 暂停 / 继续 | 不杀 Codex 的卸皮 / 恢复（CLI：`pause` / `resume`） |
+| 暂停 / 继续 | 不杀客户端的卸皮 / 恢复（CLI：`pause` / `resume`） |
 | 导入 / 导出 | `.cgskin` / `.zip` + inspect 风险扫描 |
-| 设计壁纸 | 自适应构图字段 + 自定义颜色 |
+| 自定义皮肤 | 基于目标皮肤模板；自适应构图 + 自定义颜色 / 壁纸（≤16 MB） |
 | 共享渲染内核 | 新增皮肤只需 CSS + `plugin.json`（无 inject 脚本），不必改 core |
+| 宿主选择器契约 | `engine/runtime/selectors.json` + `npm run doctor:selectors`；模板 `skins/_template` |
+| 纯 Rust 热路径 | 日常 apply/status/restore 可不依赖系统 Node；页内 Operation UI |
 | 指定客户端 | 手动选择 ChatGPT / Codex 路径 |
 | 非侵入 | 不改官方安装目录 |
+
+会话管理说明：[docs/features/sessions.md](docs/features/sessions.md)。  
+皮肤说明：[docs/features/skins.md](docs/features/skins.md)。
 
 ---
 

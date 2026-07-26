@@ -1,0 +1,230 @@
+{
+  "schema": "chatgpt-tools-host-selectors/1",
+  "description": "宿主 DOM 选择器契约（单一真相源）。皮肤 CSS 与 renderer-core 路由探测应优先引用这里的 key，而不是每次去宿主里猜。L1 缺失=主行为受损；L2 缺失=精修降级，不得阻断 shell。",
+  "verifiedAgainst": {
+    "source": "Live CDP probe on Windows Store Codex + ChatGPT Tools runtime",
+    "hostPackage": "OpenAI.Codex_26.721.3996.0_x64__2p2nqsd0c76g0",
+    "packageVersion": "26.721.3996.0",
+    "probedAt": "2026-07-25",
+    "activeSkin": "bengong",
+    "route": "home (app://-/index.html)",
+    "probeScript": "scripts/probe-contract-live.mjs",
+    "result": "All required L1 anchors present; L2 missing only route/overlay/settings scoped",
+    "notes": "升级 Codex/ChatGPT 桌面后：先 npm run doctor:selectors（静态），再 node scripts/probe-contract-live.mjs（实机）。引擎 token/class 现为 --skins-* / skins-*（legacy dream-* 仅清理兼容）。"
+  },
+  "appearanceSignal": {
+    "dark": "html.electron-dark",
+    "light": "html.electron-light",
+    "warning": "html.electron-opaque 随聚焦闪动，禁止用作明暗信号"
+  },
+  "scopeVocabulary": {
+    "all": "除设置页外的 home / thread / detail 及 overlay",
+    "home": "首页建议卡；home-icon 可能先于 utility bar 出现",
+    "thread": "会话/任务页",
+    "settings": "设置页。部分版本替换整壳；锚点缺失时降级 L0",
+    "overlay": "菜单/弹窗/popper",
+    "config": "依赖用户配置才出现"
+  },
+  "selectors": [
+    {
+      "key": "shell-main",
+      "selector": "main.main-surface",
+      "tier": "L1",
+      "scope": "all",
+      "required": true,
+      "fallback": ["main", "[role=\"main\"]"],
+      "notes": "shell-guard 主锚。侧栏可缺；无 main 则清皮（宠物窗）。"
+    },
+    {
+      "key": "left-panel",
+      "selector": "aside.app-shell-left-panel",
+      "tier": "L1",
+      "scope": "all",
+      "required": false,
+      "notes": "侧栏收起会移除节点；勿因缺失清皮。"
+    },
+    {
+      "key": "header-tint",
+      "selector": "header.app-header-tint",
+      "tier": "L1",
+      "scope": "all",
+      "required": true,
+      "notes": "皮肤勿改 position/top/z-index/transform。"
+    },
+    {
+      "key": "home-icon",
+      "selector": "[data-testid=\"home-icon\"]",
+      "tier": "L1",
+      "scope": "home",
+      "required": true,
+      "notes": "首页判定首选信号。"
+    },
+    {
+      "key": "home-route",
+      "selector": "[role=\"main\"]:has([data-testid=\"home-icon\"])",
+      "tier": "L1",
+      "scope": "home",
+      "required": true,
+      "fallback": [
+        "[role=\"main\"]:has([data-feature=\"game-source\"])",
+        "[role=\"main\"]:has([class*=\"home-suggestions\"])",
+        "[class*=\"home-main-content\"]:has([data-testid=\"home-icon\"])"
+      ],
+      "notes": "首页容器（新建任务欢迎页与冷启动首页同源）。SPA 从 chat 切回时 role=main 会整段 remount；runtime 须重标 homeClass。CSS 嵌套 :has() 可能被丢弃，CSS 路由门控用 home-route-css / home-shell。"
+    },
+    {
+      "key": "home-route-css",
+      "selector": "[role=\"main\"]",
+      "tier": "L1",
+      "scope": "home",
+      "required": true,
+      "notes": "home-route 的 CSS 安全别名（无 :has）。"
+    },
+    {
+      "key": "home-shell",
+      "selector": "main.main-surface[class*=\"home-shell\"]",
+      "tier": "L1",
+      "scope": "home",
+      "required": false,
+      "notes": "runtime 在 shell 上切换的 *-home-shell 标记；沉浸式壁纸/建议卡基线可挂此壳，减少对内容节点 HOME_CLASS 的瞬时依赖。"
+    },
+    {
+      "key": "header-primary-button",
+      "selector": "header.app-header-tint button[class~=\"bg-token-foreground\"]",
+      "tier": "L2",
+      "scope": "all",
+      "required": false,
+      "notes": "已安排/插件等页右上角「创建」主按钮。浅色皮肤勿用 header * 深色字覆盖；应排除 bg-token-foreground 或单独给浅字+实心底。"
+    },
+    {
+      "key": "composer-chrome",
+      "selector": ".composer-surface-chrome",
+      "tier": "L2",
+      "scope": "home+thread",
+      "required": false,
+      "notes": "输入框壳；部分 detail 路由无 composer。"
+    },
+    {
+      "key": "home-utility",
+      "selector": "[class*=\"_homeUtilityBar_\"]",
+      "tier": "L2",
+      "scope": "home",
+      "required": false,
+      "notes": "CSS Modules 前缀；禁止锁死完整 hash。"
+    },
+    {
+      "key": "game-source",
+      "selector": "[data-feature=\"game-source\"]",
+      "tier": "L2",
+      "scope": "home",
+      "required": false,
+      "notes": "Worker/部分模式首页信号。"
+    },
+    {
+      "key": "home-suggestions",
+      "selector": ".group\\/home-suggestions",
+      "tier": "L2",
+      "scope": "home",
+      "required": false,
+      "fallback": ["[class*=\"home-suggestions\"]"],
+      "notes": "建议区 section。两种模式：CARD 瓦片 button、LIST 展开行 button.group/home-suggestion-list-item（类 select 菜单行，非 HTML <select>）。禁止裸写 button。token：CARD=--skins-suggest-card-*（引擎有默认）；LIST=--skins-suggest-list-*（引擎无默认，未定义=宿主原生）。"
+    },
+    {
+      "key": "home-suggestion-card",
+      "selector": "[class*=\"home-suggestions\"] button:not([class*=\"home-suggestion-list-item\"])",
+      "tier": "L2",
+      "scope": "home",
+      "required": false,
+      "notes": "推荐卡片瓦片。变量族 --skins-suggest-card-*（color/bg/radius/border/shadow）。引擎提供可读默认；皮肤可覆盖。"
+    },
+    {
+      "key": "home-suggestion-list-item",
+      "selector": "button.group\\/home-suggestion-list-item",
+      "tier": "L2",
+      "scope": "home",
+      "required": false,
+      "fallback": [
+        ".group\\/home-suggestion-list-item",
+        "[class*=\"home-suggestion-list-item\"]"
+      ],
+      "notes": "推荐展开列表行（select-like）。变量族 --skins-suggest-list-*（color/color-hover/bg/bg-hover/…）。引擎不设默认值；皮肤未定义时保持宿主原生。勿与 card 变量混用。"
+    },
+    {
+      "key": "home-suggestion-list-panel",
+      "selector": "[class*=\"home-suggestions\"]:has([class*=\"home-suggestion-list-item\"])",
+      "tier": "L2",
+      "scope": "home",
+      "required": false,
+      "notes": "列表展开时的 section 面板。变量 --skins-suggest-list-panel-*（bg/border/radius/padding/shadow）。未定义=宿主原生。"
+    },
+    {
+      "key": "project-selector",
+      "selector": ".group\\/project-selector",
+      "tier": "L2",
+      "scope": "home config",
+      "required": false
+    },
+    {
+      "key": "markdown",
+      "selector": "[class*=\"_markdown\"]",
+      "tier": "L2",
+      "scope": "thread",
+      "required": false,
+      "notes": "会话内容多节点，注意选择器性能。"
+    },
+    {
+      "key": "appearance-radio",
+      "selector": "input[name=\"appearance-theme\"]",
+      "tier": "L2",
+      "scope": "settings",
+      "required": false
+    },
+    {
+      "key": "overlay-menu",
+      "selector": "[role=\"menu\"]",
+      "tier": "L2",
+      "scope": "overlay",
+      "required": false
+    },
+    {
+      "key": "overlay-dialog",
+      "selector": "[role=\"dialog\"]",
+      "tier": "L2",
+      "scope": "overlay",
+      "required": false
+    },
+    {
+      "key": "overlay-popper",
+      "selector": "[data-radix-popper-content-wrapper]",
+      "tier": "L2",
+      "scope": "overlay",
+      "required": false
+    }
+  ],
+  "stableTestids": [
+    "app-shell-header-context-menu-surface",
+    "home-icon",
+    "theme-preview"
+  ],
+  "cssAuthoringMap": {
+    "where-to-edit": {
+      "host-anchors": "engine/runtime/selectors.json（本文件）",
+      "framework-baseline-css": "engine/runtime/immersive-skin.css",
+      "runtime-js": "engine/runtime/renderer-core.js",
+      "skin-tokens-and-look": "skins/<id>/assets/*.css + plugin.json + skin.json",
+      "payload-assembly": "engine/payload.mjs 与 src-tauri/src/cdp/payload.rs",
+      "native-inject": "src-tauri/src/cdp/inject.rs + keep.rs + launch.rs"
+    },
+    "recommendedPatterns": [
+      "html.<markers.rootClass> { --skins-accent: … }",
+      "html.<root>.skins-art-standard aside.app-shell-left-panel { … }",
+      "html.<root> .composer-surface-chrome { … }",
+      "#<markers.chromeId> { pointer-events: none !important; }"
+    ]
+  },
+  "notes": [
+    "优先级：data-testid > role/语义 > 稳定类名 > CSS Modules 前缀；禁止精确 hash",
+    "L2 home 锚点可晚到：找不到只跳过精修，不阻断 L0/L1 shell",
+    "跨端差异优先当版本错位，升级后先 doctor 再改适配"
+  ]
+}

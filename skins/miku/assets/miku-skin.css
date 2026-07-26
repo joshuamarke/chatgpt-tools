@@ -1,4 +1,6 @@
 :root.codex-miku-skin {
+  /* 推荐列表：不设 --skins-suggest-list-* → 宿主原生；卡片选择器已排除 list-item */
+
   color-scheme: light !important;
   --miku-ink: #0b2b27;
   --miku-ink-muted: #4e7c76;
@@ -438,7 +440,7 @@ html.codex-miku-skin .miku-home {
 }
 
 /* 引导卡片 */
-.miku-home .group\/home-suggestions button {
+.miku-home .group\/home-suggestions button:not([class*="home-suggestion-list-item"]) {
   position: relative !important;
   min-height: 126px !important;
   padding: 14px 13px 12px !important;
@@ -456,13 +458,13 @@ html.codex-miku-skin .miku-home {
   transition: transform .16s ease, box-shadow .16s ease, border-color .16s ease !important;
 }
 
-.miku-home .group\/home-suggestions button:hover {
+.miku-home .group\/home-suggestions button:not([class*="home-suggestion-list-item"]):hover {
   transform: translateY(-2px) !important;
   border-color: rgba(0, 245, 212, 0.22) !important;
   box-shadow: 0 12px 24px rgba(11, 43, 39, 0.08) !important;
 }
 
-.miku-home .group\/home-suggestions button > span {
+.miku-home .group\/home-suggestions button:not([class*="home-suggestion-list-item"]) > span {
   display: flex !important;
   width: 100% !important;
   justify-content: center !important;
@@ -472,9 +474,9 @@ html.codex-miku-skin .miku-home {
 }
 
 /* 图标底座 */
-.miku-home .group\/home-suggestions button > span:first-child > span:first-child,
-.miku-home .group\/home-suggestions button span:has(> svg),
-.miku-home .group\/home-suggestions button span:has(> span > svg) {
+.miku-home .group\/home-suggestions button:not([class*="home-suggestion-list-item"]) > span:first-child > span:first-child,
+.miku-home .group\/home-suggestions button:not([class*="home-suggestion-list-item"]) span:has(> svg),
+.miku-home .group\/home-suggestions button:not([class*="home-suggestion-list-item"]) span:has(> span > svg) {
   width: 38px !important;
   height: 38px !important;
   min-width: 38px !important;
@@ -492,14 +494,14 @@ html.codex-miku-skin .miku-home {
   overflow: hidden !important;
 }
 
-.miku-home .group\/home-suggestions button svg {
+.miku-home .group\/home-suggestions button:not([class*="home-suggestion-list-item"]) svg {
   width: 20px !important;
   height: 20px !important;
   color: #ffffff !important;
   flex-shrink: 0 !important;
 }
 
-.miku-home .group\/home-suggestions button > span:last-child {
+.miku-home .group\/home-suggestions button:not([class*="home-suggestion-list-item"]) > span:last-child {
   align-items: center !important;
   text-align: center !important;
   color: #4e7c76 !important;
@@ -591,5 +593,5 @@ html.codex-miku-skin [data-message-author-role] {
   .miku-home > div:first-child > div:first-child > div:first-child > div:first-child > div:first-child { width: 66% !important; }
   .miku-home [data-feature="game-source"] { font-size: 18px !important; }
   .miku-home [data-feature="game-source"]::after { font-size: 12px; margin-top: 10px; }
-  .miku-home .group\/home-suggestions button { min-height: 114px !important; font-size: 12px !important; }
+  .miku-home .group\/home-suggestions button:not([class*="home-suggestion-list-item"]) { min-height: 114px !important; font-size: 12px !important; }
 }

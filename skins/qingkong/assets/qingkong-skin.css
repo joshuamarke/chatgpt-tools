@@ -1,0 +1,1147 @@
+/**
+ * qingkong — 青空 · 蒙眼旅人（Light）
+ * - appearance / desktopTheme 固定 light，引擎挂 skins-theme-light
+ * - 全屏自适应背景：body 固定 cover 铺图（对齐 Codex-Dream-Skin / immersive 契约）
+ * - 侧栏 / 建议卡 / 输入区：浅蓝毛玻璃，不盖住右侧立绘
+ * - 字体跟随宿主默认
+ */
+
+/* ── 品牌 token + 契约 --skins-* ── */
+:root.codex-qingkong-skin {
+  /* 推荐列表 opt-in（引擎 --skins-suggest-list-*；未设则宿主原生） */
+  --skins-suggest-list-color: rgba(30, 58, 95, 0.55);
+  --skins-suggest-list-color-hover: #1e3a5f;
+  --skins-suggest-list-bg: transparent;
+  --skins-suggest-list-bg-image: none;
+  --skins-suggest-list-bg-hover: transparent;
+  --skins-suggest-list-radius: 12px;
+  --skins-suggest-list-border: 0;
+  --skins-suggest-list-shadow: none;
+  --skins-suggest-list-panel-bg: linear-gradient(165deg, rgba(255, 255, 255, 0.72) 0%, rgba(220, 238, 250, 0.78) 100%);
+  --skins-suggest-list-panel-border: 1px solid rgba(255, 255, 255, 0.55);
+  --skins-suggest-list-panel-radius: 14px;
+  --skins-suggest-list-panel-padding: 8px 10px 10px;
+  --skins-suggest-list-panel-shadow: 0 14px 36px rgba(30, 80, 130, 0.12), inset 0 1px 0 rgba(255, 255, 255, 0.65);
+  /* 推荐卡片 token */
+  --skins-suggest-card-color: #1e3a5f;
+  --skins-suggest-card-bg: rgba(255, 255, 255, 0.28);
+  --skins-suggest-card-radius: 14px;
+  --skins-suggest-card-border: rgba(255, 255, 255, 0.55);
+  --skins-suggest-card-shadow: 0 8px 24px rgba(30, 80, 130, 0.1), inset 0 1px 0 rgba(255, 255, 255, 0.55);
+
+  --qingkong-ink: #1e3a5f;
+  --qingkong-ink-muted: #4a6a8a;
+  --qingkong-sky: #6eb4e8;
+  --qingkong-sky-deep: #3b8fd9;
+  --qingkong-sky-soft: #a8d4f0;
+  --qingkong-cloud: #f4fafd;
+  --qingkong-glass: rgba(255, 255, 255, 0.42);
+  --qingkong-glass-border: rgba(255, 255, 255, 0.55);
+  --qingkong-line: rgba(90, 140, 190, 0.28);
+  --qingkong-accent-warm: #e07a5f;
+
+  --skins-accent: #3b8fd9;
+  --skins-accent-ink: #f4fafd;
+  --skins-ink: #1e3a5f;
+  --skins-text: #1e3a5f;
+  --skins-canvas: #8ec8f0;
+  --skins-sidebar: rgba(200, 230, 250, 0.55);
+  --skins-surface-raised: rgba(255, 255, 255, 0.72);
+  --skins-line: rgba(90, 140, 190, 0.32);
+
+  color-scheme: light !important;
+
+  /* 宿主 design token — light 浅空 */
+  --main-surface-primary: #e8f4fc !important;
+  --main-surface-secondary: #dceef8 !important;
+  --sidebar-surface-primary: #e0f0fa !important;
+  --sidebar-surface-secondary: #d4e8f5 !important;
+  --composer-background: rgba(255, 255, 255, 0.72) !important;
+  --surface-primary: #f4fafd !important;
+  --surface-secondary: #e8f4fc !important;
+  --text-primary: #1e3a5f !important;
+  --text-secondary: #4a6a8a !important;
+  --text-tertiary: #6a8aaa !important;
+  --border-primary: rgba(90, 140, 190, 0.28) !important;
+  --border-secondary: rgba(90, 140, 190, 0.16) !important;
+  --icon-primary: #2a4a6f !important;
+  --icon-secondary: #4a6a8a !important;
+  --link: #3b8fd9 !important;
+
+  --codex-base-surface: #e8f4fc !important;
+  --color-background-surface: #e8f4fc !important;
+  --color-background-surface-under: #d4eaf8 !important;
+  --color-background-panel: rgba(255, 255, 255, 0.78) !important;
+  --color-background-control: rgba(255, 255, 255, 0.88) !important;
+  --color-background-control-opaque: #f4fafd !important;
+  --color-background-elevated-primary: rgba(255, 255, 255, 0.9) !important;
+  --color-background-elevated-primary-opaque: #f4fafd !important;
+  --color-background-elevated-secondary: rgba(30, 58, 95, 0.04) !important;
+  --color-background-elevated-secondary-opaque: #e8f4fc !important;
+  --color-background-editor-opaque: #eef6fc !important;
+  --color-background-button-secondary: rgba(30, 58, 95, 0.06) !important;
+  --color-background-button-secondary-hover: rgba(59, 143, 217, 0.14) !important;
+  --color-background-button-secondary-active: rgba(59, 143, 217, 0.2) !important;
+  --color-background-button-tertiary: rgba(30, 58, 95, 0.04) !important;
+  --color-background-button-tertiary-hover: rgba(90, 140, 190, 0.12) !important;
+  --color-background-button-tertiary-active: rgba(90, 140, 190, 0.18) !important;
+
+  --color-token-bg-primary: #e8f4fc !important;
+  --color-token-bg-secondary: color-mix(in srgb, #dceef8 92%, transparent) !important;
+  --color-token-bg-tertiary: color-mix(in srgb, #d0e6f5 88%, transparent) !important;
+  --color-token-bg-fog: color-mix(in oklab, #1e3a5f 3.5%, transparent) !important;
+  --color-token-main-surface-primary: #e8f4fc !important;
+  --color-token-side-bar-background: #e0f0fa !important;
+  --color-token-editor-background: #eef6fc !important;
+
+  --color-token-dropdown-background: #f4fafd !important;
+  --color-token-dropdown-foreground: #1e3a5f !important;
+  --color-token-menu-background: rgba(255, 255, 255, 0.96) !important;
+  --color-token-menu-border: rgba(90, 140, 190, 0.22) !important;
+  --color-token-editor-widget-background: rgba(255, 255, 255, 0.96) !important;
+
+  --color-token-border: rgba(90, 140, 190, 0.22) !important;
+  --color-token-border-default: rgba(90, 140, 190, 0.22) !important;
+  --color-token-border-heavy: rgba(90, 140, 190, 0.34) !important;
+  --color-token-border-light: rgba(90, 140, 190, 0.12) !important;
+  --color-token-list-hover-background: rgba(59, 143, 217, 0.12) !important;
+  --color-token-list-active-selection-background: rgba(59, 143, 217, 0.18) !important;
+  --color-token-list-active-selection-foreground: #1e3a5f !important;
+  --color-token-list-active-selection-icon-foreground: #1e3a5f !important;
+
+  --color-token-text-primary: #1e3a5f !important;
+  --color-token-text-secondary: #4a6a8a !important;
+  --color-token-text-tertiary: #6a8aaa !important;
+  --color-token-foreground: #1e3a5f !important;
+  --color-token-description-foreground: rgba(30, 58, 95, 0.55) !important;
+  --color-token-icon-foreground: #2a4a6f !important;
+  --color-token-input-background: rgba(255, 255, 255, 0.88) !important;
+  --color-token-input-border: rgba(90, 140, 190, 0.28) !important;
+  --color-token-input-foreground: #1e3a5f !important;
+  --color-token-focus-border: rgba(59, 143, 217, 0.55) !important;
+  --color-token-link: #3b8fd9 !important;
+
+  --vscode-menu-background: rgba(255, 255, 255, 0.96) !important;
+  --vscode-menu-foreground: #1e3a5f !important;
+  --vscode-menu-border: rgba(90, 140, 190, 0.22) !important;
+  --vscode-menu-selectionBackground: rgba(59, 143, 217, 0.16) !important;
+  --vscode-menu-selectionForeground: #1e3a5f !important;
+  --vscode-menu-separatorBackground: rgba(90, 140, 190, 0.16) !important;
+  --vscode-dropdown-background: #f4fafd !important;
+  --vscode-dropdown-foreground: #1e3a5f !important;
+  --vscode-dropdown-border: rgba(90, 140, 190, 0.22) !important;
+  --vscode-dropdown-listBackground: rgba(255, 255, 255, 0.98) !important;
+  --vscode-settings-dropdownBackground: #f4fafd !important;
+  --vscode-settings-dropdownForeground: #1e3a5f !important;
+  --vscode-settings-dropdownBorder: rgba(90, 140, 190, 0.22) !important;
+  --vscode-settings-rowHoverBackground: rgba(59, 143, 217, 0.1) !important;
+  --vscode-settings-headerForeground: #1e3a5f !important;
+  --vscode-settings-headerBorder: rgba(90, 140, 190, 0.16) !important;
+  --vscode-settings-textInputBackground: rgba(255, 255, 255, 0.92) !important;
+  --vscode-settings-textInputForeground: #1e3a5f !important;
+  --vscode-settings-textInputBorder: rgba(90, 140, 190, 0.28) !important;
+  --vscode-editor-background: #eef6fc !important;
+  --vscode-panel-background: rgba(255, 255, 255, 0.92) !important;
+  --vscode-input-background: rgba(255, 255, 255, 0.92) !important;
+  --vscode-input-foreground: #1e3a5f !important;
+  --vscode-input-border: rgba(90, 140, 190, 0.28) !important;
+  --vscode-input-placeholderForeground: rgba(30, 58, 95, 0.45) !important;
+  --vscode-list-hoverBackground: rgba(59, 143, 217, 0.12) !important;
+}
+
+:root.codex-qingkong-skin.skins-theme-light,
+:root.codex-qingkong-skin {
+  color-scheme: light !important;
+}
+
+/* immersive 基线 token：浅空半透明，避免盖住立绘 */
+html.codex-qingkong-skin.skins-art-wide,
+html.codex-qingkong-skin.skins-art-standard {
+  --cg-immersive-edge: rgba(200, 230, 250, 0.22);
+  --cg-immersive-mid: rgba(180, 220, 245, 0.12);
+  --cg-immersive-far: rgba(160, 210, 240, 0.04);
+  --cg-immersive-sidebar: rgba(210, 235, 250, 0.48);
+  --cg-task-immersive-sidebar: rgba(210, 235, 250, 0.62);
+  --cg-task-immersive-edge: rgba(220, 238, 250, 0.55);
+  --cg-task-immersive-mid: rgba(200, 230, 248, 0.42);
+  --cg-task-immersive-far: rgba(180, 220, 245, 0.28);
+  --cg-immersive-composer: rgba(255, 255, 255, 0.68);
+  --cg-immersive-line: rgba(255, 255, 255, 0.45);
+  --cg-text: #1e3a5f;
+  --cg-surface-raised: rgba(255, 255, 255, 0.55);
+}
+
+/* 设置分组卡 */
+html.codex-qingkong-skin [style*="color-background-panel"],
+html.codex-qingkong-skin main.main-surface div.rounded-2xl.border.border-token-border.overflow-hidden,
+html.codex-qingkong-skin main.main-surface div.rounded-2xl.border-token-border.overflow-hidden.flex.flex-col,
+html.codex-qingkong-skin div.rounded-2xl.border-token-border.overflow-hidden.flex.flex-col {
+  background-color: rgba(255, 255, 255, 0.78) !important;
+  border-color: rgba(90, 140, 190, 0.22) !important;
+  color: #1e3a5f !important;
+}
+
+/* ── 全局：fallback 天空色（宽图时由下方 wallpaper 覆盖） ── */
+html.codex-qingkong-skin body {
+  background:
+    radial-gradient(circle at 78% 18%, rgba(255, 255, 255, 0.35), transparent 32%),
+    radial-gradient(circle at 12% 70%, rgba(110, 180, 232, 0.2), transparent 28%),
+    linear-gradient(160deg, #a8d4f0 0%, #8ec8f0 48%, #7ab8e8 100%) !important;
+  color: var(--qingkong-ink) !important;
+  color-scheme: light !important;
+}
+
+/* 轻云粒子（标准模式；宽图 immersive 基线会关掉 body::before） */
+html.codex-qingkong-skin body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  opacity: 0.28;
+  background-image:
+    radial-gradient(circle at 18% 22%, rgba(255, 255, 255, 0.55) 0 1px, transparent 2px),
+    radial-gradient(circle at 72% 58%, rgba(255, 255, 255, 0.35) 0 1px, transparent 2px),
+    radial-gradient(circle at 45% 80%, rgba(255, 255, 255, 0.25) 0 1px, transparent 2px);
+  background-size: 48px 64px, 62px 78px, 40px 52px;
+}
+
+/*
+ * 全屏自适应背景：
+ * body 固定 cover 铺一次；侧栏 / main 只做半透明可读层。
+ * 引擎会同时注入 --qingkong-art 与 --skins-art。
+ */
+html.codex-qingkong-skin.skins-art-wide:has(main.main-surface.qingkong-home-shell) body,
+html.codex-qingkong-skin.skins-art-wide:is(.skins-task-ambient, .skins-task-banner):has(
+    main.main-surface:not(.qingkong-home-shell)
+  )
+  body,
+html.codex-qingkong-skin.skins-art-wide body {
+  background-color: var(--skins-canvas, #8ec8f0) !important;
+  background-image: var(--qingkong-art, var(--skins-art)) !important;
+  background-position: var(--skins-art-position, 78% 42%) !important;
+  background-size: cover !important;
+  background-repeat: no-repeat !important;
+  background-attachment: fixed !important;
+}
+
+/* ── 侧栏：浅蓝毛玻璃，透出背景云层 ── */
+html.codex-qingkong-skin aside.app-shell-left-panel,
+html.codex-qingkong-skin aside {
+  background: linear-gradient(
+    180deg,
+    rgba(220, 238, 250, 0.52),
+    rgba(200, 228, 245, 0.48)
+  ) !important;
+  border: 1px solid rgba(255, 255, 255, 0.35) !important;
+  border-left: 0 !important;
+  border-radius: 0 !important;
+  box-shadow:
+    8px 0 28px rgba(30, 80, 130, 0.08),
+    inset -1px 0 rgba(255, 255, 255, 0.45) !important;
+  backdrop-filter: blur(18px) saturate(1.15) !important;
+  -webkit-backdrop-filter: blur(18px) saturate(1.15) !important;
+  color: var(--qingkong-ink) !important;
+}
+
+html.codex-qingkong-skin.skins-art-wide:has(main.main-surface.qingkong-home-shell)
+  aside.app-shell-left-panel,
+html.codex-qingkong-skin.skins-art-wide:is(.skins-task-ambient, .skins-task-banner)
+  aside.app-shell-left-panel,
+html.codex-qingkong-skin.skins-art-wide aside.app-shell-left-panel {
+  background: linear-gradient(
+    90deg,
+    rgba(210, 235, 250, 0.55),
+    rgba(200, 230, 250, 0.28)
+  ) !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  backdrop-filter: blur(16px) saturate(1.1) !important;
+  -webkit-backdrop-filter: blur(16px) saturate(1.1) !important;
+}
+
+html.codex-qingkong-skin aside nav {
+  background: transparent !important;
+}
+
+html.codex-qingkong-skin aside.app-shell-left-panel button {
+  color: #2a4a6f !important;
+  transition: transform 0.16s ease, background 0.16s ease, box-shadow 0.16s ease !important;
+}
+
+html.codex-qingkong-skin aside.app-shell-left-panel button:hover {
+  background: linear-gradient(
+    90deg,
+    rgba(255, 255, 255, 0.55),
+    rgba(180, 220, 245, 0.4)
+  ) !important;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.4) !important;
+  transform: translateX(1px);
+}
+
+html.codex-qingkong-skin aside.app-shell-left-panel button[aria-label^="切换模式"] {
+  background: transparent !important;
+  border-color: transparent !important;
+  font-size: 18px !important;
+  font-weight: 700 !important;
+  color: var(--qingkong-sky-deep) !important;
+  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.6);
+}
+
+html.codex-qingkong-skin aside.app-shell-left-panel [class~="bg-token-list-hover-background"],
+html.codex-qingkong-skin aside.app-shell-left-panel [aria-current="page"] {
+  background: linear-gradient(
+    90deg,
+    rgba(255, 255, 255, 0.62),
+    rgba(180, 220, 245, 0.48)
+  ) !important;
+  border: 1px solid rgba(255, 255, 255, 0.45) !important;
+  box-shadow: 0 4px 14px rgba(30, 80, 130, 0.08) !important;
+}
+
+html.codex-qingkong-skin aside [class*="text-token"],
+html.codex-qingkong-skin aside [class*="text-secondary"],
+html.codex-qingkong-skin aside span,
+html.codex-qingkong-skin aside p,
+html.codex-qingkong-skin aside label {
+  color: inherit !important;
+}
+
+/* ── 主面板：首页/对话透出 body 立绘；设置页实底 ── */
+html.codex-qingkong-skin main.main-surface {
+  position: relative;
+  isolation: isolate;
+  background-color: transparent !important;
+  background-image: linear-gradient(
+    105deg,
+    rgba(200, 230, 250, 0.28) 0%,
+    rgba(180, 220, 245, 0.12) 38%,
+    rgba(160, 210, 240, 0.04) 62%,
+    transparent 100%
+  ) !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  overflow: hidden !important;
+}
+
+/* 首页 / 非对话 ambient：轻 scrim，透立绘 */
+html.codex-qingkong-skin.skins-art-wide main.main-surface.qingkong-home-shell,
+html.codex-qingkong-skin.skins-art-wide:is(.skins-task-ambient, .skins-task-banner)
+  main.main-surface:not(.qingkong-home-shell):not(:has(.thread-scroll-container)) {
+  background: linear-gradient(
+    90deg,
+    rgba(200, 230, 250, 0.22),
+    rgba(180, 220, 245, 0.1) 50%,
+    rgba(160, 210, 240, 0.02)
+  ) !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+}
+
+/*
+ * 对话外层蒙版（不加消息气泡底）：左重右轻浅雾，托住正文、右透立绘。
+ * 挂 main:has(.thread-scroll-container)，不给单条 markdown 铺 background。
+ */
+html.codex-qingkong-skin.skins-art-wide main.main-surface:has(.thread-scroll-container),
+html.codex-qingkong-skin main.main-surface:has(.thread-scroll-container) {
+  /* 中段（正文列）抬实，右缘仍透立绘；无消息气泡底 */
+  background: linear-gradient(
+    90deg,
+    rgba(244, 250, 253, 0.58) 0%,
+    rgba(236, 246, 252, 0.5) 28%,
+    rgba(230, 242, 250, 0.44) 52%,
+    rgba(210, 234, 248, 0.2) 78%,
+    rgba(180, 220, 245, 0.05) 92%,
+    transparent 100%
+  ) !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+}
+
+/* 禁止改 header position，仅抬升内容层 */
+html.codex-qingkong-skin main.main-surface > *:not(header.app-header-tint) {
+  position: relative;
+  z-index: 1;
+}
+
+/* 顶栏字色 */
+html.codex-qingkong-skin main.main-surface > header.app-header-tint,
+html.codex-qingkong-skin main.main-surface > header.app-header-tint * {
+  --text-primary: #1e3a5f !important;
+  --text-secondary: #4a6a8a !important;
+  --icon-primary: #2a4a6f !important;
+  --icon-secondary: #4a6a8a !important;
+}
+
+/* 顶栏次要控件：深蓝字。勿盖住 bg-token-foreground 主按钮（已安排/插件「创建」） */
+html.codex-qingkong-skin main.main-surface > header.app-header-tint button:not([class~="bg-token-foreground"]),
+html.codex-qingkong-skin main.main-surface > header.app-header-tint a:not([class~="bg-token-foreground"]),
+html.codex-qingkong-skin main.main-surface > header.app-header-tint [role="button"]:not([class~="bg-token-foreground"]),
+html.codex-qingkong-skin main.main-surface > header.app-header-tint [data-state]:not([class~="bg-token-foreground"]) {
+  color: #1e3a5f !important;
+  pointer-events: auto !important;
+}
+
+html.codex-qingkong-skin main.main-surface > header.app-header-tint svg {
+  color: #2a4a6f !important;
+  opacity: 1 !important;
+}
+
+/* 主按钮在顶栏保持浅色字 + 实心底 */
+html.codex-qingkong-skin main.main-surface > header.app-header-tint button[class~="bg-token-foreground"],
+html.codex-qingkong-skin main.main-surface > header.app-header-tint button[class~="bg-token-foreground"] * {
+  color: #f5f9fc !important;
+  --text-primary: #f5f9fc !important;
+  --text-secondary: #f5f9fc !important;
+  --icon-primary: #f5f9fc !important;
+}
+
+html.codex-qingkong-skin main.main-surface > header.app-header-tint button[class~="bg-token-foreground"] svg {
+  color: #f5f9fc !important;
+  opacity: 1 !important;
+}
+
+/* 首页 / 对话：顶栏透明 */
+html.codex-qingkong-skin main.main-surface.qingkong-home-shell > header.app-header-tint,
+html.codex-qingkong-skin.skins-art-wide main.main-surface.qingkong-home-shell > header.app-header-tint,
+html.codex-qingkong-skin.skins-art-wide main.main-surface:has(.thread-scroll-container) > header.app-header-tint {
+  background: transparent !important;
+  background-image: none !important;
+  border-bottom: 0 !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  color: var(--qingkong-ink) !important;
+  text-shadow:
+    0 1px 2px rgba(255, 255, 255, 0.55),
+    0 0 8px rgba(255, 255, 255, 0.35) !important;
+}
+
+/* 设置等非 home：关掉 body 立绘透出，实底可读 */
+html.codex-qingkong-skin main.main-surface:not(.qingkong-home-shell):not(:has(.thread-scroll-container)) {
+  background-color: #e8f4fc !important;
+  background-image: none !important;
+}
+
+html.codex-qingkong-skin.skins-art-wide
+  main.main-surface:not(.qingkong-home-shell):not(:has(.thread-scroll-container)) {
+  background-color: #e8f4fc !important;
+  background-image: none !important;
+}
+
+html.codex-qingkong-skin main.main-surface:not(.qingkong-home-shell):not(:has(.thread-scroll-container))
+  > header.app-header-tint,
+html.codex-qingkong-skin.skins-art-wide
+  main.main-surface:not(.qingkong-home-shell):not(:has(.thread-scroll-container))
+  > header.app-header-tint {
+  background: #e8f4fc !important;
+  background-image: none !important;
+  border-bottom: 1px solid rgba(90, 140, 190, 0.14) !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  color: var(--qingkong-ink) !important;
+  text-shadow: none !important;
+}
+
+/* 应用菜单顶栏 */
+html.codex-qingkong-skin [class~="group/application-menu-top-bar"],
+html.codex-qingkong-skin.skins-theme-light [class~="group/application-menu-top-bar"] {
+  color: var(--qingkong-ink) !important;
+  background: color-mix(in srgb, #75AFD9 10%, transparent) !important;
+  border-bottom: 1px solid rgba(90, 140, 190, 0.14) !important;
+  color-scheme: light !important;
+  backdrop-filter: blur(12px) !important;
+}
+
+html.codex-qingkong-skin [class~="group/application-menu-top-bar"] button,
+html.codex-qingkong-skin [class~="group/application-menu-top-bar"] [role="button"],
+html.codex-qingkong-skin [class~="group/application-menu-top-bar"] *,
+html.codex-qingkong-skin.skins-theme-light [class~="group/application-menu-top-bar"] button,
+html.codex-qingkong-skin.skins-theme-light [class~="group/application-menu-top-bar"] svg {
+  color: inherit !important;
+}
+
+/* ── Chrome 装饰（pointer-events: none） ── */
+#codex-qingkong-skin-chrome {
+  position: fixed;
+  z-index: 31;
+  pointer-events: none !important;
+  overflow: hidden;
+  border-radius: 0;
+}
+
+.qingkong-brand {
+  position: absolute;
+  left: 25px;
+  top: 8px;
+  height: 36px;
+  display: none;
+  align-items: center;
+  gap: 10px;
+  color: var(--qingkong-ink);
+  text-shadow: 0 1px 4px rgba(255, 255, 255, 0.7);
+  pointer-events: none !important;
+}
+#codex-qingkong-skin-chrome.qingkong-home-shell .qingkong-brand {
+  display: flex;
+}
+
+.qingkong-brand .qingkong-seal {
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: linear-gradient(145deg, rgba(255, 255, 255, 0.75), rgba(168, 212, 240, 0.85));
+  color: var(--qingkong-sky-deep);
+  font-size: 14px;
+  line-height: 1;
+  box-shadow:
+    0 2px 10px rgba(59, 143, 217, 0.25),
+    0 0 0 1px rgba(255, 255, 255, 0.55);
+}
+.qingkong-brand b {
+  display: block;
+  font-size: 14px;
+  letter-spacing: 0.12em;
+  font-weight: 700;
+  color: #1e3a5f;
+}
+.qingkong-brand small {
+  display: block;
+  margin-top: 1px;
+  color: #4a6a8a;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+}
+
+/* 花瓣 / 云絮飘落 */
+.qingkong-petals {
+  position: absolute;
+  inset: 48px 0 0;
+  opacity: 0.55;
+  overflow: hidden;
+  pointer-events: none !important;
+}
+.qingkong-petals i {
+  position: absolute;
+  width: 8px;
+  height: 10px;
+  border-radius: 50% 50% 50% 0;
+  background: rgba(255, 255, 255, 0.75);
+  box-shadow: 0 0 8px rgba(255, 255, 255, 0.5);
+  animation: qingkongPetal 7s linear infinite;
+  transform: rotate(35deg);
+}
+.qingkong-petals i:nth-child(1) {
+  left: 18%;
+  top: -8%;
+  animation-duration: 8.2s;
+  animation-delay: 0s;
+}
+.qingkong-petals i:nth-child(2) {
+  left: 42%;
+  top: -12%;
+  animation-duration: 9.5s;
+  animation-delay: 1.2s;
+  width: 6px;
+  height: 8px;
+}
+.qingkong-petals i:nth-child(3) {
+  left: 58%;
+  top: -6%;
+  animation-duration: 7.4s;
+  animation-delay: 0.6s;
+}
+.qingkong-petals i:nth-child(4) {
+  left: 72%;
+  top: -14%;
+  animation-duration: 10s;
+  animation-delay: 2s;
+  width: 7px;
+  height: 9px;
+}
+.qingkong-petals i:nth-child(5) {
+  left: 32%;
+  top: -10%;
+  animation-duration: 8.8s;
+  animation-delay: 1.6s;
+}
+.qingkong-petals i:nth-child(6) {
+  left: 86%;
+  top: -5%;
+  animation-duration: 9.2s;
+  animation-delay: 0.4s;
+  width: 5px;
+  height: 7px;
+}
+
+@keyframes qingkongPetal {
+  0% {
+    transform: translateY(0) translateX(0) rotate(35deg);
+    opacity: 0;
+  }
+  12% {
+    opacity: 0.85;
+  }
+  100% {
+    transform: translateY(110vh) translateX(-40px) rotate(200deg);
+    opacity: 0;
+  }
+}
+
+/* ── 主内容透明，露出 body 背景 ── */
+html.codex-qingkong-skin [role="main"] {
+  background: transparent !important;
+  scrollbar-color: rgba(90, 140, 190, 0.35) transparent;
+}
+
+html.codex-qingkong-skin main.main-surface [class*="bg-token-main-surface"],
+html.codex-qingkong-skin main.main-surface [class*="bg-token-sidebar"],
+html.codex-qingkong-skin main.main-surface .bg-token-main-surface-primary,
+html.codex-qingkong-skin main.main-surface .bg-token-main-surface-secondary {
+  background-color: transparent !important;
+  background-image: none !important;
+}
+
+/* ── 首页布局：不改宿主 flex 几何 ── */
+html.codex-qingkong-skin .qingkong-home {
+  /*
+   * 对齐宿主 body 默认 --thread-content-max-width: 48rem（CDP 实测 768px）。
+   * 标题壳 w-[min(100%,var(--thread-content-max-width))]、composer 的
+   * max-w-(--thread-content-max-width) 与建议卡 absolute 轨同源；
+   * 旧值 950/980px 会把推荐卡和输入框整轨拉宽。
+   */
+  --thread-content-max-width: min(48rem, calc(100cqw - 44px)) !important;
+  overflow-x: hidden !important;
+  background: transparent !important;
+}
+
+.qingkong-home > div:first-child {
+  background: transparent !important;
+}
+
+.qingkong-home > div:first-child > div:first-child {
+  background: transparent !important;
+}
+
+/* 标题壳：透明，不二次裁切立绘 */
+.qingkong-home > div:first-child > div:first-child > div:first-child {
+  position: relative !important;
+  isolation: isolate;
+  overflow: visible !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  height: auto !important;
+  min-height: 0 !important;
+  padding: 0 !important;
+}
+
+.qingkong-home > div:first-child > div:first-child > div:first-child::before,
+.qingkong-home > div:first-child > div:first-child > div:first-child::after {
+  content: none !important;
+  display: none !important;
+}
+
+/* 文案区：相对标题壳左对齐（宿主默认 justify-center / items-center） */
+.qingkong-home > div:first-child > div:first-child > div:first-child > div:first-child {
+  position: relative;
+  z-index: 1;
+  justify-content: flex-start !important;
+  align-items: flex-end !important;
+  width: 100% !important;
+}
+
+.qingkong-home > div:first-child > div:first-child > div:first-child > div:first-child > div:first-child {
+  align-items: flex-start !important;
+  width: 100% !important;
+  max-width: 100% !important;
+}
+
+.qingkong-home [data-testid="home-icon"] {
+  display: none !important;
+}
+
+/* 主标题：左对齐，与下方推荐卡轨左侧齐平 */
+.qingkong-home [data-feature="game-source"] {
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: flex-start !important;
+  justify-content: flex-end !important;
+  align-self: flex-start !important;
+  width: 100% !important;
+  max-width: 100% !important;
+  margin-inline: 0 !important;
+  color: #1e3a5f !important;
+  font-size: clamp(22px, 2.4vw, 36px) !important;
+  line-height: 1.35 !important;
+  font-weight: 700 !important;
+  text-align: left !important;
+  letter-spacing: 0.06em;
+  text-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.75),
+    0 2px 16px rgba(255, 255, 255, 0.45);
+  opacity: 1 !important;
+  pointer-events: auto !important;
+}
+
+.qingkong-home [data-feature="game-source"]::before {
+  content: "☁  青空";
+  display: block;
+  margin-bottom: 10px;
+  padding: 3px 14px;
+  border: 1px solid rgba(255, 255, 255, 0.55);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.35);
+  color: rgba(30, 58, 95, 0.88);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.24em;
+  line-height: 1.4;
+  box-shadow: inset 0 0 12px rgba(255, 255, 255, 0.25);
+  backdrop-filter: blur(8px);
+}
+
+.qingkong-home [data-feature="game-source"]::after {
+  content: "晴空之下，与青春同行让向往的地方变成脚下走过的路。";
+  display: block;
+  margin-top: 12px;
+  color: rgba(42, 74, 111, 0.88);
+  font-size: 16px;
+  line-height: 1.55;
+  font-weight: 500;
+  letter-spacing: 0.1em;
+  text-shadow: 0 1px 8px rgba(255, 255, 255, 0.5);
+}
+
+.qingkong-home [data-feature="game-source"] button {
+  margin: 0 5px;
+  padding: 2px 9px 3px;
+  border: 1px solid rgba(59, 143, 217, 0.35);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.4);
+  color: #1e3a5f !important;
+  text-decoration-color: rgba(59, 143, 217, 0.4) !important;
+  text-underline-offset: 5px;
+  box-shadow: inset 0 0 12px rgba(255, 255, 255, 0.2);
+}
+
+.qingkong-home [data-feature="game-source"] button::before {
+  content: "启程 · ";
+  font-size: 0.48em;
+  font-weight: 600;
+  vertical-align: middle;
+  opacity: 0.86;
+}
+
+/* ── 建议卡：高透明、无 blur，透出壁纸 ── */
+.qingkong-home .group\/home-suggestions {
+  overflow: visible !important;
+  gap: 12px !important;
+}
+
+html.codex-qingkong-skin .qingkong-home .group\/home-suggestions button:not([class*="home-suggestion-list-item"]),
+html.codex-qingkong-skin
+  main.main-surface
+  .qingkong-home
+  .group\/home-suggestions
+  button:not([class*="home-suggestion-list-item"]),
+html.codex-qingkong-skin.skins-art-wide
+  main.main-surface.qingkong-home-shell
+  .qingkong-home
+  .group\/home-suggestions
+  button:not([class*="home-suggestion-list-item"]) {
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 10px !important;
+  text-align: center !important;
+  min-height: 104px !important;
+  border: 1px solid rgba(255, 255, 255, 0.55) !important;
+  border-radius: 14px !important;
+  color: #1e3a5f !important;
+  font-weight: 600 !important;
+  line-height: 1.45 !important;
+  /* 高透明，透出壁纸；无 blur（保持边缘清晰） */
+  background: rgba(255, 255, 255, 0.28) !important;
+  background-image: none !important;
+  box-shadow:
+    0 8px 24px rgba(30, 80, 130, 0.1),
+    inset 0 1px 0 rgba(255, 255, 255, 0.55) !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  transform: translateY(0);
+  transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease !important;
+}
+
+.qingkong-home .group\/home-suggestions button:not([class*="home-suggestion-list-item"]):hover {
+  transform: translateY(-3px) !important;
+  border-color: rgba(255, 255, 255, 0.75) !important;
+  box-shadow:
+    0 14px 32px rgba(30, 80, 130, 0.14),
+    0 0 0 1px rgba(59, 143, 217, 0.18),
+    inset 0 1px 0 rgba(255, 255, 255, 0.75) !important;
+}
+
+.qingkong-home .group\/home-suggestions button:not([class*="home-suggestion-list-item"]) > span {
+  display: flex !important;
+  width: 100% !important;
+  justify-content: center !important;
+  align-items: center !important;
+  text-align: center !important;
+  margin-inline: auto !important;
+}
+
+.qingkong-home .group\/home-suggestions button:not([class*="home-suggestion-list-item"]) > span:first-child > span:first-child,
+.qingkong-home .group\/home-suggestions button:not([class*="home-suggestion-list-item"]) span:has(> svg),
+.qingkong-home .group\/home-suggestions button:not([class*="home-suggestion-list-item"]) span:has(> span > svg) {
+  width: 40px !important;
+  height: 40px !important;
+  min-width: 40px !important;
+  min-height: 40px !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  margin: 0 auto !important;
+  border-radius: 50% !important;
+  color: #2a4a6f !important;
+  background:
+    radial-gradient(circle at 35% 30%, rgba(255, 255, 255, 0.7), transparent 55%),
+    linear-gradient(145deg, rgba(255, 255, 255, 0.65), rgba(168, 212, 240, 0.55)) !important;
+  border: 1px solid rgba(255, 255, 255, 0.55) !important;
+  box-shadow:
+    0 4px 12px rgba(30, 80, 130, 0.12),
+    inset 0 1px 0 rgba(255, 255, 255, 0.7) !important;
+  flex: 0 0 auto !important;
+  line-height: 0 !important;
+  overflow: hidden !important;
+}
+
+.qingkong-home .group\/home-suggestions button:not([class*="home-suggestion-list-item"]) svg {
+  width: 20px !important;
+  height: 20px !important;
+  display: block !important;
+  margin: 0 auto !important;
+  color: #2a4a6f !important;
+  flex-shrink: 0 !important;
+  opacity: 0.92;
+}
+
+.qingkong-home .group\/home-suggestions button:not([class*="home-suggestion-list-item"]) > span:last-child {
+  flex-direction: column !important;
+  align-items: center !important;
+  justify-content: center !important;
+  text-align: center !important;
+  color: #2a4a6f !important;
+  font-size: 13px !important;
+}
+
+
+/* ── 输入区毛玻璃 ── */
+/* 四角圆角跟宿主 ._multilineSurface / --composer-border-radius，勿压成上边方角 */
+html.codex-qingkong-skin .composer-surface-chrome,
+html.codex-qingkong-skin.skins-art-wide .composer-surface-chrome {
+  border: 1px solid rgba(255, 255, 255, 0.55) !important;
+  border-radius: var(--composer-border-radius, 1.25rem) !important;
+  background: rgba(255, 255, 255, 0.52) !important;
+  box-shadow:
+    0 10px 28px rgba(30, 80, 130, 0.1),
+    inset 0 1px 0 rgba(255, 255, 255, 0.7) !important;
+  backdrop-filter: blur(16px) saturate(1.1) !important;
+  -webkit-backdrop-filter: blur(16px) saturate(1.1) !important;
+  color: var(--qingkong-ink) !important;
+  overflow: visible !important;
+}
+
+html.codex-qingkong-skin .composer-surface-chrome::before {
+  content: none !important;
+}
+
+html.codex-qingkong-skin .ProseMirror {
+  color: #1e3a5f !important;
+  caret-color: var(--qingkong-sky-deep) !important;
+}
+
+/* 主按钮（发送 / 顶栏创建 / 其它 bg-token-foreground）：天空蓝 + 浅字 */
+html.codex-qingkong-skin button[class~="bg-token-foreground"],
+html.codex-qingkong-skin .composer-surface-chrome button[class~="bg-token-foreground"],
+html.codex-qingkong-skin .composer-surface-chrome button[class*="size-token-button-composer"],
+html.codex-qingkong-skin button[class~="bg-token-foreground"][class*="size-token-button-composer"] {
+  background: linear-gradient(145deg, #5aa8e0 0%, #3b8fd9 100%) !important;
+  color: #f4fafd !important;
+  border: 1px solid rgba(255, 255, 255, 0.35) !important;
+  box-shadow:
+    0 4px 14px rgba(59, 143, 217, 0.35),
+    inset 0 1px 0 rgba(255, 255, 255, 0.35) !important;
+  opacity: 1 !important;
+}
+
+html.codex-qingkong-skin button[class~="bg-token-foreground"]:hover,
+html.codex-qingkong-skin .composer-surface-chrome button[class~="bg-token-foreground"]:hover,
+html.codex-qingkong-skin .composer-surface-chrome button[class*="size-token-button-composer"]:hover {
+  background: linear-gradient(145deg, #6eb4e8, #3b8fd9) !important;
+  box-shadow:
+    0 6px 18px rgba(59, 143, 217, 0.45),
+    inset 0 1px 0 rgba(255, 255, 255, 0.4) !important;
+}
+
+html.codex-qingkong-skin button[class~="bg-token-foreground"] svg,
+html.codex-qingkong-skin .composer-surface-chrome button[class~="bg-token-foreground"] svg,
+html.codex-qingkong-skin .composer-surface-chrome button[class*="size-token-button-composer"] svg {
+  color: #f4fafd !important;
+  fill: currentColor;
+  opacity: 1 !important;
+}
+
+/* 项目选择区 */
+.qingkong-home div:has(> .horizontal-scroll-fade-mask .group\/project-selector),
+.qingkong-home div:has(> .horizontal-scroll-fade-mask)[class*="bg-token-side-bar"],
+.qingkong-home div:has(> .horizontal-scroll-fade-mask)[class*="bg-token-bg-fog"],
+.qingkong-home div.select-none:has(> .horizontal-scroll-fade-mask) {
+  position: relative !important;
+  border: 1px solid rgba(255, 255, 255, 0.5) !important;
+  border-bottom: 0 !important;
+  border-radius: 14px 14px 0 0 !important;
+  background-color: transparent !important;
+  background-image: linear-gradient(
+    180deg,
+    rgba(255, 255, 255, 0.55),
+    rgba(220, 238, 250, 0.42)
+  ) !important;
+  backdrop-filter: blur(12px) !important;
+  -webkit-backdrop-filter: blur(12px) !important;
+  color: #1e3a5f !important;
+  --text-primary: #1e3a5f !important;
+  --text-secondary: #4a6a8a !important;
+  --icon-primary: #2a4a6f !important;
+  --color-token-side-bar-background: transparent !important;
+  --color-token-bg-fog: transparent !important;
+}
+
+.qingkong-home div:has(> .horizontal-scroll-fade-mask .group\/project-selector) {
+  padding-top: 28px !important;
+}
+
+.qingkong-home div:has(> .horizontal-scroll-fade-mask .group\/project-selector)::before {
+  content: "◇  选择项目";
+  position: absolute;
+  left: 14px;
+  top: 7px;
+  z-index: 2;
+  color: rgba(59, 143, 217, 0.9);
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.6);
+  white-space: nowrap;
+}
+
+.qingkong-home .group\/project-selector,
+.qingkong-home .group\/project-selector *,
+.qingkong-home div:has(> .horizontal-scroll-fade-mask)[class*="bg-token-side-bar"],
+.qingkong-home div:has(> .horizontal-scroll-fade-mask)[class*="bg-token-side-bar"] *,
+.qingkong-home div.select-none:has(> .horizontal-scroll-fade-mask),
+.qingkong-home div.select-none:has(> .horizontal-scroll-fade-mask) * {
+  --text-primary: #1e3a5f !important;
+  --text-secondary: #4a6a8a !important;
+  color: #2a4a6f !important;
+}
+
+.qingkong-home .group\/project-selector > button,
+.qingkong-home .group\/project-selector button,
+.qingkong-home div:has(> .horizontal-scroll-fade-mask) > .horizontal-scroll-fade-mask button,
+.qingkong-home div.select-none:has(> .horizontal-scroll-fade-mask) button {
+  border-color: rgba(255, 255, 255, 0.5) !important;
+  background: linear-gradient(
+    135deg,
+    rgba(255, 255, 255, 0.65),
+    rgba(200, 230, 250, 0.55)
+  ) !important;
+  color: #2a4a6f !important;
+  box-shadow: 0 3px 10px rgba(30, 80, 130, 0.08) !important;
+}
+
+/* utility 行 */
+.qingkong-home [class*="homeUtilityBar"],
+.qingkong-home [class*="_homeUtilityBar_"],
+html.codex-qingkong-skin .qingkong-home-utility {
+  color: #1e3a5f !important;
+  --text-primary: #1e3a5f !important;
+  --text-secondary: #4a6a8a !important;
+}
+
+/* utility 独立圆角；composer 保持四角宿主圆角（勿 0 0 16px 16px 合并成上边方角） */
+html.codex-qingkong-skin .qingkong-home-utility,
+html.codex-qingkong-skin .qingkong-home [class*="homeUtilityBar"],
+html.codex-qingkong-skin .qingkong-home [class*="_homeUtilityBar_"] {
+  border: 1px solid rgba(255, 255, 255, 0.5) !important;
+  border-radius: 16px !important;
+  background: rgba(255, 255, 255, 0.48) !important;
+  backdrop-filter: blur(14px) !important;
+  -webkit-backdrop-filter: blur(14px) !important;
+}
+
+/* 「完全访问」暖色强调（对齐设计图橙红） */
+html.codex-qingkong-skin .qingkong-home [class*="homeUtilityBar"] [class*="text-"],
+html.codex-qingkong-skin .composer-surface-chrome [class*="text-orange"],
+html.codex-qingkong-skin .composer-surface-chrome [class*="text-red"],
+html.codex-qingkong-skin .qingkong-home button:has(svg) span[class*="text-"] {
+  /* 保留宿主语义色 */
+}
+
+/* 弹层 light */
+html.codex-qingkong-skin [role="menu"],
+html.codex-qingkong-skin [role="listbox"],
+html.codex-qingkong-skin [role="dialog"],
+html.codex-qingkong-skin [role="alertdialog"],
+html.codex-qingkong-skin [data-radix-popper-content-wrapper],
+html.codex-qingkong-skin [data-radix-menu-content],
+html.codex-qingkong-skin [data-radix-select-content],
+html.codex-qingkong-skin [cmdk-root],
+html.codex-qingkong-skin [data-cmdk-root] {
+  color-scheme: light !important;
+}
+
+html.codex-qingkong-skin [role="menu"],
+html.codex-qingkong-skin [role="listbox"],
+html.codex-qingkong-skin [data-radix-menu-content],
+html.codex-qingkong-skin [data-radix-select-content],
+html.codex-qingkong-skin [cmdk-root],
+html.codex-qingkong-skin [data-cmdk-root] {
+  background-color: var(--color-token-dropdown-background, #f4fafd) !important;
+  color: var(--color-token-dropdown-foreground, #1e3a5f) !important;
+  border-color: var(--color-token-menu-border, rgba(90, 140, 190, 0.22));
+}
+
+/*
+ * 对话线程可读性（外层蒙版 + 字色；不加气泡底）
+ * 宿主：markdown 透明底；无可靠 data-message-author-role；thread 直接叠 main 蒙版。
+ */
+html.codex-qingkong-skin .thread-scroll-container {
+  --text-primary: #1e3a5f !important;
+  --text-secondary: #2a4060 !important;
+  --text-tertiary: #3d5470 !important;
+  --icon-primary: #2a4060 !important;
+  --icon-secondary: #3d5470 !important;
+  --color-token-text-primary: #1e3a5f !important;
+  --color-token-text-secondary: #2a4060 !important;
+  --color-token-text-tertiary: #3d5470 !important;
+  --color-token-foreground: #1e3a5f !important;
+  --color-token-description-foreground: rgba(42, 64, 96, 0.72) !important;
+  --color-token-icon-foreground: #2a4060 !important;
+  --color-token-link: #185a9c !important;
+  --link: #185a9c !important;
+  color: #1e3a5f !important;
+}
+
+html.codex-qingkong-skin .thread-scroll-container .text-size-chat,
+html.codex-qingkong-skin .thread-scroll-container [class*="markdownContent"],
+html.codex-qingkong-skin .thread-scroll-container [class*="_markdownContent_"],
+html.codex-qingkong-skin .thread-scroll-container [class*="markdownText"],
+html.codex-qingkong-skin .thread-scroll-container [class*="_markdownText_"] {
+  color: #1e3a5f !important;
+}
+
+html.codex-qingkong-skin .thread-scroll-container .text-token-text-secondary,
+html.codex-qingkong-skin .thread-scroll-container [class*="text-token-text-secondary"] {
+  color: #2a4060 !important;
+}
+
+html.codex-qingkong-skin .thread-scroll-container .text-token-text-tertiary,
+html.codex-qingkong-skin .thread-scroll-container [class*="text-token-text-tertiary"] {
+  color: #3d5470 !important;
+}
+
+html.codex-qingkong-skin .thread-scroll-container a,
+html.codex-qingkong-skin .thread-scroll-container [class*="markdownContent"] a,
+html.codex-qingkong-skin .thread-scroll-container [class*="_markdownContent_"] a {
+  color: #185a9c !important;
+}
+
+/* 宿主偶发 article 节点：只圆角，不铺气泡底 */
+html.codex-qingkong-skin article,
+html.codex-qingkong-skin [data-message-author-role] {
+  border-radius: 12px;
+}
+
+/* 线程底部渐变：与外层蒙版同系，避免底边发脏 */
+html.codex-qingkong-skin div.pointer-events-none.absolute.inset-x-0.bottom-0 > div[class*="bg-gradient-to-t"],
+html.codex-qingkong-skin.skins-art-wide
+  main.main-surface
+  .thread-scroll-container
+  .bg-gradient-to-t.from-token-main-surface-primary {
+  background-image: linear-gradient(
+    180deg,
+    transparent 0%,
+    rgba(230, 242, 250, 0.28) 55%,
+    rgba(244, 250, 253, 0.48) 100%
+  ) !important;
+  background-color: transparent !important;
+}
+
+/* 对话区主表面打穿 */
+html.codex-qingkong-skin main.main-surface:not(.qingkong-home-shell) [class*="bg-token-main-surface"],
+html.codex-qingkong-skin main.main-surface:not(.qingkong-home-shell) form,
+html.codex-qingkong-skin main.main-surface:not(.qingkong-home-shell) section {
+  background-color: transparent !important;
+}
+
+/*
+ * 兜底：composer 四角恢复宿主 --composer-border-radius
+ *（覆盖任何「上方 utility 合并 → 上边 0 圆角」残留）
+ */
+html.codex-qingkong-skin.skins-art-wide main.main-surface .composer-surface-chrome,
+html.codex-qingkong-skin main.main-surface .composer-surface-chrome,
+html.codex-qingkong-skin
+  .qingkong-home:has(.qingkong-home-utility)
+  .composer-surface-chrome,
+html.codex-qingkong-skin
+  .qingkong-home:has([class*="homeUtilityBar"])
+  .composer-surface-chrome,
+html.codex-qingkong-skin
+  .qingkong-home:has([class*="_homeUtilityBar_"])
+  .composer-surface-chrome {
+  border-radius: var(--composer-border-radius, 1.25rem) !important;
+  border-top-left-radius: var(--composer-border-radius, 1.25rem) !important;
+  border-top-right-radius: var(--composer-border-radius, 1.25rem) !important;
+  border-bottom-left-radius: var(--composer-border-radius, 1.25rem) !important;
+  border-bottom-right-radius: var(--composer-border-radius, 1.25rem) !important;
+}
+
+html.codex-qingkong-skin.skins-art-wide main.main-surface .app-shell-main-content-top-fade {
+  display: none !important;
+  background: transparent !important;
+}
+
+/* 响应式 */
+@media (max-width: 1120px) {
+  .qingkong-home {
+    --thread-content-max-width: min(48rem, calc(100cqw - 30px)) !important;
+  }
+}
+
+@media (max-width: 900px) {
+  .qingkong-brand {
+    left: 14px;
+    top: 48px;
+  }
+  .qingkong-brand b {
+    font-size: 13px;
+  }
+  .qingkong-home [data-feature="game-source"] {
+    font-size: 20px !important;
+  }
+  .qingkong-home [data-feature="game-source"]::after {
+    font-size: 13px;
+  }
+}

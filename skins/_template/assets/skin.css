@@ -1,0 +1,151 @@
+/**
+ * =============================================================================
+ * 皮肤个性化 CSS 模板（skins/_template/assets/skin.css）
+ * =============================================================================
+ *
+ * 改这里：色板、品牌装饰、面板润色、圆角阴影等「长什么样」。
+ * 别改：engine/runtime/*（那是全局框架，升级一次全皮肤受益）。
+ *
+ * 宿主锚点（main / 侧栏 / 顶栏 / 建议卡…）的「叫什么」见：
+ *   engine/runtime/selectors.json
+ * 推荐选择器 key：shell-main, left-panel, header-tint, home-suggestions, composer-chrome
+ *
+ * 注入顺序（引擎自动）：
+ *   1) immersive-skin.css  框架能力基线
+ *   2) 本文件              你的个性化（后写优先）
+ *
+ * 运行时 class / 属性（renderer-core 自动挂）：
+ *   skins-art-wide | skins-art-standard | skins-art-none
+ *   skins-theme-light | skins-theme-dark
+ *   skins-safe-* | skins-focus-* | skins-task-*
+ *   data-skins-art-mode = wallpaper | token-only | none
+ *   data-skins-art-paint = body | none | custom
+ *
+ * 壁纸策略（skin.json → art.mode / art.paint）：
+ *   wallpaper + paint:body  — 框架在 body 画全窗壁纸（默认）
+ *   token-only / paint:custom — 引擎只注入 --skins-art；皮肤自挂 main/chrome
+ *   mode:none — 纯样式无图，可省略 assets.art
+ */
+
+/* ---- 1) Token：全模式生效，建议卡/正文默认跟 --skins-text ---- */
+:root.codex-my-skin {
+  --skins-accent: #6688ff;
+  --skins-text: #1a1a2e;
+  --skins-ink: #1a1a2e;
+  --skins-canvas: #f7f8ff;
+  --skins-sidebar: #eef0fa;
+  --skins-surface-raised: #ffffff;
+  --skins-line: #c8cad8;
+  /* 立绘变量名必须与 skin.json markers.artVar 一致；paint=body 时框架用 --skins-art 画 body */
+  --my-skin-art: var(--skins-art, none);
+  /* 推荐卡片 token（可选；引擎有默认）。列表勿默认写——未定义 = 宿主原生 */
+  --skins-suggest-card-color: var(--skins-text);
+  --skins-suggest-card-bg: color-mix(in srgb, var(--skins-surface-raised) 40%, transparent);
+  /*
+   * 推荐列表（select-like 行）— 仅自定义时取消注释：
+   * --skins-suggest-list-color: color-mix(in srgb, var(--skins-text) 55%, transparent);
+   * --skins-suggest-list-color-hover: var(--skins-text);
+   * --skins-suggest-list-bg: transparent;
+   * --skins-suggest-list-panel-bg: color-mix(in srgb, var(--skins-surface-raised) 78%, transparent);
+   */
+}
+
+:root.codex-my-skin.skins-theme-dark {
+  --skins-text: #eef0f6;
+  --skins-ink: #eef0f6;
+  --skins-canvas: #141820;
+  --skins-sidebar: #10141c;
+  --skins-surface-raised: #1e2430;
+  --skins-line: #3a4150;
+}
+
+/* ---- 2) 装饰 chrome：不抢点击（契约） ---- */
+#codex-my-skin-chrome {
+  pointer-events: none !important;
+  z-index: 2;
+}
+
+#codex-my-skin-chrome .my-brand {
+  position: fixed;
+  left: 18px;
+  bottom: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 14px;
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--skins-surface-raised) 82%, transparent);
+  border: 1px solid color-mix(in srgb, var(--skins-line) 70%, transparent);
+  color: var(--skins-text);
+  font-size: 12px;
+  line-height: 1.35;
+  box-shadow: 0 8px 24px rgba(20, 24, 40, 0.08);
+}
+
+#codex-my-skin-chrome .my-brand b {
+  font-size: 13px;
+}
+
+#codex-my-skin-chrome .my-brand small {
+  opacity: 0.72;
+}
+
+/* ---- 3) 面板润色：标准构图（非超宽壁纸）可叠半透明底 ---- */
+/* shell-main / left-panel → selectors.json */
+html.codex-my-skin.skins-art-standard aside.app-shell-left-panel {
+  background: color-mix(in srgb, var(--skins-sidebar) 88%, transparent) !important;
+}
+
+html.codex-my-skin.skins-art-standard main.main-surface {
+  background: color-mix(in srgb, var(--skins-canvas) 72%, transparent) !important;
+}
+
+/* ---- 4) 宽图模式：少叠不透明实心底，保留连续壁纸 ---- */
+html.codex-my-skin.skins-art-wide main.main-surface,
+html.codex-my-skin.skins-art-wide aside.app-shell-left-panel {
+  background: transparent !important;
+}
+
+/*
+ * ---- 4b) paint=custom 示例：引擎不画 body，皮肤自挂立绘 ----
+ * skin.json: "art": { "mode": "token-only", "paint": "custom", ... }
+ * 任选一处取消注释；变量用 --my-skin-art 或 --skins-art。
+ */
+/*
+html.codex-my-skin[data-skins-art-paint="custom"] main.main-surface {
+  background-color: var(--skins-canvas) !important;
+  background-image: var(--my-skin-art, var(--skins-art)) !important;
+  background-position: var(--skins-art-position, 50% 50%) !important;
+  background-size: cover !important;
+  background-repeat: no-repeat !important;
+}
+*/
+/*
+html.codex-my-skin[data-skins-art-paint="custom"] #codex-my-skin-chrome {
+  background-image: var(--my-skin-art, var(--skins-art));
+  background-size: contain;
+  background-repeat: no-repeat;
+  background-position: right bottom;
+}
+*/
+
+/* ---- 5) 输入框 / 建议卡（L2，缺失时规则自然不生效） ---- */
+html.codex-my-skin .composer-surface-chrome {
+  border-color: color-mix(in srgb, var(--skins-accent) 28%, var(--skins-line)) !important;
+}
+
+/*
+ * 建议区：CARD 与 LIST 同属 section.group/home-suggestions（列表是类 select 的 button 行）。
+ * 写卡片必须 :not([class*="home-suggestion-list-item"])。
+ * 卡片调 --skins-suggest-card-*；列表默认不碰；要主题化列表再设 --skins-suggest-list-*。
+ */
+html.codex-my-skin
+  .group\/home-suggestions
+  button:not([class*="home-suggestion-list-item"]) {
+  /* 可选卡片装饰；可用 var(--skins-suggest-card-bg) */
+}
+
+/* ---- 6) 顶栏：可改颜色，勿改 position/top/z-index ---- */
+html.codex-my-skin header.app-header-tint {
+  color: var(--skins-text) !important;
+}

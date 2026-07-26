@@ -3,6 +3,7 @@
   "name": "Dream 粉紫",
   "nameEn": "Dream Pink",
   "description": "粉紫梦幻风格，温柔星光氛围",
+  "categories": ["art"],
   "tags": [
     "粉紫",
     "梦幻",
@@ -24,7 +25,7 @@
     "chromeId": "codex-dream-skin-chrome",
     "stateKey": "__CODEX_DREAM_SKIN_STATE__",
     "disabledKey": "__CODEX_DREAM_SKIN_DISABLED__",
-    "artVar": "--dream-art"
+    "artVar": "--skins-art"
   },
   "desktopTheme": {
     "appearanceTheme": "light",

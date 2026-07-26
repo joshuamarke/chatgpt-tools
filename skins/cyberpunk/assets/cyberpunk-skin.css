@@ -1,4 +1,6 @@
 :root.codex-cyberpunk-skin {
+  /* 推荐列表：不设 --skins-suggest-list-* → 宿主原生；卡片选择器已排除 list-item */
+
   color-scheme: light !important;
   --cyber-ink: #1f152d;
   --cyber-ink-muted: #6d528f;
@@ -439,7 +441,7 @@ html.codex-cyberpunk-skin .cyberpunk-home {
 }
 
 /* 亮色高亮高对比推荐卡 */
-.cyberpunk-home .group\/home-suggestions button {
+.cyberpunk-home .group\/home-suggestions button:not([class*="home-suggestion-list-item"]) {
   position: relative !important;
   min-height: 126px !important;
   padding: 14px 13px 12px !important;
@@ -457,13 +459,13 @@ html.codex-cyberpunk-skin .cyberpunk-home {
   transition: transform .16s ease, box-shadow .16s ease, border-color .16s ease !important;
 }
 
-.cyberpunk-home .group\/home-suggestions button:hover {
+.cyberpunk-home .group\/home-suggestions button:not([class*="home-suggestion-list-item"]):hover {
   transform: translateY(-2px) !important;
   border-color: rgba(255, 0, 127, 0.22) !important;
   box-shadow: 0 12px 24px rgba(31, 21, 45, 0.08) !important;
 }
 
-.cyberpunk-home .group\/home-suggestions button > span {
+.cyberpunk-home .group\/home-suggestions button:not([class*="home-suggestion-list-item"]) > span {
   display: flex !important;
   width: 100% !important;
   justify-content: center !important;
@@ -473,9 +475,9 @@ html.codex-cyberpunk-skin .cyberpunk-home {
 }
 
 /* 图标底座 */
-.cyberpunk-home .group\/home-suggestions button > span:first-child > span:first-child,
-.cyberpunk-home .group\/home-suggestions button span:has(> svg),
-.cyberpunk-home .group\/home-suggestions button span:has(> span > svg) {
+.cyberpunk-home .group\/home-suggestions button:not([class*="home-suggestion-list-item"]) > span:first-child > span:first-child,
+.cyberpunk-home .group\/home-suggestions button:not([class*="home-suggestion-list-item"]) span:has(> svg),
+.cyberpunk-home .group\/home-suggestions button:not([class*="home-suggestion-list-item"]) span:has(> span > svg) {
   width: 38px !important;
   height: 38px !important;
   min-width: 38px !important;
@@ -493,14 +495,14 @@ html.codex-cyberpunk-skin .cyberpunk-home {
   overflow: hidden !important;
 }
 
-.cyberpunk-home .group\/home-suggestions button svg {
+.cyberpunk-home .group\/home-suggestions button:not([class*="home-suggestion-list-item"]) svg {
   width: 20px !important;
   height: 20px !important;
   color: #ffffff !important;
   flex-shrink: 0 !important;
 }
 
-.cyberpunk-home .group\/home-suggestions button > span:last-child {
+.cyberpunk-home .group\/home-suggestions button:not([class*="home-suggestion-list-item"]) > span:last-child {
   align-items: center !important;
   text-align: center !important;
   color: #6d528f !important;
@@ -592,5 +594,5 @@ html.codex-cyberpunk-skin [data-message-author-role] {
   .cyberpunk-home > div:first-child > div:first-child > div:first-child > div:first-child > div:first-child { width: 66% !important; }
   .cyberpunk-home [data-feature="game-source"] { font-size: 18px !important; }
   .cyberpunk-home [data-feature="game-source"]::after { font-size: 12px; margin-top: 10px; }
-  .cyberpunk-home .group\/home-suggestions button { min-height: 114px !important; font-size: 12px !important; }
+  .cyberpunk-home .group\/home-suggestions button:not([class*="home-suggestion-list-item"]) { min-height: 114px !important; font-size: 12px !important; }
 }

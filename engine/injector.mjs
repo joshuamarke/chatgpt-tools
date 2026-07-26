@@ -27,9 +27,10 @@ const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "[::1]", "::1"]);
 const BROWSER_ID_PATTERN = /^[A-Za-z0-9._-]{1,200}$/;
 /** Fallback full rebuild interval when fs.watch is unavailable. */
 const STRONG_THEME_AUDIT_MS = 120000;
-/** Large original art is intentional; CDP evaluate timeout scales with payload size. */
-const ART_EVAL_BASE_TIMEOUT_MS = 20000;
-const ART_EVAL_BYTES_PER_MS = 400;
+/** Large original art is intentional; CDP evaluate timeout scales with payload size.
+ *  Relaxed for multi-MB wallpapers (up to 16 MB): longer base + more budget per byte. */
+const ART_EVAL_BASE_TIMEOUT_MS = 30000;
+const ART_EVAL_BYTES_PER_MS = 250;
 const CONTROL_POLL_MS = 280;
 
 class CdpIdentityMismatchError extends Error {}
@@ -380,8 +381,8 @@ function artEvaluateTimeoutMs(staged) {
   const bytes = Number(staged?.artPayloadBytes || staged?.artBytes || 0);
   if (!bytes) return ART_EVAL_BASE_TIMEOUT_MS;
   return Math.min(
-    120000,
-    Math.max(ART_EVAL_BASE_TIMEOUT_MS, Math.round(bytes / ART_EVAL_BYTES_PER_MS) + 8000)
+    180000,
+    Math.max(ART_EVAL_BASE_TIMEOUT_MS, Math.round(bytes / ART_EVAL_BYTES_PER_MS) + 12000)
   );
 }
 
@@ -494,6 +495,14 @@ async function applyStagedToSession(
 
 /** Normalize buildStagedPayload / buildPayload results for watch reload checks. */
 function stagedFromBuilt(built) {
+  // Staged shell is present even when art.mode=none (empty artPayload is valid).
+  if (built?.shellPayload && (built.phase === "staged" || "hasArt" in (built || {}))) {
+    return {
+      ...built,
+      artPayload: built.artPayload || null,
+      deferredArt: Boolean(built.hasArt && built.artPayload),
+    };
+  }
   if (built?.shellPayload && built?.artPayload) return built;
   // Monolithic fallback — treat full payload as shell only (no separate art).
   return {
@@ -562,6 +571,10 @@ async function removeFromSession(session, markers) {
     }
     const root = document.documentElement;
     const themeClasses = [
+      'skins-theme-light','skins-theme-dark','skins-art-wide','skins-art-standard','skins-art-none',
+      'skins-focus-left','skins-focus-center','skins-focus-right',
+      'skins-safe-left','skins-safe-center','skins-safe-right','skins-safe-none',
+      'skins-task-ambient','skins-task-banner','skins-task-off',
       'dream-theme-light','dream-theme-dark','dream-art-wide','dream-art-standard',
       'dream-focus-left','dream-focus-center','dream-focus-right',
       'dream-safe-left','dream-safe-center','dream-safe-right','dream-safe-none',
@@ -569,12 +582,18 @@ async function removeFromSession(session, markers) {
     ];
     root?.classList.remove(markers.rootClass, ...themeClasses);
     for (const prop of [
-      markers.artVar, '--dream-art', '--dream-art-position', '--dream-focus-x',
+      markers.artVar, '--skins-art', '--skins-art-position', '--skins-focus-x',
+      '--skins-focus-y', '--skins-accent', '--skins-accent-ink', '--skins-image-luma',
+      '--dream-art', '--dream-art-position', '--dream-focus-x',
       '--dream-focus-y', '--dream-accent', '--dream-accent-ink', '--dream-image-luma'
     ].filter(Boolean)) {
       root?.style.removeProperty(prop);
     }
     root?.removeAttribute('data-chatgpt-tools-skin');
+    root?.removeAttribute('data-skins-shell');
+    root?.removeAttribute('data-skins-art-mode');
+    root?.removeAttribute('data-skins-art-paint');
+    root?.removeAttribute('data-skin-contract');
     root?.removeAttribute('data-dream-shell');
     document.getElementById(markers.styleId)?.remove();
     document.getElementById(markers.chromeId)?.remove();

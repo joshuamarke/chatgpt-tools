@@ -3,7 +3,7 @@
  * CJS for manager.js; ESM consumers use createRequire or version.mjs.
  */
 const ENGINE_NAME = "chatgpt-tools-engine";
-const ENGINE_VERSION = "2.3.0";
+const ENGINE_VERSION = "2.4.1";
 const ENGINE_PROTOCOL = 2;
 
 module.exports = {

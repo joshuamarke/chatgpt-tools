@@ -1,7 +1,7 @@
 [package]
 name = "chatgpt-tools"
 version = "1.0.0"
-description = "ChatGPT Tools — lightweight ChatGPT / Codex skin manager (Tauri 2)"
+description = "ChatGPT Tools — ChatGPT / Codex desktop toolbox (skins, sessions, more)"
 authors = ["chatgpt-tools"]
 edition = "2021"
 
@@ -30,6 +30,14 @@ hex = "0.4"
 parking_lot = "0.12"
 # Native .cgskin / .zip import-export (no Node adm-zip)
 zip = { version = "2.2", default-features = false, features = ["deflate"] }
+# Local Codex session management (SQLite + backups)
+rusqlite = { version = "0.32", features = ["bundled"] }
+uuid = { version = "1", features = ["v4", "serde"] }
+anyhow = "1"
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+# Provider config (Codex / Grok Build TOML live files)
+toml = "0.8"
+toml_edit = "0.22"
 
 [profile.release]
 panic = "abort"

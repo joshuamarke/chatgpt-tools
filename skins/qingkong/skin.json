@@ -1,0 +1,46 @@
+{
+  "id": "qingkong",
+  "name": "青空 · 蒙眼旅人",
+  "nameEn": "Azure Sky Blindfold",
+  "description": "晴空立绘全屏自适应，毛玻璃侧栏与浅色透感控件；青空限定",
+  "categories": ["anime", "nature", "art"],
+  "tags": [
+    "青春",
+    "晴空",
+    "动漫",
+    "浅色",
+    "Light",
+    "毛玻璃"
+  ],
+  "previewGradient": "linear-gradient(135deg, #8ec8f0 0%, #c5e8fb 45%, #6eb4e8 100%)",
+  "accent": "#3B8FD9",
+  "port": 9336,
+  "assets": {
+    "css": "assets/qingkong-skin.css",
+    "art": "assets/bg-min.jpg",
+    "artMime": "image/jpeg",
+    "plugin": "assets/plugin.json"
+  },
+  "markers": {
+    "rootClass": "codex-qingkong-skin",
+    "homeClass": "qingkong-home",
+    "styleId": "codex-qingkong-skin-style",
+    "chromeId": "codex-qingkong-skin-chrome",
+    "stateKey": "__CODEX_QINGKONG_SKIN_STATE__",
+    "disabledKey": "__CODEX_QINGKONG_SKIN_DISABLED__",
+    "artVar": "--qingkong-art"
+  },
+  "desktopTheme": {
+    "appearanceTheme": "light",
+    "appearanceLightCodeThemeId": "codex",
+    "appearanceLightChromeTheme": "{ accent = \"#3B8FD9\", contrast = 58, fonts = { code = \"SF Mono\", ui = \"PingFang SC\" }, ink = \"#1E3A5F\", opaqueWindows = true, semanticColors = { diffAdded = \"#B8E0C8\", diffRemoved = \"#F0C4C0\", skill = \"#5BA3E0\" }, surface = \"#E8F4FC\" }"
+  },
+  "appearance": "light",
+  "art": {
+    "focusX": 0.78,
+    "focusY": 0.42,
+    "safeArea": "left",
+    "taskMode": "ambient"
+  },
+  "version": "3.0.0"
+}

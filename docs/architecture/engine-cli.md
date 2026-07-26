@@ -117,13 +117,17 @@ node engine/cli.mjs <command> [options]
 
 ### `design-wallpaper --payload <json-file|json-string>`
 
+基于 **目标皮肤模板**（`baseSkinId`）生成用户自定义皮肤：复制模板资源，替换壁纸，合并 `art.*` / 颜色 tokens，并追加不破坏模板布局的 designer CSS。
+
+壁纸硬上限 **16 MB**（与 `MAX_ART_BYTES` 一致）。
+
 Payload 字段（camelCase）：
 
 ```json
 {
   "baseSkinId": "dream",
   "imagePath": "C:/path/to.jpg",
-  "name": "我的主题",
+  "name": "我的自定义皮肤",
   "fit": "cover",
   "position": "right center",
   "accent": "#8b7cff",

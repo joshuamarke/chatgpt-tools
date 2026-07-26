@@ -159,7 +159,7 @@ fn find_node() -> Result<PathBuf, EngineError> {
         }
     }
     Err(EngineError::msg(
-        "未找到 Node.js。主路径换肤已不需要 Node；仅导入/导出/设计壁纸或强制 Node 回退时需要。请安装 Node 18+ 或设置 CODEX_SKIN_NODE。",
+        "未找到 Node.js。主路径换肤已不需要 Node；仅导入/导出/自定义皮肤或强制 Node 回退时需要。请安装 Node 18+ 或设置 CODEX_SKIN_NODE。",
     ))
 }
 
@@ -299,6 +299,13 @@ pub fn run_engine(args: &[&str]) -> Result<Value, EngineError> {
                     }
                 }
             }
+            "start-host" | "start_host" => match cdp::start_host_native() {
+                Ok(v) => return Ok(v),
+                Err(e) => {
+                    eprintln!("[chatgpt-tools] native start-host: {e}");
+                    return Err(e);
+                }
+            },
             "resolve-asset" => {
                 if let (Some(skin_id), Some(kind)) =
                     (flag_value(args, "skin-id"), flag_value(args, "kind"))

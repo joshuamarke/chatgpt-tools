@@ -1,0 +1,6 @@
+{
+  "version": "2.0.0",
+  "chromeHtml": "<div class=\"my-brand\" data-skin-chrome=\"brand\"><b>模板皮肤</b><small>改 chromeHtml 即可 · 勿改 renderer-core</small></div>",
+  "skipAnalysis": false,
+  "_comment": "chromeHtml 注入到 markers.chromeId 节点；装饰默认 pointer-events:none（框架基线）。文案/IP 只写这里。"
+}

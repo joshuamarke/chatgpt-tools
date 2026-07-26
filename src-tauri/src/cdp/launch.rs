@@ -1,15 +1,17 @@
 //! Launch / stop ChatGPT·Codex with remote debugging — parity with manager ensureDebugPort.
 
 use super::host::{
-    append_diag, find_host_main_pids, invalidate_host_probe_cache, note_host_ready,
-    probe_host_lifecycle_force, resolve_timing_budget, run_powershell, state_root,
-    wait_for_host_lifecycle, wait_until_renderer_ready, TimingBudget,
+    append_diag, find_host_main_pids, invalidate_host_lifecycle_sticky, invalidate_host_probe_cache,
+    note_host_ready, probe_host_lifecycle, probe_host_lifecycle_force, resolve_timing_budget,
+    state_root, wait_until_renderer_ready, HostLifecycle, TimingBudget,
 };
+use super::http::is_debug_port_open;
 use crate::engine::EngineError;
+use serde_json::{json, Value};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 fn sleep_ms(ms: u64) {
     std::thread::sleep(Duration::from_millis(ms));
@@ -120,26 +122,122 @@ fn resolve_exe_quick() -> Option<String> {
             }
         }
     } else if cfg!(target_os = "macos") {
-        for c in [
-            "/Applications/ChatGPT.app/Contents/MacOS/ChatGPT",
-            "/Applications/Codex.app/Contents/MacOS/Codex",
-            "/Applications/Codex.app/Contents/MacOS/ChatGPT",
-        ] {
-            if Path::new(c).is_file() {
-                return Some(c.into());
+        for c in macos_exe_candidates() {
+            if Path::new(&c).is_file() {
+                return Some(c);
             }
         }
     }
     None
 }
 
+/// Official + common install locations on macOS (ChatGPT / Codex desktop).
+fn macos_exe_candidates() -> Vec<String> {
+    let mut out = vec![
+        "/Applications/ChatGPT.app/Contents/MacOS/ChatGPT".into(),
+        "/Applications/Codex.app/Contents/MacOS/Codex".into(),
+        "/Applications/Codex.app/Contents/MacOS/ChatGPT".into(),
+    ];
+    if let Ok(home) = std::env::var("HOME") {
+        out.push(format!(
+            "{home}/Applications/ChatGPT.app/Contents/MacOS/ChatGPT"
+        ));
+        out.push(format!(
+            "{home}/Applications/Codex.app/Contents/MacOS/Codex"
+        ));
+        out.push(format!(
+            "{home}/Applications/Codex.app/Contents/MacOS/ChatGPT"
+        ));
+    }
+    out
+}
+
+/// Bundle root for a Mac executable path
+/// (`…/ChatGPT.app/Contents/MacOS/ChatGPT` → `…/ChatGPT.app`).
+fn macos_bundle_root(exe: &str) -> Option<PathBuf> {
+    let p = Path::new(exe);
+    // …/App.app/Contents/MacOS/Binary
+    p.parent()? // MacOS
+        .parent()? // Contents
+        .parent() // App.app
+        .map(|b| b.to_path_buf())
+}
+
+/// Prefer launching via `open -n -a <App.app> --args --remote-debugging-port=…`
+/// so LaunchServices does not drop Chromium flags as easily as bare exec.
+fn launch_macos_app(exe: &str, port: u16) -> Result<u32, EngineError> {
+    let arg = format!("--remote-debugging-port={port}");
+    let addr = "--remote-debugging-address=127.0.0.1";
+    if let Some(bundle) = macos_bundle_root(exe) {
+        if bundle.is_dir() {
+            append_diag(&format!(
+                "launch_macos_app open -n -a {}",
+                bundle.display()
+            ));
+            let mut cmd = Command::new("open");
+            cmd.args([
+                "-n",
+                "-a",
+                &bundle.to_string_lossy(),
+                "--args",
+                &arg,
+                addr,
+            ]);
+            cmd.stdin(std::process::Stdio::null());
+            cmd.stdout(std::process::Stdio::null());
+            cmd.stderr(std::process::Stdio::null());
+            match cmd.spawn() {
+                Ok(child) => {
+                    let pid = child.id();
+                    std::mem::forget(child);
+                    // `open` returns quickly; host PID may differ — lifecycle probe owns readiness.
+                    return Ok(if pid == 0 { 1 } else { pid });
+                }
+                Err(e) => {
+                    append_diag(&format!("launch_macos_app open failed: {e}; fallback spawn"));
+                }
+            }
+        }
+    }
+    spawn_with_debug_port(exe, port)
+}
+
+/// Event-driven wait: host PIDs gone OR timeout (no fixed 700ms sleep).
+fn wait_host_gone(timeout_ms: u64) -> bool {
+    let deadline = Instant::now() + Duration::from_millis(timeout_ms);
+    while Instant::now() < deadline {
+        if find_host_main_pids().is_empty() {
+            return true;
+        }
+        sleep_ms(40);
+    }
+    find_host_main_pids().is_empty()
+}
+
+/// Event-driven wait: debug port answers OR timeout.
+fn wait_port_open(port: u16, timeout_ms: u64) -> bool {
+    let deadline = Instant::now() + Duration::from_millis(timeout_ms);
+    while Instant::now() < deadline {
+        if is_debug_port_open(port, 400) {
+            return true;
+        }
+        sleep_ms(60);
+    }
+    is_debug_port_open(port, 400)
+}
+
 /// Stop ChatGPT / Codex host processes.
 ///
-/// Prefer PID list from `find_host_main_pids` (name-scoped). Image-wide
-/// `taskkill /IM` is only a last resort after CIM path match, so we never
-/// treat "command ran" as success without re-probing emptiness.
+/// Windows: Toolhelp + TerminateProcess (OpenAI-path filtered). No taskkill / PowerShell.
+/// Callers (apply / ensure_debug_port) must `stop_keep()` before this when possible.
+/// Also disarms keep here so restore/ensure never kill with CDP still attached.
 pub fn stop_host() {
+    let t0 = Instant::now();
     append_diag("stop_host: begin");
+    // Crash static: never leave keep / art evaluate attached while killing the host.
+    super::keep::stop_keep(); // also bumps art generation
+    invalidate_host_lifecycle_sticky();
+
     if cfg!(target_os = "macos") {
         let _ = Command::new("osascript")
             .args(["-e", r#"tell application "ChatGPT" to quit"#])
@@ -147,110 +245,163 @@ pub fn stop_host() {
         let _ = Command::new("osascript")
             .args(["-e", r#"tell application "Codex" to quit"#])
             .output();
-        sleep_ms(600);
+        let _ = wait_host_gone(800);
         for pid in find_host_main_pids() {
             let _ = Command::new("kill").args(["-TERM", &pid.to_string()]).output();
         }
-        sleep_ms(350);
+        let _ = wait_host_gone(400);
         for pid in find_host_main_pids() {
             let _ = Command::new("kill").args(["-KILL", &pid.to_string()]).output();
         }
+        let _ = wait_host_gone(600);
+        append_diag(&format!(
+            "stop_host: done (macos) left={} t={}ms",
+            find_host_main_pids().len(),
+            t0.elapsed().as_millis()
+        ));
         return;
     }
 
-    if cfg!(windows) {
-        // 1) Graceful-ish: only PIDs we already identified as ChatGPT/Codex mains.
-        let pids = find_host_main_pids();
-        for pid in &pids {
-            let mut cmd = Command::new("taskkill");
-            cmd.args(["/PID", &pid.to_string(), "/T"]);
-            #[cfg(windows)]
-            {
-                use std::os::windows::process::CommandExt;
-                const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-                cmd.creation_flags(CREATE_NO_WINDOW);
-            }
-            let _ = cmd.output();
+    #[cfg(windows)]
+    {
+        super::win_native::stop_host_native();
+        let gone = wait_host_gone(1_200);
+        if !gone {
+            append_diag(&format!(
+                "stop_host: some host PIDs still alive after Toolhelp terminate left={:?}",
+                find_host_main_pids()
+            ));
         }
-        sleep_ms(400);
-        // 2) Force only remaining known PIDs (re-probe — never kill a recycled PID blindly).
-        for pid in find_host_main_pids() {
-            let mut cmd = Command::new("taskkill");
-            cmd.args(["/F", "/PID", &pid.to_string(), "/T"]);
-            #[cfg(windows)]
-            {
-                use std::os::windows::process::CommandExt;
-                const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-                cmd.creation_flags(CREATE_NO_WINDOW);
-            }
-            let _ = cmd.output();
-        }
-        // 3) CIM path-scoped force (OpenAI package paths only — not every ChatGPT-named binary).
-        if !find_host_main_pids().is_empty() {
-            let script = r#"
-$ErrorActionPreference = 'SilentlyContinue'
-Get-CimInstance Win32_Process | Where-Object {
-  $_.Name -match '^(ChatGPT|Codex)\.exe$' -and (
-    -not $_.ExecutablePath -or
-    $_.ExecutablePath -match 'OpenAI\.(Codex|ChatGPT)|\\Programs\\(ChatGPT|Codex)\\|\\WindowsApps\\'
-  )
-} | ForEach-Object {
-  Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
-}
-"#;
-            let _ = run_powershell(script, 15_000);
-        }
-        for _ in 0..40 {
-            if find_host_main_pids().is_empty() {
-                break;
-            }
-            sleep_ms(150);
-        }
-        sleep_ms(500);
-        if !find_host_main_pids().is_empty() {
-            append_diag("stop_host: some host PIDs still alive after stop attempts");
-        }
+        append_diag(&format!(
+            "stop_host: done (win-native) left={} t={}ms",
+            find_host_main_pids().len(),
+            t0.elapsed().as_millis()
+        ));
+        return;
     }
-    append_diag("stop_host: done");
+
+    #[cfg(not(windows))]
+    {
+        append_diag(&format!(
+            "stop_host: done (noop) t={}ms",
+            t0.elapsed().as_millis()
+        ));
+    }
 }
 
-fn first_non_empty_line(stdout: &str) -> Option<String> {
-    stdout
-        .lines()
-        .map(str::trim)
-        .find(|l| !l.is_empty())
-        .map(|s| s.to_string())
+/// Resolve the best Store package for ChatGPT / Codex (native, no PowerShell).
+fn resolve_windows_store_package() -> Option<WindowsStorePackage> {
+    resolve_windows_store_package_detail().map(|(pkg, _)| pkg)
+}
+
+/// Same as `resolve_windows_store_package`, plus registered package count.
+pub fn resolve_windows_store_package_detail() -> Option<(WindowsStorePackage, u32)> {
+    #[cfg(windows)]
+    {
+        let (pkg, count) = super::win_native::resolve_store_package_native()?;
+        return Some((
+            WindowsStorePackage {
+                aumid: pkg.aumid,
+                package_full_name: pkg.package_full_name,
+                package_family_name: pkg.package_family_name,
+                version: pkg.version,
+                install_location: pkg.install_location,
+                executable: pkg.executable,
+            },
+            count,
+        ));
+    }
+    #[cfg(not(windows))]
+    {
+        None
+    }
+}
+
+/// JSON snapshot of Store package for status/detect (Windows only; null-ish elsewhere).
+pub fn store_package_status_json() -> Value {
+    if !cfg!(windows) {
+        return json!({
+            "available": false,
+            "platform": "non-windows",
+        });
+    }
+    match resolve_windows_store_package_detail() {
+        Some((pkg, count)) => {
+            let multi = count > 1;
+            json!({
+                "available": true,
+                "aumid": pkg.aumid,
+                "packageFullName": pkg.package_full_name,
+                "packageFamilyName": pkg.package_family_name,
+                "version": pkg.version,
+                "installLocation": pkg.install_location,
+                "executable": pkg.executable,
+                "registeredCount": count,
+                "multiPackage": multi,
+                "warning": if multi {
+                    json!("检测到多个 Store 包版本。若换肤异常，请在任务管理器结束全部 ChatGPT/Codex 后再试。")
+                } else {
+                    Value::Null
+                },
+            })
+        }
+        None => json!({
+            "available": false,
+            "registeredCount": 0,
+            "multiPackage": false,
+        }),
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct WindowsStorePackage {
+    pub aumid: String,
+    pub package_full_name: String,
+    pub package_family_name: String,
+    pub version: String,
+    pub install_location: String,
+    pub executable: String,
 }
 
 fn resolve_windows_store_aumid() -> Option<String> {
-    let script = r#"
-$ErrorActionPreference = 'SilentlyContinue'
-$pkgs = @()
-foreach ($n in @('OpenAI.Codex','OpenAI.ChatGPT','OpenAI.ChatGPT-Desktop')) {
-  $pkgs += Get-AppxPackage -Name $n
+    resolve_windows_store_package().map(|p| p.aumid)
 }
-$pkgs += Get-AppxPackage | Where-Object {
-  $_.Name -match 'ChatGPT|Codex' -or $_.PackageFamilyName -match 'OpenAI'
-}
-$p = $pkgs | Sort-Object Version -Descending | Select-Object -First 1
-if (-not $p) { return }
-$manifest = Join-Path $p.InstallLocation 'AppxManifest.xml'
-if (-not (Test-Path -LiteralPath $manifest)) {
-  Write-Output ($p.PackageFamilyName + '!App')
-  return
-}
-try {
-  [xml]$x = Get-Content -LiteralPath $manifest
-  $app = @($x.Package.Applications.Application) | Select-Object -First 1
-  if ($app -and $app.Id) {
-    Write-Output ($p.PackageFamilyName + '!' + $app.Id)
-    return
-  }
-} catch {}
-Write-Output ($p.PackageFamilyName + '!App')
-"#;
-    let stdout = run_powershell(script, 20_000)?;
-    first_non_empty_line(&stdout)
+
+/// Whether a saved Store package identity still matches **any** registered package.
+/// During Store auto-update the "current" package may change while the old package
+/// still owns a healthy CDP session — accept any registered full/family name.
+#[allow(dead_code)]
+pub fn store_package_still_registered(full_name: &str, family_name: &str) -> bool {
+    if full_name.is_empty() && family_name.is_empty() {
+        return false;
+    }
+    #[cfg(windows)]
+    {
+        let packages = super::win_native::list_store_packages_native();
+        for pkg in &packages {
+            if !full_name.is_empty() && pkg.package_full_name == full_name {
+                return true;
+            }
+            if !family_name.is_empty() && pkg.package_family_name == family_name {
+                return true;
+            }
+        }
+        // Fallback: best-package resolve (covers scan path when list is empty mid-API).
+        if let Some((pkg, _)) = resolve_windows_store_package_detail() {
+            if !full_name.is_empty() && pkg.package_full_name == full_name {
+                return true;
+            }
+            if !family_name.is_empty() && pkg.package_family_name == family_name {
+                return true;
+            }
+        }
+        return false;
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = (full_name, family_name);
+        false
+    }
 }
 
 fn launch_windows_store_app(port: u16, aumid_pref: Option<&str>) -> Result<u32, EngineError> {
@@ -258,57 +409,29 @@ fn launch_windows_store_app(port: u16, aumid_pref: Option<&str>) -> Result<u32, 
         .map(|s| s.to_string())
         .or_else(resolve_windows_store_aumid)
         .ok_or_else(|| EngineError::msg("未找到 Microsoft Store 版 ChatGPT/Codex AUMID"))?;
-    let arg = format!("--remote-debugging-port={port}");
-    // Escape for PowerShell single-quoted strings
-    let aumid_esc = aumid.replace('\'', "''");
-    let arg_esc = arg.replace('\'', "''");
-    let script = format!(
-        r#"
-$ErrorActionPreference = 'Stop'
-if (-not ('ChatGPTToolsAppLauncher' -as [type])) {{
-  $code = @'
-using System;
-using System.Runtime.InteropServices;
-public class ChatGPTToolsAppLauncher {{
-  [ComImport, Guid("2e941141-7f97-4756-ba1d-9decde894a3d"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
-  interface IApplicationActivationManager {{
-    IntPtr ActivateApplication([In] String appUserModelId, [In] String arguments, [In] UInt32 options, [Out] out UInt32 processId);
-  }}
-  [ComImport, Guid("45BA127D-10A8-46EA-8AB7-56EA9078943C")]
-  class ApplicationActivationManager {{}}
-  public static uint Launch(string aumid, string args) {{
-    var mgr = new ApplicationActivationManager();
-    var iam = (IApplicationActivationManager)mgr;
-    uint pid;
-    iam.ActivateApplication(aumid, args, 0, out pid);
-    return pid;
-  }}
-}}
-'@
-  Add-Type -TypeDefinition $code
-}}
-$launchPid = [ChatGPTToolsAppLauncher]::Launch('{aumid_esc}', '{arg_esc}')
-Write-Output $launchPid
-"#
+    // Pass both port + loopback address so production runtimes that honor flags stay local.
+    let args = format!(
+        "--remote-debugging-port={port} --remote-debugging-address=127.0.0.1"
     );
-    let stdout = run_powershell(&script, 30_000)
-        .ok_or_else(|| EngineError::msg("Store 应用激活失败（PowerShell）"))?;
-    let line = first_non_empty_line(&stdout).unwrap_or_default();
-    let pid: u32 = line
-        .parse()
-        .map_err(|_| EngineError::msg(format!("Store 激活返回无效 PID: {line}")))?;
-    if pid == 0 {
-        return Err(EngineError::msg("Store 激活 PID 为 0"));
+    #[cfg(windows)]
+    {
+        return super::win_native::activate_packaged_app_blocking(&aumid, &args);
     }
-    append_diag(&format!("launch_windows_store_app aumid={aumid} pid={pid}"));
-    Ok(pid)
+    #[cfg(not(windows))]
+    {
+        let _ = args;
+        Err(EngineError::msg("Store activation is Windows-only"))
+    }
 }
 
 fn spawn_with_debug_port(exe: &str, port: u16) -> Result<u32, EngineError> {
     let arg = format!("--remote-debugging-port={port}");
+    // Loopback-only when the host supports the Chromium flag (macOS Codex / ChatGPT).
+    let addr = "--remote-debugging-address=127.0.0.1";
     append_diag(&format!("spawn_with_debug_port exe={exe}"));
     let mut cmd = Command::new(exe);
     cmd.arg(&arg);
+    cmd.arg(addr);
     cmd.stdin(std::process::Stdio::null());
     cmd.stdout(std::process::Stdio::null());
     cmd.stderr(std::process::Stdio::null());
@@ -331,7 +454,7 @@ fn spawn_with_debug_port(exe: &str, port: u16) -> Result<u32, EngineError> {
             if cfg!(windows) {
                 // Shell fallback for paths with spaces
                 let mut shell = Command::new("cmd");
-                shell.args(["/C", "start", "", exe, &arg]);
+                shell.args(["/C", "start", "", exe, &arg, addr]);
                 shell.stdin(std::process::Stdio::null());
                 shell.stdout(std::process::Stdio::null());
                 shell.stderr(std::process::Stdio::null());
@@ -358,22 +481,168 @@ fn spawn_with_debug_port(exe: &str, port: u16) -> Result<u32, EngineError> {
     }
 }
 
+/// After Store package activation, detect owl/protocol redirect of CDP flags and
+/// try a constrained direct launch of the package's validated `app\ChatGPT.exe`.
+/// Does not copy or patch official binaries — only re-spawns the same install tree.
+#[cfg(windows)]
+fn maybe_recover_store_cdp_redirect(
+    port: u16,
+    pkg: &WindowsStorePackage,
+    activated_pid: u32,
+) -> Result<u32, EngineError> {
+    use super::win_native::{
+        classify_cdp_argument_status, inspect_host_cdp_arg_status, read_process_command_line,
+        CdpArgStatus,
+    };
+
+    // Brief settle for process start + argument materialization.
+    let deadline = Instant::now() + Duration::from_millis(2_500);
+    let mut status = CdpArgStatus::Uninspectable;
+    while Instant::now() < deadline {
+        if is_debug_port_open(port, 250) {
+            append_diag("store cdp: port open after package activation (no redirect recovery)");
+            return Ok(activated_pid);
+        }
+        status = inspect_host_cdp_arg_status(port);
+        if status == CdpArgStatus::ProtocolRedirected || status == CdpArgStatus::Forwarded {
+            break;
+        }
+        // Also inspect the PID returned by ActivateApplication when available.
+        if activated_pid > 0 {
+            let cmd = read_process_command_line(activated_pid);
+            let s = classify_cdp_argument_status(&cmd, port);
+            if s == CdpArgStatus::ProtocolRedirected || s == CdpArgStatus::Forwarded {
+                status = s;
+                break;
+            }
+        }
+        sleep_ms(120);
+    }
+
+    if is_debug_port_open(port, 400) {
+        return Ok(activated_pid);
+    }
+
+    if status != CdpArgStatus::ProtocolRedirected {
+        append_diag(&format!(
+            "store cdp: no protocol-redirect detected status={status:?} pid={activated_pid}"
+        ));
+        return Ok(activated_pid);
+    }
+
+    let exe = pkg.executable.trim();
+    if exe.is_empty() || !Path::new(exe).is_file() {
+        return Err(EngineError::msg(format!(
+            "Codex 将调试参数改写成了 codex:// 协议路径，且无法定位已验证的 Store 可执行文件（package={}）。请更新客户端或改用非 Store 安装。",
+            pkg.package_full_name
+        )));
+    }
+    // Only allow direct launch under the same registered install tree.
+    let exe_l = exe.replace('/', "\\").to_ascii_lowercase();
+    let root_l = pkg
+        .install_location
+        .replace('/', "\\")
+        .to_ascii_lowercase();
+    if !root_l.is_empty() && !exe_l.starts_with(&root_l) {
+        return Err(EngineError::msg(
+            "Store 直启回退拒绝：可执行文件不在已注册包安装目录内",
+        ));
+    }
+    if !exe_l.contains("\\windowsapps\\")
+        && !exe_l.contains("openai.codex")
+        && !exe_l.contains("openai.chatgpt")
+    {
+        return Err(EngineError::msg(
+            "Store 直启回退拒绝：路径未通过 OpenAI Store 宿主校验",
+        ));
+    }
+
+    append_diag(&format!(
+        "store cdp: protocol-redirected → direct spawn exe={} full={}",
+        exe, pkg.package_full_name
+    ));
+
+    // Close the package-activated session that swallowed CDP, then spawn with raw flags.
+    stop_host();
+    let _ = wait_host_gone(2_000);
+    invalidate_host_probe_cache();
+
+    match spawn_with_debug_port(exe, port) {
+        Ok(pid) => {
+            // Confirm the port actually opens; Access Denied / still-redirected → error.
+            if wait_port_open(port, 8_000) {
+                append_diag(&format!(
+                    "store cdp: direct spawn recovered port={port} pid={pid}"
+                ));
+                write_last_store_package(pkg);
+                return Ok(pid);
+            }
+            let after = inspect_host_cdp_arg_status(port);
+            Err(EngineError::msg(format!(
+                "Codex Store 运行时将 --remote-debugging-port 转成了协议路径；直启已验证可执行文件后调试口仍未开放（status={after:?}）。此环境可能因 ACL 限制无法暴露 CDP，换肤无法继续。"
+            )))
+        }
+        Err(e) => Err(EngineError::msg(format!(
+            "Codex 吞掉了 CDP 参数，直启 Store 包内可执行文件失败: {e}"
+        ))),
+    }
+}
+
+#[cfg(not(windows))]
+fn maybe_recover_store_cdp_redirect(
+    _port: u16,
+    _pkg: &WindowsStorePackage,
+    activated_pid: u32,
+) -> Result<u32, EngineError> {
+    Ok(activated_pid)
+}
+
 /// Launch ChatGPT/Codex with remote debugging port.
+///
+/// Platform notes (no system Node required on this path):
+/// - Windows Store: AUMID activation + re-resolve package every launch (survives updates)
+/// - macOS: `open -n -a App.app --args` with loopback debug flags
+/// - Classic install: direct spawn with `--remote-debugging-port`
 pub fn launch_host(port: u16) -> Result<u32, EngineError> {
     // Configured non-Store path first
     if let Some(configured) = get_configured_app_path() {
         if let Some(fixed) = expand_configured_path(&configured) {
             if !is_windows_store_path(&fixed) && Path::new(&fixed).is_file() {
+                if cfg!(target_os = "macos") {
+                    return launch_macos_app(&fixed, port);
+                }
                 return spawn_with_debug_port(&fixed, port);
             }
         }
     }
 
     if cfg!(windows) {
-        if let Some(aumid) = resolve_windows_store_aumid() {
-            match launch_windows_store_app(port, Some(&aumid)) {
-                Ok(pid) => return Ok(pid),
-                Err(e) => append_diag(&format!("store launch soft-fail: {e}")),
+        if let Some((pkg, count)) = resolve_windows_store_package_detail() {
+            if count > 1 {
+                append_diag(&format!(
+                    "store multi-package registeredCount={count} using full={} (prefer running package when present)",
+                    pkg.package_full_name
+                ));
+            }
+            match launch_windows_store_app(port, Some(&pkg.aumid)) {
+                Ok(pid) => {
+                    write_last_store_package(&pkg);
+                    if count > 1 {
+                        append_diag(
+                            "store: multiple package versions registered; identity prefers running package",
+                        );
+                    }
+                    // Owl runtime may swallow CDP flags into codex:// — recover when proven.
+                    return maybe_recover_store_cdp_redirect(port, &pkg, pid);
+                }
+                Err(e) => {
+                    if count > 1 {
+                        return Err(EngineError::msg(format!(
+                            "Store 应用激活失败，且检测到 {count} 个已注册包版本。请打开任务管理器结束全部 ChatGPT/Codex 进程后重试。详情: {e}"
+                        )));
+                    }
+                    append_diag(&format!("store launch soft-fail: {e}"));
+                }
             }
         }
     }
@@ -385,25 +654,110 @@ pub fn launch_host(port: u16) -> Result<u32, EngineError> {
     })?;
 
     if cfg!(windows) && is_windows_store_path(&exe) {
-        let pid = launch_windows_store_app(port, None)?;
-        return Ok(pid);
+        let detail = resolve_windows_store_package_detail();
+        let aumid = detail.as_ref().map(|(p, _)| p.aumid.as_str());
+        if let Some((p, count)) = detail.as_ref() {
+            write_last_store_package(p);
+            if *count > 1 {
+                append_diag(&format!("store multi-package count={count} on classic store path"));
+            }
+        }
+        match launch_windows_store_app(port, aumid) {
+            Ok(pid) => {
+                if let Some((p, _)) = detail.as_ref() {
+                    return maybe_recover_store_cdp_redirect(port, p, pid);
+                }
+                return Ok(pid);
+            }
+            Err(e) => {
+                if detail.as_ref().map(|(_, c)| *c > 1).unwrap_or(false) {
+                    return Err(EngineError::msg(format!(
+                        "Store 激活失败（多版本包并存）。请结束全部 ChatGPT/Codex 后再试: {e}"
+                    )));
+                }
+                return Err(e);
+            }
+        }
+    }
+
+    if cfg!(target_os = "macos") {
+        return launch_macos_app(&exe, port);
     }
 
     spawn_with_debug_port(&exe, port)
 }
 
-/// Ensure CDP is up with remote debugging (parity with manager.ensureDebugPort).
-///
-/// - `restart=true`: always stop + relaunch (GUI auto-restart / desktopTheme)
-/// - already ready + restart=false: return immediately
-/// - port open, no app://: wait (slow cold start) before relaunch
-/// - process without debug port: error unless we can relaunch (restart or auto)
-pub fn ensure_debug_port(port: u16, restart: bool) -> Result<(), EngineError> {
+fn write_last_store_package(pkg: &WindowsStorePackage) {
+    let path = state_root().join("last-store-package.json");
+    let body = serde_json::json!({
+        "aumid": pkg.aumid,
+        "packageFullName": pkg.package_full_name,
+        "packageFamilyName": pkg.package_family_name,
+        "version": pkg.version,
+        "installLocation": pkg.install_location,
+        "executable": pkg.executable,
+        "resolvedAt": std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0),
+    });
+    if let Ok(text) = serde_json::to_string_pretty(&body) {
+        let _ = fs::create_dir_all(state_root());
+        let _ = fs::write(path, format!("{text}\n"));
+    }
+}
+
+/// Read last resolved Store package (if any).
+pub fn read_last_store_package() -> Option<serde_json::Value> {
+    let path = state_root().join("last-store-package.json");
+    let text = fs::read_to_string(path).ok()?;
+    serde_json::from_str(&text).ok()
+}
+
+/// Fire-and-forget: stop + launch only (no wait for renderer).
+/// Callers that need inject must wait in a background job.
+/// Hard relaunch is limited to **one** extra stop+launch (never chain kills).
+pub fn restart_host_fire_and_forget(port: u16) -> Result<u32, EngineError> {
+    append_diag(&format!(
+        "restart_host_fire_and_forget port={port}"
+    ));
+    stop_host();
     invalidate_host_probe_cache();
+    // Event: PIDs gone (cap ~1.2s already inside stop); brief port-clear check.
+    let _ = wait_port_open(port, 50); // if still open, process may be dying — continue
+    let pid = launch_host(port)?;
+    append_diag(&format!(
+        "restart_host_fire_and_forget launched pid={pid}"
+    ));
+    Ok(pid)
+}
+
+/// Ensure CDP is up with remote debugging.
+///
+/// - `restart=true`: stop + relaunch (event-driven settle); at most **one** hard relaunch
+/// - already ready + restart=false: return immediately
+/// - soft-miss callers should NOT call this with relaunch; wait renderer first
+/// - first-paint miss uses a wide retry window before declaring failure (slow machines)
+pub fn ensure_debug_port(port: u16, restart: bool) -> Result<(), EngineError> {
+    // Always disarm keep before any stop path inside.
+    if restart {
+        super::keep::stop_keep(); // bumps art gen + disarms keep
+        invalidate_host_lifecycle_sticky();
+    } else {
+        invalidate_host_probe_cache();
+    }
+
     let mut probe = probe_host_lifecycle_force(port);
     let budget = resolve_timing_budget(Some(&probe));
+    // Production-grade: slow first paint must not fail the whole apply path.
+    // Cap is higher than a single wait_renderer so ensure can absorb Store cold starts.
+    let verify_window_ms = budget
+        .wait_renderer_ms
+        .saturating_add(budget.wait_debug_port_ms)
+        .max(90_000)
+        .min(120_000);
     append_diag(&format!(
-        "ensure_debug_port begin port={port} lifecycle={} process={} portOpen={} renderer={} scale={} restart={restart}",
+        "ensure_debug_port begin port={port} lifecycle={} process={} portOpen={} renderer={} scale={} restart={restart} verifyWindowMs={verify_window_ms}",
         probe.lifecycle,
         probe.process_running,
         probe.debug_port_open,
@@ -411,33 +765,36 @@ pub fn ensure_debug_port(port: u16, restart: bool) -> Result<(), EngineError> {
         budget.scale
     ));
 
+    let mut hard_relaunch_used = false;
+    let overall_deadline = Instant::now() + Duration::from_millis(verify_window_ms);
+
     if restart {
         append_diag(&format!(
             "ensure_debug_port: forced restart wasReady={}",
             probe.renderer_ready
         ));
-        stop_host();
-        invalidate_host_probe_cache();
-        sleep_ms(budget.stop_settle_ms);
-        let _ = launch_host(port)?;
-        sleep_ms(budget.launch_settle_ms);
-        let after = wait_for_host_lifecycle(
-            port,
-            &["starting", "ready"],
-            budget.wait_debug_port_ms,
-            budget.poll_ms,
-        );
-        if after.renderer_ready || after.lifecycle == "ready" {
+        let _ = restart_host_fire_and_forget(port)?;
+        // Event-driven: port open then renderer (no fixed 900ms sleep).
+        if !wait_port_open(port, budget.wait_debug_port_ms) {
+            append_diag("ensure_debug_port: port not open after restart launch");
+        }
+        if wait_until_renderer_ready(port, budget.wait_renderer_ms, budget.poll_ms) {
             note_host_ready(port);
             return Ok(());
         }
-        if after.debug_port_open
-            && wait_until_renderer_ready(port, budget.wait_renderer_ms, budget.poll_ms)
-        {
+        // One hard relaunch only
+        hard_relaunch_used = true;
+        append_diag("ensure_debug_port: one hard relaunch after forced restart");
+        let _ = restart_host_fire_and_forget(port)?;
+        let _ = wait_port_open(port, budget.wait_debug_port_ms);
+        // Wide window after relaunch — do not fail on first early-boot miss.
+        let remain = overall_deadline
+            .saturating_duration_since(Instant::now())
+            .as_millis() as u64;
+        if wait_until_renderer_ready(port, remain.max(budget.wait_renderer_ms), budget.poll_ms) {
             note_host_ready(port);
             return Ok(());
         }
-        // fall through to hard relaunch
     } else {
         if probe.renderer_ready || (probe.lifecycle == "ready" && probe.can_hot_apply) {
             note_host_ready(port);
@@ -445,8 +802,15 @@ pub fn ensure_debug_port(port: u16, restart: bool) -> Result<(), EngineError> {
         }
 
         if probe.debug_port_open && !probe.renderer_ready {
-            append_diag("ensure_debug_port: port open, waiting for app:// renderer");
-            if wait_until_renderer_ready(port, budget.wait_renderer_ms, budget.poll_ms) {
+            append_diag("ensure_debug_port: port open, waiting for app:// renderer (wide window)");
+            let remain = overall_deadline
+                .saturating_duration_since(Instant::now())
+                .as_millis() as u64;
+            if wait_until_renderer_ready(
+                port,
+                remain.max(budget.wait_renderer_ms),
+                budget.poll_ms,
+            ) {
                 note_host_ready(port);
                 return Ok(());
             }
@@ -455,71 +819,70 @@ pub fn ensure_debug_port(port: u16, restart: bool) -> Result<(), EngineError> {
 
         let running = probe.codex_running() || !find_host_main_pids().is_empty();
         if running && !probe.debug_port_open {
-            // Host up without debug port — must relaunch with our flag.
             append_diag(
                 "ensure_debug_port: host running without debug port → stop+relaunch",
             );
-            stop_host();
-            invalidate_host_probe_cache();
-            sleep_ms(budget.stop_settle_ms);
+            let _ = restart_host_fire_and_forget(port)?;
+            hard_relaunch_used = true;
         } else if running && probe.debug_port_open && !probe.renderer_ready {
-            append_diag("ensure_debug_port: running but not ready after wait; relaunch");
-            stop_host();
-            invalidate_host_probe_cache();
-            sleep_ms(budget.stop_settle_ms);
+            // Port open but renderer late: prefer waiting out the verify window
+            // before killing a healthy debug session (slow first paint).
+            let remain = overall_deadline
+                .saturating_duration_since(Instant::now())
+                .as_millis() as u64;
+            if remain > 3_000 {
+                append_diag(&format!(
+                    "ensure_debug_port: debug port open, extending wait remainMs={remain} before relaunch"
+                ));
+                if wait_until_renderer_ready(port, remain, budget.poll_ms) {
+                    note_host_ready(port);
+                    return Ok(());
+                }
+            }
+            append_diag("ensure_debug_port: running but not ready after wide wait; relaunch");
+            let _ = restart_host_fire_and_forget(port)?;
+            hard_relaunch_used = true;
         } else if !running {
-            // cold launch
+            let _ = launch_host(port)?;
         } else if probe.renderer_ready {
             note_host_ready(port);
             return Ok(());
         }
 
-        if !probe_host_lifecycle_force(port).renderer_ready {
-            let _ = launch_host(port)?;
-            sleep_ms(budget.launch_settle_ms);
-        }
-    }
-
-    // Shared tail
-    let after_launch = wait_for_host_lifecycle(
-        port,
-        &["starting", "ready"],
-        budget.wait_debug_port_ms,
-        budget.poll_ms,
-    );
-    if after_launch.renderer_ready || after_launch.lifecycle == "ready" {
-        note_host_ready(port);
-        return Ok(());
-    }
-    if after_launch.debug_port_open {
-        append_diag("ensure_debug_port: launched, waiting for renderer");
-        if wait_until_renderer_ready(port, budget.wait_renderer_ms, budget.poll_ms) {
+        let _ = wait_port_open(port, budget.wait_debug_port_ms);
+        let remain = overall_deadline
+            .saturating_duration_since(Instant::now())
+            .as_millis() as u64;
+        if wait_until_renderer_ready(
+            port,
+            remain.max(budget.wait_renderer_ms.min(45_000)),
+            budget.poll_ms,
+        ) {
             note_host_ready(port);
             return Ok(());
         }
-    }
 
-    append_diag("ensure_debug_port: retry hard relaunch");
-    stop_host();
-    invalidate_host_probe_cache();
-    sleep_ms(budget.stop_settle_ms + 300);
-    let _ = launch_host(port)?;
-    sleep_ms(budget.launch_settle_ms);
-
-    let final_snap = wait_for_host_lifecycle(
-        port,
-        &["ready"],
-        budget.wait_renderer_ms + budget.wait_debug_port_ms,
-        budget.poll_ms,
-    );
-    if final_snap.renderer_ready || final_snap.lifecycle == "ready" {
-        note_host_ready(port);
-        return Ok(());
+        if !hard_relaunch_used {
+            append_diag("ensure_debug_port: one hard relaunch (cold path)");
+            let _ = restart_host_fire_and_forget(port)?;
+            let _ = wait_port_open(port, budget.wait_debug_port_ms);
+            let remain = overall_deadline
+                .saturating_duration_since(Instant::now())
+                .as_millis() as u64;
+            if wait_until_renderer_ready(
+                port,
+                remain.max(15_000),
+                budget.poll_ms,
+            ) {
+                note_host_ready(port);
+                return Ok(());
+            }
+        }
     }
 
     let last = probe_host_lifecycle_force(port);
     append_diag(&format!(
-        "ensure_debug_port: failed lifecycle={} process={} portOpen={}",
+        "ensure_debug_port: failed lifecycle={} process={} portOpen={} hardUsed={hard_relaunch_used}",
         last.lifecycle, last.process_running, last.debug_port_open
     ));
     let diag = state_root().join("diag.log");
@@ -531,7 +894,22 @@ pub fn ensure_debug_port(port: u16, restart: bool) -> Result<(), EngineError> {
 }
 
 /// Soft budget for inject retries after ensure.
+/// Prefer a known lifecycle seed to avoid an extra force probe on the hot path.
+#[allow(dead_code)]
 pub fn inject_budget(port: u16) -> TimingBudget {
+    inject_budget_from(port, None)
+}
+
+/// When `seed` is Some (e.g. post-ensure probe), skip another force CDP/process scan.
+pub fn inject_budget_from(port: u16, seed: Option<&HostLifecycle>) -> TimingBudget {
+    if let Some(s) = seed {
+        return resolve_timing_budget(Some(s));
+    }
+    // Cached probe first; only force when we have no useful snapshot.
+    let cached = probe_host_lifecycle(port);
+    if cached.lifecycle == "ready" || cached.can_hot_apply {
+        return resolve_timing_budget(Some(&cached));
+    }
     let probe = probe_host_lifecycle_force(port);
     resolve_timing_budget(Some(&probe))
 }

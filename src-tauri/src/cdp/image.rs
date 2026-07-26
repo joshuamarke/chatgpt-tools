@@ -6,7 +6,9 @@ use thiserror::Error;
 pub const MAX_IMAGE_DIMENSION: u32 = 16384;
 pub const MAX_IMAGE_PIXELS: u64 = 50_000_000;
 pub const MAX_ART_BYTES: u64 = 16 * 1024 * 1024;
-pub const RECOMMENDED_ART_BYTES: u64 = 1_500_000;
+/// Soft advisory only — high-fidelity wallpapers up to MAX_ART_BYTES are allowed.
+/// Raised from 1.5 MB so multi-MB backgrounds are not treated as "should compress".
+pub const RECOMMENDED_ART_BYTES: u64 = 8 * 1024 * 1024;
 
 #[derive(Debug, Error)]
 pub enum ImageError {
@@ -253,9 +255,9 @@ pub fn assert_art_bytes(size: u64, label: &str) -> Result<(), ImageError> {
     }
     if size > MAX_ART_BYTES {
         return Err(ImageError::msg(format!(
-            "{label} exceeds the {} MB inject limit; compress to JPEG ≤ {} MB",
+            "{label} exceeds the {} MB inject limit; please use PNG/JPEG/WebP ≤ {} MB (high-quality originals are supported within this cap)",
             MAX_ART_BYTES / 1024 / 1024,
-            RECOMMENDED_ART_BYTES / 1024 / 1024
+            MAX_ART_BYTES / 1024 / 1024
         )));
     }
     Ok(())

@@ -70,17 +70,33 @@ pub fn validate_skin_manifest(manifest: &Value, skin_dir: &Path) -> Result<(), E
     let art = manifest
         .pointer("/assets/art")
         .and_then(|v| v.as_str())
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
         .unwrap_or("");
     let plugin = manifest
         .pointer("/assets/plugin")
         .and_then(|v| v.as_str())
         .unwrap_or("");
-    if css.is_empty() || art.is_empty() {
-        return Err(EngineError::msg("skin.json 缺少 assets.css / art"));
+    if css.is_empty() {
+        return Err(EngineError::msg("skin.json 缺少 assets.css"));
     }
     if plugin.is_empty() {
         return Err(EngineError::msg(
             "skin.json 需要 assets.plugin（共享 runtime，不再使用 assets.inject）",
+        ));
+    }
+    // art.mode=none → pure style skin, assets.art optional
+    let art_mode = manifest
+        .pointer("/art/mode")
+        .and_then(|v| v.as_str())
+        .or_else(|| manifest.pointer("/theme/art/mode").and_then(|v| v.as_str()))
+        .unwrap_or("wallpaper")
+        .trim()
+        .to_ascii_lowercase();
+    let needs_art = art_mode != "none";
+    if needs_art && art.is_empty() {
+        return Err(EngineError::msg(
+            "skin.json 缺少 assets.art（纯样式皮肤请设 art.mode 为 \"none\"）",
         ));
     }
     for key in ["rootClass", "styleId", "stateKey"] {
@@ -93,7 +109,11 @@ pub fn validate_skin_manifest(manifest: &Value, skin_dir: &Path) -> Result<(), E
             return Err(EngineError::msg("skin.json 缺少 markers 字段"));
         }
     }
-    for rel in [css, art, plugin] {
+    let mut required: Vec<&str> = vec![css, plugin];
+    if needs_art {
+        required.push(art);
+    }
+    for rel in required {
         if !skin_dir.join(rel).is_file() {
             return Err(EngineError::msg(format!("缺少资源文件：{rel}")));
         }
@@ -109,16 +129,19 @@ pub fn validate_skin_manifest(manifest: &Value, skin_dir: &Path) -> Result<(), E
     {
         return Err(EngineError::msg("plugin.json 需要 chromeHtml 字符串"));
     }
-    let art_meta = fs::metadata(skin_dir.join(art))
-        .map_err(|e| EngineError::msg(format!("立绘不可读：{e}")))?;
-    if art_meta.len() < 1 {
-        return Err(EngineError::msg("立绘文件为空"));
-    }
-    if art_meta.len() > MAX_ART_BYTES {
-        return Err(EngineError::msg(format!(
-            "立绘超过 {} MB 注入上限，请压缩为 JPEG 后再导入",
-            MAX_ART_BYTES / 1024 / 1024
-        )));
+    if needs_art {
+        let art_meta = fs::metadata(skin_dir.join(art))
+            .map_err(|e| EngineError::msg(format!("立绘不可读：{e}")))?;
+        if art_meta.len() < 1 {
+            return Err(EngineError::msg("立绘文件为空"));
+        }
+        if art_meta.len() > MAX_ART_BYTES {
+            return Err(EngineError::msg(format!(
+                "立绘超过 {} MB 注入上限；请使用 ≤ {} MB 的 PNG/JPEG/WebP（上限内支持高质量原图）",
+                MAX_ART_BYTES / 1024 / 1024,
+                MAX_ART_BYTES / 1024 / 1024
+            )));
+        }
     }
     Ok(())
 }
@@ -206,6 +229,14 @@ pub fn export_skin_native(skin_id: &str, output_path: &str) -> Result<Value, Eng
         "name": skin.get("name").and_then(|v| v.as_str()).unwrap_or(""),
         "engine": "native-rust",
     }))
+}
+
+pub fn extract_zip_to_pub(package_path: &Path, tmp_root: &Path) -> Result<Vec<String>, EngineError> {
+    extract_zip_to(package_path, tmp_root)
+}
+
+pub fn resolve_skin_dir_from_extracted_pub(tmp_root: &Path) -> Result<PathBuf, EngineError> {
+    resolve_skin_dir_from_extracted(tmp_root)
 }
 
 fn extract_zip_to(package_path: &Path, tmp_root: &Path) -> Result<Vec<String>, EngineError> {
@@ -306,9 +337,9 @@ fn scan_risks(inject_code: &str, leftover_inject: bool, art_bytes: u64) -> Vec<S
             "立绘超过 {} MB 注入上限",
             MAX_ART_BYTES / 1024 / 1024
         ));
-    } else if art_bytes > 1_500_000 {
+    } else if art_bytes > 8 * 1024 * 1024 {
         risks.push(
-            "立绘较大（>1.5MB）：引擎支持高质量原图，但 shell 后贴图会更慢；请为列表提供 assets/screenshot"
+            "立绘较大（>8MB）：引擎支持高质量原图，但 shell 后贴图会更慢；请为列表提供 assets/screenshot"
                 .into(),
         );
     }

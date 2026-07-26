@@ -27,7 +27,7 @@ npm run dev
 |------|------|
 | `Missing manifest in toolchain` | `rustup toolchain uninstall stable` 后 `rustup toolchain install stable` |
 | `link.exe not found` | 安装 VS Build Tools / 在「x64 Native Tools」终端编译 |
-| `未找到 Node.js` | apply/status/restore/import/export（含冷启动与刷新保持）走 Rust，无需 Node；设计壁纸或 `CODEX_SKIN_FORCE_NODE=1` 仍可能需 Node 18+ |
+| `未找到 Node.js` | apply/status/restore/import/export（含冷启动与刷新保持）走 Rust，无需 Node；自定义皮肤或 `CODEX_SKIN_FORCE_NODE=1` 仍可能需 Node 18+ |
 | 想强制 Node / 关原生 | `CODEX_SKIN_FORCE_NODE=1` 或 `CODEX_SKIN_NATIVE=0` |
 | 窗口白屏 / API 不可用 | 见下方「白屏排查」；必须用 `npm run dev` 或安装包，勿双击 `index.html` |
 | 换肤失败 / 无调试口 | 勾选自动重启，先完全退出 ChatGPT 再应用 |
@@ -61,6 +61,24 @@ node engine/cli.mjs apply --skin-id dream --restart true
 node engine/cli.mjs restore
 ```
 
+## 云端开发预览（CDN）
+
+本机对接 `chatgpt-tools-cdn`（默认 `http://127.0.0.1:8788/v1`）：
+
+```powershell
+# 终端 1：CDN
+cd E:\demo\chatgpt-tools-cdn
+npm run serve
+
+# 终端 2：客户端
+cd E:\demo\chatgpt-tools
+$env:CODEX_SKIN_CLOUD_URL = "http://127.0.0.1:8788/v1"
+npm run dev
+```
+
+关闭云端：`$env:CODEX_SKIN_CLOUD_DISABLED = "1"`。  
+完整契约与安全说明见 [../cloud-integration.md](../cloud-integration.md)。
+
 ## 日志位置
 
 状态根目录下：
@@ -68,7 +86,9 @@ node engine/cli.mjs restore
 - `diag.log` — 管理器诊断  
 - `injector.log` / `injector-error.log` — 注入守护  
 - `state.json` — 当前皮肤与 injector PID  
-- `settings.json` — 手动指定的客户端路径  
+- `settings.json` — 手动指定的客户端路径（可含 `cloud` 段）  
+- `cloud\` — catalog / announcements 缓存  
+- `cache\skins\` — 云端皮肤缓存  
 
 ## 图标
 

@@ -136,12 +136,14 @@ const PURGE = `(() => {
 
   // Legacy / one-off markers (pre-shared-runtime skins and external tools)
   const legacy = [
-    { disabled: '__CODEX_DREAM_SKIN_DISABLED__', state: '__CODEX_DREAM_SKIN_STATE__', root: 'codex-dream-skin', art: '--dream-art', style: 'codex-dream-skin-style', chrome: 'codex-dream-skin-chrome', homes: ['dream-home','dream-home-shell'] },
+    { disabled: '__CODEX_DREAM_SKIN_DISABLED__', state: '__CODEX_DREAM_SKIN_STATE__', root: 'codex-dream-skin', art: '--skins-art', style: 'codex-dream-skin-style', chrome: 'codex-dream-skin-chrome', homes: ['dream-home','dream-home-shell'] },
     { disabled: '__CODEX_CN_SKIN_DISABLED__', state: '__CODEX_CN_SKIN_STATE__', root: 'codex-cn-skin', art: '--cn-art', style: 'codex-cn-skin-style', chrome: 'codex-cn-skin-chrome', homes: ['cn-home','cn-home-shell'] },
+    { disabled: '__CODEX_QINGKONG_SKIN_DISABLED__', state: '__CODEX_QINGKONG_SKIN_STATE__', root: 'codex-qingkong-skin', art: '--qingkong-art', style: 'codex-qingkong-skin-style', chrome: 'codex-qingkong-skin-chrome', homes: ['qingkong-home','qingkong-home-shell'] },
     { disabled: '__CODEX_LINGLONG_SKIN_DISABLED__', state: '__CODEX_LINGLONG_SKIN_STATE__', root: 'codex-linglong-skin', art: '--linglong-art', style: 'codex-linglong-skin-style', chrome: 'codex-linglong-skin-chrome', homes: ['linglong-home','linglong-home-shell'] },
     { disabled: '__CODEX_MORTAL_SKIN_DISABLED__', state: '__CODEX_MORTAL_SKIN_STATE__', root: 'codex-mortal-skin', art: '--mortal-art', style: 'codex-mortal-skin-style', chrome: 'codex-mortal-skin-chrome', homes: ['mortal-home','mortal-home-shell'] },
     { disabled: '__CODEX_CYBERPUNK_SKIN_DISABLED__', state: '__CODEX_CYBERPUNK_SKIN_STATE__', root: 'codex-cyberpunk-skin', art: '--cyberpunk-art', style: 'codex-cyberpunk-skin-style', chrome: 'codex-cyberpunk-skin-chrome', homes: ['cyberpunk-home','cyberpunk-home-shell'] },
     { disabled: '__CODEX_EVA_SKIN_DISABLED__', state: '__CODEX_EVA_SKIN_STATE__', root: 'codex-eva-skin', art: '--eva-art', style: 'codex-eva-skin-style', chrome: 'codex-eva-skin-chrome', homes: ['eva-home','eva-home-shell'] },
+    { disabled: '__CODEX_BENGONG_SKIN_DISABLED__', state: '__CODEX_BENGONG_SKIN_STATE__', root: 'codex-bengong-skin', art: '--bengong-art', style: 'codex-bengong-skin-style', chrome: 'codex-bengong-skin-chrome', homes: ['bengong-home','bengong-home-shell'] },
     { disabled: '__CODEX_MIKU_SKIN_DISABLED__', state: '__CODEX_MIKU_SKIN_STATE__', root: 'codex-miku-skin', art: '--miku-art', style: 'codex-miku-skin-style', chrome: 'codex-miku-skin-chrome', homes: ['miku-home','miku-home-shell'] },
     { disabled: '__CODEX_JIUYI_SKIN_DISABLED__', state: '__CODEX_JIUYI_SKIN_STATE__', root: 'codex-jiuyi-skin', art: '--jiuyi-art', style: 'codex-jiuyi-skin-style', chrome: 'codex-jiuyi-skin-chrome', homes: ['jiuyi-home','jiuyi-home-shell'] },
   ];
@@ -171,17 +173,30 @@ const PURGE = `(() => {
     }
   }
 
-  // Adaptive theme classes from shared core
+  // Adaptive theme classes from shared core (+ legacy dream-* names)
   document.documentElement?.classList.remove(
+    'skins-theme-light','skins-theme-dark','skins-art-wide','skins-art-standard','skins-art-none',
+    'skins-focus-left','skins-focus-center','skins-focus-right',
+    'skins-safe-left','skins-safe-center','skins-safe-right','skins-safe-none',
+    'skins-task-ambient','skins-task-banner','skins-task-off',
     'dream-theme-light','dream-theme-dark','dream-art-wide','dream-art-standard',
     'dream-focus-left','dream-focus-center','dream-focus-right',
     'dream-safe-left','dream-safe-center','dream-safe-right','dream-safe-none',
     'dream-task-ambient','dream-task-banner','dream-task-off'
   );
-  for (const prop of ['--dream-art','--dream-art-position','--dream-focus-x','--dream-focus-y','--dream-accent','--dream-accent-ink','--dream-image-luma']) {
+  for (const prop of [
+    '--skins-art','--skins-art-position','--skins-focus-x','--skins-focus-y',
+    '--skins-accent','--skins-accent-ink','--skins-image-luma',
+    '--dream-art','--dream-art-position','--dream-focus-x','--dream-focus-y',
+    '--dream-accent','--dream-accent-ink','--dream-image-luma'
+  ]) {
     document.documentElement?.style.removeProperty(prop);
   }
   document.documentElement?.removeAttribute('data-chatgpt-tools-skin');
+  document.documentElement?.removeAttribute('data-skins-shell');
+  document.documentElement?.removeAttribute('data-skins-art-mode');
+  document.documentElement?.removeAttribute('data-skins-art-paint');
+  document.documentElement?.removeAttribute('data-skin-contract');
   document.documentElement?.removeAttribute('data-dream-shell');
 
   // Any style / chrome nodes tagged by shared runtime

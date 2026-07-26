@@ -1,0 +1,58 @@
+{
+  "id": "my-skin",
+  "name": "模板皮肤 · 请改名",
+  "nameEn": "Template Skin",
+  "version": "2.0.0",
+  "description": "复制本目录为 skins/<id>/ 后改字段。本文件是清单；真正样式在 assets/。",
+  "categories": ["art"],
+  "tags": ["模板", "自定义"],
+  "previewGradient": "linear-gradient(135deg, #f7f8ff 0%, #c8d4ff 100%)",
+  "accent": "#6688FF",
+  "appearance": "auto",
+  "art": {
+    "mode": "wallpaper",
+    "paint": "body",
+    "focusX": 0.72,
+    "focusY": 0.45,
+    "safeArea": "left",
+    "taskMode": "ambient"
+  },
+  "assets": {
+    "css": "assets/skin.css",
+    "plugin": "assets/plugin.json",
+    "art": "assets/art.jpg",
+    "artMime": "image/jpeg",
+    "screenshot": "assets/screenshot.jpg"
+  },
+  "markers": {
+    "rootClass": "codex-my-skin",
+    "homeClass": "my-skin-home",
+    "styleId": "codex-my-skin-style",
+    "chromeId": "codex-my-skin-chrome",
+    "stateKey": "__CODEX_MY_SKIN_STATE__",
+    "disabledKey": "__CODEX_MY_SKIN_DISABLED__",
+    "artVar": "--my-skin-art"
+  },
+  "desktopTheme": {
+    "appearanceTheme": "light",
+    "appearanceLightCodeThemeId": "codex",
+    "appearanceLightChromeTheme": "{ accent = \"#6688FF\", contrast = 64, fonts = { code = \"SF Mono\", ui = \"PingFang SC\" }, ink = \"#1a1a2e\", opaqueWindows = true, semanticColors = { diffAdded = \"#BCE8CF\", diffRemoved = \"#F7B8CE\", skill = \"#88aaff\" }, surface = \"#F7F8FF\" }"
+  },
+  "_authorNotes": {
+    "doNotShip": "删除 _authorNotes 字段后再发布 .cgskin（可选；引擎会忽略未知字段）",
+    "editMap": {
+      "显示名/标签/构图": "本文件 skin.json",
+      "GUI 侧栏分类": "本文件 categories（匹配 src/skin-categories.json 的 filter id）",
+      "色板与布局": "assets/skin.css",
+      "品牌文案 HTML": "assets/plugin.json → chromeHtml",
+      "壁纸策略": "art.mode=wallpaper|token-only|none；art.paint=body|custom|none",
+      "壁纸文件": "assets/art.jpg（≤16MB；mode=none 时可省略）",
+      "卡片缩略图": "assets/screenshot.jpg（推荐 <500KB）",
+      "宿主 DOM 选择器": "engine/runtime/selectors.json（全局，勿复制进皮肤）",
+      "框架默认样式": "engine/runtime/immersive-skin.css（全局）",
+      "运行时逻辑": "engine/runtime/renderer-core.js（全局，禁止 per-skin 复制）",
+      "mode说明": "wallpaper=全窗壁纸(默认)；token-only=只注入--skins-art由皮肤自挂main/chrome；none=纯样式无图",
+      "paint说明": "body=框架画body(默认)；custom/none=框架不画body，皮肤CSS用var(--skins-art)挂任意选择器"
+    }
+  }
+}

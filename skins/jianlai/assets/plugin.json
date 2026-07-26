@@ -1,5 +1,5 @@
 {
-  "version": "2.0.0",
-  "chromeHtml": "<div class=\"linglong-brand\"><span class=\"linglong-seal\">炁</span><span><b>灵笼专属皮肤</b><small>Codex · 极光白月魁</small></span></div>\n<div class=\"linglong-signature\">生命元炁 · 太极归一</div>\n<div class=\"linglong-clouds\"><i></i><i></i><i></i><i></i><i></i><i></i></div>\n<div class=\"linglong-ornament\"><span>✦</span>地面探索<span>✦</span>元炁引流<span>✦</span></div>\n<div class=\"linglong-scroll\"></div>",
+  "version": "2.1.0",
+  "chromeHtml": "<div class=\"ningyao-brand\"><span class=\"ningyao-seal\">剑</span><span><b>剑来 · 宁姚</b><small>青衣执卷 · 秋叶问道</small></span></div>\n<div class=\"ningyao-signature\">书中剑气 · 一念即至</div>\n<div class=\"ningyao-leaves\"><i></i><i></i><i></i><i></i><i></i><i></i></div>\n<div class=\"ningyao-ornament\"><span>◇</span>青衣<span>◇</span>执卷<span>◇</span>问剑</div>",
   "skipAnalysis": false
 }
