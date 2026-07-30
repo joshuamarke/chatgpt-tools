@@ -121,8 +121,6 @@ pub fn hide_main_to_tray(app: &AppHandle) {
     }
 }
 
-use std::sync::atomic::{AtomicBool, Ordering};
-
 static HAS_CLEANED: AtomicBool = AtomicBool::new(false);
 
 /// Remove the tray icon before process exit (avoids Windows ghost icons).

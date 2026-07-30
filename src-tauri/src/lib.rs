@@ -189,7 +189,7 @@ pub fn run() {
         ])
         .build(tauri::generate_context!())
         .expect("error while building ChatGPT Tools")
-        .run(|app_handle, event| {
+        .run(|_app_handle, event| {
             if let RunEvent::Exit = event {
                 // Only real process exit restores direct live configs.
                 // Hide-to-tray must NOT reach here — proxy stays up for Codex/Grok.
