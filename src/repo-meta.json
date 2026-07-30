@@ -4,7 +4,13 @@
   "url": "https://github.com/joshuamarke/chatgpt-tools",
   "releasesUrl": "https://github.com/joshuamarke/chatgpt-tools/releases",
   "latestJsonUrl": "https://github.com/joshuamarke/chatgpt-tools/releases/latest/download/latest.json",
+  "latestMirrorJsonUrl": "https://github.com/joshuamarke/chatgpt-tools/releases/latest/download/latest.mirror.json",
+  "updaterEndpoints": [
+    "https://github.com/joshuamarke/chatgpt-tools/releases/latest/download/latest.json",
+    "https://ghfast.top/https://github.com/joshuamarke/chatgpt-tools/releases/latest/download/latest.mirror.json",
+    "https://ghproxy.net/https://github.com/joshuamarke/chatgpt-tools/releases/latest/download/latest.mirror.json"
+  ],
   "repository": "joshuamarke/chatgpt-tools",
   "source": "src/repo-meta.json",
-  "stampedAt": "2026-07-30T10:37:48.117Z"
+  "stampedAt": "2026-07-30T11:40:28.093Z"
 }

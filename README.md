@@ -180,12 +180,24 @@ git push origin main --tags
 
 ### 应用内更新（`tauri-plugin-updater`）
 
-- 关于页「检查更新」→ 官方 updater 拉取 `latest.json`
-- **默认 endpoint**：本仓库 `releases/latest/download/latest.json`（打包时由 `inject-release-config` 写入）
-- 可选：`TAURI_UPDATER_ENDPOINTS` 覆盖（多地址 fallback）
+- 关于页「检查更新」→ 官方 updater 按 **多 endpoint 顺序** 拉取清单，失败自动换下一个
+- **默认 endpoint 链**（打包 / `npm run dev` 由 `inject-release-config` 写入）：
+  1. `…/releases/latest/download/latest.json`（直连 GitHub，清单内 exe/dmg 也是 GitHub）
+  2. `https://ghfast.top/https://github.com/…/latest.mirror.json`（镜像拉清单；**清单内 exe/dmg 也是镜像 URL**）
+  3. `https://ghproxy.net/https://github.com/…/latest.mirror.json`（第二镜像）
+- 可选 Secret 覆盖：`TAURI_UPDATER_ENDPOINTS`（完整列表）、`GITHUB_RELEASE_MIRROR_PREFIX`（生成 `latest.mirror.json` 时用的前缀）
 - 仓库内 `tauri.conf.json` 的 `endpoints` 保持为空，只在打包 overlay 合并
-- 验签：`createUpdaterArtifacts` + CI 私钥签发 `.sig`
+- 验签：`createUpdaterArtifacts` + CI 私钥签发 `.sig`（镜像只加速下载，仍校验签名）
 - 关于页「查看开源协议」旁 **GitHub** 按钮 → 仓库主页（`src/repo-meta.json`）
+
+### Release 自动上传
+
+`release: published` 后 **Release assets** workflow 会：
+
+1. 构建并 **自动上传** Windows setup / portable /（若成功）macOS dmg 到该 Release  
+2. 再生成并上传 `latest.json` + `latest.mirror.json`  
+
+PR / `main` 的 **PR build** 只把安装包挂到 **Actions Artifact**（不写 Release），正式发版请用 Publish Release。
 
 `latest.json`（Tauri 格式）形如：
 

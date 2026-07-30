@@ -96,12 +96,25 @@ const latestJsonUrl = full
   ? `https://github.com/${full}/releases/latest/download/latest.json`
   : "";
 
+const latestMirrorJsonUrl = full
+  ? `https://github.com/${full}/releases/latest/download/latest.mirror.json`
+  : "";
+const mirrorPrefixes = ["https://ghfast.top/", "https://ghproxy.net/"];
+const updaterEndpoints = full
+  ? [
+      latestJsonUrl,
+      ...mirrorPrefixes.map((p) => `${p}${latestMirrorJsonUrl}`),
+    ]
+  : [];
+
 const meta = {
   owner,
   name,
   url,
   releasesUrl,
   latestJsonUrl,
+  latestMirrorJsonUrl,
+  updaterEndpoints,
   repository: full,
   source: resolved.source,
   stampedAt: new Date().toISOString(),

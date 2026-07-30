@@ -2,19 +2,20 @@
  * Inject package-time updater endpoints (and optional extra hosts).
  *
  * Sources (priority high → low):
- *   1) process env (CI Secrets / shell)
+ *   1) process env (CI Secrets / shell) — TAURI_UPDATER_ENDPOINTS full override
  *   2) keys/release.env  (local only, entire keys/ is gitignored)
- *   3) GitHub Releases default from repo-meta / GITHUB_REPOSITORY
- *      → https://github.com/{owner}/{repo}/releases/latest/download/latest.json
+ *   3) Default chain (GitHub direct → GitHub-proxy mirrors):
+ *        https://github.com/{owner}/{repo}/releases/latest/download/latest.json
+ *        {mirror}https://github.com/.../latest.mirror.json   (exe/dmg URLs also mirrored)
  *
- * Writes (gitignored):
- *   src-tauri/gen/release-config.json          → embedded by build.rs
- *   src-tauri/gen/tauri.release-overlay.json   → `tauri build --config …`
+ * Tauri tries endpoints in order; first successful check wins. The mirror
+ * manifest uses proxied asset URLs so installers also fall back off GitHub.
  *
  * Env:
- *   TAURI_UPDATER_ENDPOINTS       optional override; else GitHub latest.json
- *   REQUIRE_RELEASE_SECRETS=1     fail if no updater endpoint can be resolved
- *   SKIP_RELEASE_INJECT=1         empty inject (smoke builds)
+ *   TAURI_UPDATER_ENDPOINTS          optional full override (comma / JSON array)
+ *   GITHUB_RELEASE_MIRROR_PREFIXES   comma list of proxy prefixes (default: ghfast.top)
+ *   REQUIRE_RELEASE_SECRETS=1        fail if no updater endpoint can be resolved
+ *   SKIP_RELEASE_INJECT=1            empty inject (smoke builds)
  */
 import fs from "node:fs";
 import path from "node:path";
@@ -114,16 +115,46 @@ function readRepoMeta() {
   }
 }
 
-/** Public GitHub Releases updater manifest (not a secret). */
-function defaultGithubUpdaterEndpoints() {
+/** Default public mirror prefixes (prepend to full https://github.com/... URL). */
+function defaultMirrorPrefixes(fileEnv) {
+  const raw = env("GITHUB_RELEASE_MIRROR_PREFIXES", fileEnv);
+  if (raw) {
+    return raw
+      .split(/[\n,;]+/)
+      .map((s) => s.trim())
+      .filter(Boolean)
+      .map((s) => (s.endsWith("/") ? s : `${s}/`));
+  }
+  // Community GitHub release accelerators (China / restricted networks).
+  // Order = fallback priority after direct GitHub.
+  return ["https://ghfast.top/", "https://ghproxy.net/"];
+}
+
+function resolveRepoSlug() {
   const meta = readRepoMeta();
-  if (meta?.latestJsonUrl) return [String(meta.latestJsonUrl).trim()].filter(Boolean);
   const full =
     (meta?.repository || "").trim() ||
     (meta?.owner && meta?.name ? `${meta.owner}/${meta.name}` : "") ||
     (process.env.GITHUB_REPOSITORY || "").trim();
-  if (!full || !full.includes("/")) return [];
-  return [`https://github.com/${full}/releases/latest/download/latest.json`];
+  if (full && full.includes("/")) return full;
+  return "";
+}
+
+/**
+ * Public GitHub Releases updater manifests (not secrets).
+ * 1) Direct latest.json (platform.url = github.com downloads)
+ * 2+) Mirror of latest.mirror.json (platform.url already proxied for exe/dmg)
+ */
+function defaultGithubUpdaterEndpoints(fileEnv = {}) {
+  const full = resolveRepoSlug();
+  if (!full) return [];
+  const direct = `https://github.com/${full}/releases/latest/download/latest.json`;
+  const mirrorManifest = `https://github.com/${full}/releases/latest/download/latest.mirror.json`;
+  const endpoints = [direct];
+  for (const prefix of defaultMirrorPrefixes(fileEnv)) {
+    endpoints.push(`${prefix}${mirrorManifest}`);
+  }
+  return endpoints;
 }
 
 function writeOutputs({ cloudUrl, endpoints, hosts, note }) {
@@ -185,10 +216,10 @@ let endpoints = parseEndpoints(env("TAURI_UPDATER_ENDPOINTS", fileEnv));
 const extraHosts = parseHosts(env("CODEX_SKIN_CLOUD_EXTRA_HOSTS", fileEnv));
 
 if (!endpoints.length) {
-  endpoints = defaultGithubUpdaterEndpoints();
+  endpoints = defaultGithubUpdaterEndpoints(fileEnv);
   if (endpoints.length) {
     console.log(
-      "[inject-release-config] TAURI_UPDATER_ENDPOINTS empty → default GitHub Releases latest.json"
+      `[inject-release-config] TAURI_UPDATER_ENDPOINTS empty → GitHub direct + ${endpoints.length - 1} mirror(s)`
     );
   }
 }
@@ -234,6 +265,12 @@ for (const h of [
   "raw.githubusercontent.com",
 ]) {
   hosts.add(h);
+}
+// Mirror proxy hosts derived from default prefixes
+for (const prefix of defaultMirrorPrefixes(fileEnv)) {
+  const base = prefix.startsWith("http") ? prefix.replace(/\/?$/, "") : `https://${prefix.replace(/\/?$/, "")}`;
+  const hh = hostFromUrl(base);
+  if (hh) hosts.add(hh);
 }
 
 writeOutputs({ cloudUrl, endpoints, hosts });

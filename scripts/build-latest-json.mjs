@@ -1,5 +1,10 @@
 /**
- * Build Tauri updater static JSON (latest.json) from GitHub Release assets.
+ * Build Tauri updater static JSON from GitHub Release assets.
+ *
+ * Writes:
+ *   latest.json         — platform.url = direct GitHub download
+ *   latest.mirror.json  — platform.url = mirrorPrefix + GitHub download
+ *                         (for networks that cannot reach github.com)
  *
  * Expected assets (after release-assets workflow):
  *   ChatGPTTools-{ver}-windows-x64-setup.exe (+ .sig)
@@ -9,11 +14,10 @@
  * Usage (CI):
  *   node scripts/build-latest-json.mjs \
  *     --repo owner/name --tag v1.1.13 \
- *     --notes-file notes.md \
  *     --sig-dir dist/sigs \
- *     --out latest.json
- *
- * Signature files may also be Release assets named `*.sig`.
+ *     --out latest.json \
+ *     --mirror-out latest.mirror.json \
+ *     --mirror-prefix https://ghfast.top/
  */
 import fs from "node:fs";
 import path from "node:path";
@@ -34,7 +38,18 @@ const tag = arg("tag", process.env.TAG || process.env.GITHUB_REF_NAME || "");
 const notesFile = arg("notes-file", "");
 const sigDir = arg("sig-dir", "");
 const outPath = arg("out", "latest.json");
+const mirrorOutPath = arg(
+  "mirror-out",
+  process.env.LATEST_MIRROR_OUT || "latest.mirror.json"
+);
 const releaseJsonPath = arg("release-json", "release.json");
+/** Prefix prepended to full https://github.com/... URLs (no trailing path only). */
+const mirrorPrefix = normalizeMirrorPrefix(
+  arg(
+    "mirror-prefix",
+    process.env.GITHUB_RELEASE_MIRROR_PREFIX || "https://ghfast.top/"
+  )
+);
 
 if (!repo || !tag) {
   console.error("build-latest-json: --repo and --tag are required");
@@ -43,6 +58,20 @@ if (!repo || !tag) {
 
 const version = String(tag).replace(/^v/i, "");
 const baseUrl = `https://github.com/${repo}/releases/download/${tag}`;
+
+function normalizeMirrorPrefix(raw) {
+  const s = String(raw || "").trim();
+  if (!s) return "";
+  return s.endsWith("/") ? s : `${s}/`;
+}
+
+/** Turn a direct GitHub URL into a mirror URL. */
+function mirrorUrl(directUrl) {
+  if (!mirrorPrefix || !directUrl) return directUrl;
+  // Avoid double-prefixing
+  if (directUrl.startsWith(mirrorPrefix)) return directUrl;
+  return `${mirrorPrefix}${directUrl}`;
+}
 
 function loadRelease() {
   if (fs.existsSync(releaseJsonPath)) {
@@ -78,16 +107,16 @@ function readSigFor(assetName) {
   const candidates = [];
   if (sigDir) {
     candidates.push(path.join(sigDir, `${assetName}.sig`));
-    candidates.push(path.join(sigDir, assetName.replace(/\.(exe|msi|dmg|app\.tar\.gz)$/i, "") + ".sig"));
+    candidates.push(
+      path.join(sigDir, assetName.replace(/\.(exe|msi|dmg|app\.tar\.gz)$/i, "") + ".sig")
+    );
   }
-  // Also allow .sig uploaded as release asset content via local files
   candidates.push(`${assetName}.sig`);
   for (const p of candidates) {
     if (fs.existsSync(p)) {
       return fs.readFileSync(p, "utf8").trim();
     }
   }
-  // Signature may be a release asset named `${asset}.sig`
   const sigAsset = `${assetName}.sig`;
   if (assetNames.has(sigAsset) && sigDir) {
     const p = path.join(sigDir, sigAsset);
@@ -112,7 +141,6 @@ function downloadSigAssets() {
       console.warn(`warn: failed to download ${name}:`, e?.message || e);
     }
   }
-  // Also download main installers' sibling sigs if named oddly
   for (const a of assets) {
     const name = a?.name;
     if (!name || name.endsWith(".sig")) continue;
@@ -122,7 +150,18 @@ function downloadSigAssets() {
     try {
       execFileSync(
         "gh",
-        ["release", "download", tag, "--repo", repo, "--pattern", sigName, "--dir", sigDir, "--clobber"],
+        [
+          "release",
+          "download",
+          tag,
+          "--repo",
+          repo,
+          "--pattern",
+          sigName,
+          "--dir",
+          sigDir,
+          "--clobber",
+        ],
         { stdio: "inherit" }
       );
     } catch {
@@ -139,14 +178,19 @@ const winSetup =
   findAsset((l) => l.includes("windows") && l.endsWith(".exe") && !l.includes("portable"));
 
 const macArm =
-  findAsset((l) => l.includes("macos") && (l.includes("arm64") || l.includes("aarch64")) && l.endsWith(".dmg")) ||
-  findAsset((l) => l.includes("aarch64") && l.endsWith(".dmg"));
+  findAsset(
+    (l) =>
+      l.includes("macos") &&
+      (l.includes("arm64") || l.includes("aarch64")) &&
+      l.endsWith(".dmg")
+  ) || findAsset((l) => l.includes("aarch64") && l.endsWith(".dmg"));
 
 const macX64 =
-  findAsset((l) => l.includes("macos") && (l.includes("x64") || l.includes("x86_64")) && l.endsWith(".dmg")) ||
-  findAsset((l) => l.includes("x86_64") && l.endsWith(".dmg"));
+  findAsset(
+    (l) => l.includes("macos") && (l.includes("x64") || l.includes("x86_64")) && l.endsWith(".dmg")
+  ) || findAsset((l) => l.includes("x86_64") && l.endsWith(".dmg"));
 
-const platforms = {};
+const platformsDirect = {};
 
 function addPlatform(key, assetName) {
   if (!assetName) return;
@@ -155,10 +199,8 @@ function addPlatform(key, assetName) {
     console.warn(`warn: missing signature for ${assetName} — platform ${key} skipped`);
     return;
   }
-  platforms[key] = {
-    signature,
-    url: `${baseUrl}/${encodeURIComponent(assetName)}`,
-  };
+  const url = `${baseUrl}/${encodeURIComponent(assetName)}`;
+  platformsDirect[key] = { signature, url };
 }
 
 addPlatform("windows-x86_64", winSetup);
@@ -172,31 +214,53 @@ if (notesFile && fs.existsSync(notesFile)) {
   notes = String(release.body).trim();
 }
 
-const pubDate =
-  release.publishedAt ||
-  release.createdAt ||
-  new Date().toISOString();
+const pubDate = release.publishedAt || release.createdAt || new Date().toISOString();
 
-const payload = {
-  version,
-  notes,
-  pub_date: pubDate,
-  platforms,
-  // Extra fields (ignored by updater, useful for humans / CDN mirrors)
-  url: release.url || `https://github.com/${repo}/releases/tag/${tag}`,
-  assets: [...assetNames]
-    .filter((n) => n !== "latest.json")
-    .map((name) => ({ name, url: `${baseUrl}/${encodeURIComponent(name)}` })),
-};
+function buildPayload(platforms) {
+  return {
+    version,
+    notes,
+    pub_date: pubDate,
+    platforms,
+    url: release.url || `https://github.com/${repo}/releases/tag/${tag}`,
+    assets: [...assetNames]
+      .filter((n) => n !== "latest.json" && n !== "latest.mirror.json")
+      .map((name) => {
+        const direct = `${baseUrl}/${encodeURIComponent(name)}`;
+        return { name, url: direct, mirrorUrl: mirrorUrl(direct) };
+      }),
+  };
+}
 
-if (!Object.keys(platforms).length) {
-  console.error("build-latest-json: no signed platforms found — refusing to write empty updater manifest");
+const platformsMirror = {};
+for (const [key, p] of Object.entries(platformsDirect)) {
+  platformsMirror[key] = {
+    signature: p.signature,
+    url: mirrorUrl(p.url),
+  };
+}
+
+if (!Object.keys(platformsDirect).length) {
+  console.error(
+    "build-latest-json: no signed platforms found — refusing to write empty updater manifest"
+  );
   if (hasFlag("allow-empty")) {
-    fs.writeFileSync(outPath, `${JSON.stringify(payload, null, 2)}\n`);
+    fs.writeFileSync(outPath, `${JSON.stringify(buildPayload({}), null, 2)}\n`);
     process.exit(0);
   }
   process.exit(1);
 }
 
-fs.writeFileSync(outPath, `${JSON.stringify(payload, null, 2)}\n`);
-console.log(`wrote ${outPath} with platforms: ${Object.keys(platforms).join(", ")}`);
+const directPayload = buildPayload(platformsDirect);
+fs.writeFileSync(outPath, `${JSON.stringify(directPayload, null, 2)}\n`);
+console.log(`wrote ${outPath} with platforms: ${Object.keys(platformsDirect).join(", ")}`);
+
+if (mirrorPrefix && mirrorOutPath) {
+  const mirrorPayload = buildPayload(platformsMirror);
+  mirrorPayload.notes = notes;
+  mirrorPayload._mirrorPrefix = mirrorPrefix;
+  fs.writeFileSync(mirrorOutPath, `${JSON.stringify(mirrorPayload, null, 2)}\n`);
+  console.log(
+    `wrote ${mirrorOutPath} (mirrorPrefix=${mirrorPrefix}) platforms: ${Object.keys(platformsMirror).join(", ")}`
+  );
+}

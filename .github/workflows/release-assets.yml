@@ -176,11 +176,13 @@ Version: $version
           }
           $files | Format-Table Name, Length -AutoSize
 
-      - name: Upload Windows assets
+      - name: Upload Windows assets to GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.event.release.tag_name }}
+          # false: MSI may be absent depending on Tauri bundle targets
           fail_on_unmatched_files: false
+          token: ${{ secrets.GITHUB_TOKEN }}
           files: |
             dist/windows/*.exe
             dist/windows/*.exe.sig
@@ -301,22 +303,25 @@ Version: $version
 
           ls -lh "$DIST"
 
-      - name: Upload macOS assets
+      - name: Upload macOS assets to GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.event.release.tag_name }}
           fail_on_unmatched_files: false
+          token: ${{ secrets.GITHUB_TOKEN }}
           files: |
             dist/macos/*.dmg
             dist/macos/*.dmg.sig
             dist/macos/*.zip
 
   latest-json:
-    name: Upload Tauri latest.json
+    name: Upload Tauri latest.json (+ mirror)
     runs-on: ubuntu-latest
+    # Windows is required; macOS optional so a Mac-only failure still ships updater JSON.
     needs:
       - windows-installer
       - macos-dmg
+    if: ${{ always() && needs.windows-installer.result == 'success' }}
     steps:
       - name: Checkout (for build-latest-json script)
         uses: actions/checkout@v4
@@ -328,25 +333,32 @@ Version: $version
         with:
           node-version: "22"
 
-      - name: Build + upload latest.json
+      - name: Build + upload latest.json and latest.mirror.json
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
           TAG: ${{ github.event.release.tag_name }}
+          # Optional override; empty → https://ghfast.top/ in the script below
+          GITHUB_RELEASE_MIRROR_PREFIX: ${{ secrets.GITHUB_RELEASE_MIRROR_PREFIX }}
         shell: bash
         run: |
           set -euo pipefail
+          MIRROR_PREFIX="${GITHUB_RELEASE_MIRROR_PREFIX:-https://ghfast.top/}"
           gh release view "$TAG" --repo "$REPO" --json assets,body,tagName,url,publishedAt > release.json
           mkdir -p dist/sigs
-          # Download all .sig assets for the manifest
           gh release download "$TAG" --repo "$REPO" --dir dist/sigs --pattern "*.sig" || true
-          # Also download installers' names are needed only for pairing; sig content is enough
           node scripts/build-latest-json.mjs \
             --repo "$REPO" \
             --tag "$TAG" \
             --release-json release.json \
             --sig-dir dist/sigs \
-            --out latest.json
+            --out latest.json \
+            --mirror-out latest.mirror.json \
+            --mirror-prefix "${MIRROR_PREFIX}"
+          echo "=== latest.json (direct GitHub asset URLs) ==="
           cat latest.json
-          gh release upload "$TAG" latest.json --clobber --repo "$REPO"
-          echo "::notice::Upload latest.json — optionally mirror to your first TAURI_UPDATER_ENDPOINTS URL (ops only; do not log the URL here)"
+          echo "=== latest.mirror.json (mirrored asset URLs) ==="
+          cat latest.mirror.json
+          gh release upload "$TAG" latest.json latest.mirror.json --clobber --repo "$REPO"
+          echo "::notice::Uploaded latest.json + latest.mirror.json to Release ${TAG}"
