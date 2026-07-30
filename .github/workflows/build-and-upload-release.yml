@@ -42,20 +42,41 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Require updater signing key
+      # Same idea as cc-switch: normalize Secret → file/env so Tauri never sees raw newlines
+      - name: Prepare Tauri updater signing key
         shell: bash
         env:
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          RAW_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          RAW_PASS: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: |
-          if [ -z "${TAURI_SIGNING_PRIVATE_KEY}" ]; then
-            echo "::error::Missing secret TAURI_SIGNING_PRIVATE_KEY — generate with: npx tauri signer generate -w keys/chatgpt-tools.key --ci"
+          set -euo pipefail
+          if [ -z "${RAW_KEY}" ]; then
+            echo "::error::Missing secret TAURI_SIGNING_PRIVATE_KEY"
+            echo "Generate locally: npx tauri signer generate -w keys/chatgpt-tools.key --ci"
+            echo "Then set Actions Secret to the .key file contents (single line, NO trailing newline)."
+            echo "Do NOT commit keys/ — only the Secret is used in CI."
             exit 1
           fi
+          KEY_PATH="${RUNNER_TEMP}/tauri_signing.key"
+          # Strip CR/LF/spaces that break base64 decode (error: Invalid symbol 10 = newline)
+          ONE=$(printf '%s' "${RAW_KEY}" | tr -d '\r\n[:space:]')
+          if [ -z "${ONE}" ]; then
+            echo "::error::TAURI_SIGNING_PRIVATE_KEY is empty after stripping whitespace"
+            exit 1
+          fi
+          # Write as one-line .key file (tauri signer --ci format)
+          printf '%s' "${ONE}" > "${KEY_PATH}"
+          # Prefer path (avoids env multiline / base64 edge cases)
+          echo "TAURI_SIGNING_PRIVATE_KEY_PATH=${KEY_PATH}" >> "$GITHUB_ENV"
+          # Also provide cleaned single-line value for tools that read the env var
+          echo "TAURI_SIGNING_PRIVATE_KEY=${ONE}" >> "$GITHUB_ENV"
+          if [ -n "${RAW_PASS}" ]; then
+            echo "TAURI_SIGNING_PRIVATE_KEY_PASSWORD=${RAW_PASS}" >> "$GITHUB_ENV"
+          fi
+          echo "Signing key prepared (len=${#ONE}, path=${KEY_PATH})"
 
       - name: Stamp repo meta + build Tauri (Windows, signed updater artifacts)
         env:
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
           # GITHUB_REPOSITORY → default updater latest.json on this repo
           REQUIRE_RELEASE_SECRETS: "1"
           # Optional override; empty → GitHub Releases latest.json
@@ -227,20 +248,29 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Require updater signing key
+      - name: Prepare Tauri updater signing key
         shell: bash
         env:
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          RAW_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          RAW_PASS: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: |
-          if [ -z "${TAURI_SIGNING_PRIVATE_KEY}" ]; then
+          set -euo pipefail
+          if [ -z "${RAW_KEY}" ]; then
             echo "::error::Missing secret TAURI_SIGNING_PRIVATE_KEY"
             exit 1
           fi
+          KEY_PATH="${RUNNER_TEMP}/tauri_signing.key"
+          ONE=$(printf '%s' "${RAW_KEY}" | tr -d '\r\n[:space:]')
+          printf '%s' "${ONE}" > "${KEY_PATH}"
+          echo "TAURI_SIGNING_PRIVATE_KEY_PATH=${KEY_PATH}" >> "$GITHUB_ENV"
+          echo "TAURI_SIGNING_PRIVATE_KEY=${ONE}" >> "$GITHUB_ENV"
+          if [ -n "${RAW_PASS}" ]; then
+            echo "TAURI_SIGNING_PRIVATE_KEY_PASSWORD=${RAW_PASS}" >> "$GITHUB_ENV"
+          fi
+          echo "Signing key prepared (len=${#ONE})"
 
       - name: Stamp repo meta + build Tauri (macOS ${{ matrix.arch }}, signed)
         env:
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
           REQUIRE_RELEASE_SECRETS: "1"
           TAURI_UPDATER_ENDPOINTS: ${{ secrets.TAURI_UPDATER_ENDPOINTS }}
         run: |
