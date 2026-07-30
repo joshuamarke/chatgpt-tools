@@ -26,6 +26,8 @@ pub fn ensure_cloud_layout() -> Result<(), EngineError> {
         cache_tmp_dir(),
         // Catalog screenshot thumbnails (independent of full .skin package cache)
         cdp::native_state_root().join("cache").join("previews"),
+        // Contact / about images (QR etc.) rewritten to data-URLs for CSP
+        cdp::native_state_root().join("cache").join("about-images"),
         cloud_root().join("meta"),
     ] {
         fs::create_dir_all(&d)

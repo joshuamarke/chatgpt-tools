@@ -560,6 +560,10 @@ pub async fn open_devtools(app: AppHandle) -> Result<Value, String> {
         }
     });
 
+    // Packaged builds: same WebView chrome lock as main (right-click / F12).
+    #[cfg(not(debug_assertions))]
+    crate::webview_guard::harden_window(&win);
+
     let _ = win.show();
     let _ = win.set_focus();
 

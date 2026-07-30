@@ -148,8 +148,20 @@ pub fn cloud_status_snapshot(force_refresh: bool) -> Value {
     let announcements = announcements::load_announcements_for_ui(&cfg);
     // Version from disk catalog only (no nested network during status).
     let version = check_app_version(&cfg, catalog.as_ref());
-    // About / contact from disk only during status (network via soft_network_sync / cloud_about).
-    let about = about::load_about_disk();
+    // About JSON from disk; contact images resolved to data-URLs (disk cache + allowlisted fetch).
+    // Same CSP constraint as catalog previews — WebView cannot load raw https:// img.
+    let about = {
+        let ui = about::get_about(&cfg, false);
+        if ui.get("contact").map(|c| c.is_object()).unwrap_or(false) {
+            Some(json!({
+                "protocol": ui.get("protocol").cloned().unwrap_or(json!(1)),
+                "updatedAt": ui.get("updatedAt").cloned().unwrap_or(Value::Null),
+                "contact": ui.get("contact").cloned().unwrap_or(json!({})),
+            }))
+        } else {
+            about::load_about_disk()
+        }
+    };
 
     json!({
         "ok": catalog.is_some() || sync_meta.get("ok").and_then(|v| v.as_bool()).unwrap_or(false),

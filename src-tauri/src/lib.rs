@@ -9,6 +9,9 @@ mod providers;
 mod proxy;
 mod sessions;
 mod tray;
+/// Release-only: disable GUI WebView right-click + F12 (see module docs).
+#[cfg(not(debug_assertions))]
+pub(crate) mod webview_guard;
 
 use tauri::{Manager, RunEvent, WindowEvent};
 
@@ -33,6 +36,13 @@ pub fn run() {
         builder = builder.plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             tray::show_main_window(app);
         }));
+    }
+
+    // Packaged/release only: strip WebView right-click menu + F12 / DevTools hotkeys.
+    // `tauri dev` (debug) keeps browser-like inspect. Unrelated to Skin DevTools / CDP.
+    #[cfg(not(debug_assertions))]
+    {
+        builder = builder.plugin(webview_guard::plugin());
     }
 
     builder
@@ -79,6 +89,10 @@ pub fn run() {
             for (_, window) in app.webview_windows() {
                 let _ = window.remove_menu();
             }
+
+            // Release: WebView2 native off for right-click menu + F12 (JS guard already injected).
+            #[cfg(not(debug_assertions))]
+            webview_guard::harden_all(app.handle());
 
             // Warm UI settings cache (CloseRequested uses the atomic fast path).
             let _ = app_settings::get_settings();

@@ -1,16 +1,28 @@
 //! About / contact info from CDN (`/v1/about.json`).
 //! Independent of app version check (`version.json`).
+//!
+//! Contact images (QR / banners) are remote `https://…` URLs in about.json, but
+//! WebView CSP only allows `data:` / `asset:` images — same constraint as catalog
+//! previews. We download allowlisted images in Rust, cache under
+//! `cache/about-images/`, and rewrite field values / HTML `<img src>` to data-URLs
+//! before handing JSON to the GUI.
 
 use super::cache::{
     about_etag_path, about_path, ensure_cloud_layout, read_etag, read_json, write_etag,
     write_text_atomic,
 };
-use super::config::CloudConfig;
-use super::http::{get_text, join_url};
+use super::config::{validate_download_url, CloudConfig, MAX_PREVIEW_BYTES};
+use super::http::{get_bytes_allowlisted_with_cap, get_text, join_url};
+use crate::cdp;
 use crate::engine::EngineError;
+use base64::{engine::general_purpose::STANDARD as B64, Engine as _};
 use serde_json::{json, Value};
+use sha2::{Digest, Sha256};
+use std::fs;
+use std::path::PathBuf;
 
-/// Fetch about.json from CDN and cache to disk.
+/// Fetch about.json from CDN and cache to disk (original remote image URLs kept).
+/// UI payload always goes through [`materialize_contact_images`].
 pub fn refresh_about(cfg: &CloudConfig) -> Result<Value, EngineError> {
     if !cfg.enabled {
         return Err(EngineError::msg("云端已关闭"));
@@ -26,7 +38,7 @@ pub fn refresh_about(cfg: &CloudConfig) -> Result<Value, EngineError> {
         match get_text(cfg, url, etag.as_deref()) {
             Ok(resp) if resp.not_modified => {
                 if let Some(v) = read_json(&about_path()) {
-                    return Ok(normalize_about(v));
+                    return Ok(materialize_contact_images(cfg, true, normalize_about(v)));
                 }
             }
             Ok(resp) => {
@@ -42,6 +54,7 @@ pub fn refresh_about(cfg: &CloudConfig) -> Result<Value, EngineError> {
                     )));
                 }
                 let normalized = normalize_about(value);
+                // Disk keeps original remote URLs (small JSON); images live in about-images/.
                 write_text_atomic(
                     &about_path(),
                     &format!(
@@ -52,20 +65,23 @@ pub fn refresh_about(cfg: &CloudConfig) -> Result<Value, EngineError> {
                 if let Some(et) = resp.etag {
                     let _ = write_etag(&about_etag_path(), &et);
                 }
-                return Ok(normalized);
+                return Ok(materialize_contact_images(cfg, true, normalized));
             }
             Err(e) => last_err = e,
         }
     }
     if let Some(v) = read_json(&about_path()) {
-        return Ok(normalize_about(v));
+        return Ok(materialize_contact_images(cfg, true, normalize_about(v)));
     }
     Err(last_err)
 }
 
-/// Load disk cache only (no network).
+/// Load disk cache only (no network for about.json). Still rewrites images from
+/// local about-images cache when present; optional network fill when `cfg` given.
 pub fn load_about_disk() -> Option<Value> {
-    read_json(&about_path()).map(normalize_about)
+    let v = read_json(&about_path()).map(normalize_about)?;
+    // Disk-only image resolve (no network) — use cached thumbs if any.
+    Some(materialize_contact_images_disk_only(v))
 }
 
 /// UI-facing about payload: disk first, optional network refresh.
@@ -91,16 +107,17 @@ pub fn get_about(cfg: &CloudConfig, network: bool) -> Value {
                 });
             }
             Err(e) => {
-                if let Some(disk) = load_about_disk() {
+                if let Some(disk) = read_json(&about_path()).map(normalize_about) {
+                    let v = materialize_contact_images(cfg, true, disk);
                     return json!({
                         "ok": true,
                         "enabled": true,
                         "fromNetwork": false,
                         "fromCache": true,
                         "networkError": e.to_string(),
-                        "protocol": disk.get("protocol").cloned().unwrap_or(json!(1)),
-                        "updatedAt": disk.get("updatedAt").cloned().unwrap_or(Value::Null),
-                        "contact": disk.get("contact").cloned().unwrap_or(json!({})),
+                        "protocol": v.get("protocol").cloned().unwrap_or(json!(1)),
+                        "updatedAt": v.get("updatedAt").cloned().unwrap_or(Value::Null),
+                        "contact": v.get("contact").cloned().unwrap_or(json!({})),
                     });
                 }
                 return json!({
@@ -113,15 +130,17 @@ pub fn get_about(cfg: &CloudConfig, network: bool) -> Value {
         }
     }
 
-    if let Some(disk) = load_about_disk() {
+    if let Some(disk) = read_json(&about_path()).map(normalize_about) {
+        // Prefer cache; allow network fill for missing contact images so first open works offline-ish after one fetch.
+        let v = materialize_contact_images(cfg, true, disk);
         return json!({
             "ok": true,
             "enabled": true,
             "fromNetwork": false,
             "fromCache": true,
-            "protocol": disk.get("protocol").cloned().unwrap_or(json!(1)),
-            "updatedAt": disk.get("updatedAt").cloned().unwrap_or(Value::Null),
-            "contact": disk.get("contact").cloned().unwrap_or(json!({})),
+            "protocol": v.get("protocol").cloned().unwrap_or(json!(1)),
+            "updatedAt": v.get("updatedAt").cloned().unwrap_or(Value::Null),
+            "contact": v.get("contact").cloned().unwrap_or(json!({})),
         });
     }
 
@@ -150,9 +169,7 @@ fn normalize_field(raw: &Value, index: usize) -> Option<Value> {
     let value = str_field(raw, "value");
     let mut href = str_field(raw, "href");
     let mut ty = str_field(raw, "type").to_lowercase();
-    if ty.is_empty()
-        || !matches!(ty.as_str(), "text" | "email" | "link" | "image")
-    {
+    if ty.is_empty() || !matches!(ty.as_str(), "text" | "email" | "link" | "image") {
         ty = "text".into();
     }
     let mut id = str_field(raw, "id");
@@ -287,4 +304,332 @@ fn normalize_about(raw: Value) -> Value {
             "css": "",
         }
     })
+}
+
+// ── Contact image materialization (CSP-safe data-URLs) ─────────────────────
+
+fn about_images_root() -> PathBuf {
+    cdp::native_state_root().join("cache").join("about-images")
+}
+
+fn url_cache_key(url: &str) -> String {
+    let mut h = Sha256::new();
+    h.update(url.trim().as_bytes());
+    hex::encode(h.finalize())
+}
+
+fn meta_path_for(key: &str) -> PathBuf {
+    about_images_root().join(format!("{key}.meta.json"))
+}
+
+fn image_path_for(key: &str, ext: &str) -> PathBuf {
+    about_images_root().join(format!("{key}.{ext}"))
+}
+
+fn find_cached_image(key: &str) -> Option<PathBuf> {
+    let root = about_images_root();
+    if !root.is_dir() {
+        return None;
+    }
+    for ext in ["jpg", "jpeg", "png", "webp", "gif", "svg", "bin"] {
+        let p = root.join(format!("{key}.{ext}"));
+        if p.is_file() {
+            return Some(p);
+        }
+    }
+    None
+}
+
+fn mime_from_ext(ext: &str) -> &'static str {
+    match ext.to_ascii_lowercase().as_str() {
+        "jpg" | "jpeg" => "image/jpeg",
+        "webp" => "image/webp",
+        "gif" => "image/gif",
+        "svg" => "image/svg+xml",
+        "png" => "image/png",
+        _ => "application/octet-stream",
+    }
+}
+
+fn ext_from_url_or_bytes(url: &str, bytes: &[u8]) -> String {
+    if let Ok(parsed) = url::Url::parse(url) {
+        if let Some(seg) = parsed
+            .path_segments()
+            .and_then(|mut s| s.next_back())
+            .map(|s| s.to_ascii_lowercase())
+        {
+            for ext in ["jpg", "jpeg", "png", "webp", "gif", "svg"] {
+                if seg.ends_with(&format!(".{ext}")) || seg.contains(&format!(".{ext}?")) {
+                    return ext.to_string();
+                }
+            }
+        }
+    }
+    // Magic sniff
+    if bytes.starts_with(&[0x89, b'P', b'N', b'G']) {
+        return "png".into();
+    }
+    if bytes.starts_with(&[0xFF, 0xD8, 0xFF]) {
+        return "jpg".into();
+    }
+    if bytes.len() >= 12 && &bytes[0..4] == b"RIFF" && &bytes[8..12] == b"WEBP" {
+        return "webp".into();
+    }
+    if bytes.starts_with(b"GIF8") {
+        return "gif".into();
+    }
+    if bytes.starts_with(b"<svg") || bytes.starts_with(b"<?xml") {
+        return "svg".into();
+    }
+    "bin".into()
+}
+
+fn bytes_to_data_url(ext: &str, bytes: &[u8]) -> String {
+    format!("data:{};base64,{}", mime_from_ext(ext), B64.encode(bytes))
+}
+
+fn load_cached_data_url(source_url: &str) -> Option<String> {
+    let key = url_cache_key(source_url);
+    // Prefer meta match so URL changes bust the cache
+    if let Some(meta) = read_json(&meta_path_for(&key)) {
+        let cached = meta
+            .get("sourceUrl")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        if cached != source_url.trim() {
+            return None;
+        }
+    }
+    let path = find_cached_image(&key)?;
+    let bytes = fs::read(&path).ok()?;
+    if bytes.is_empty() || bytes.len() as u64 > MAX_PREVIEW_BYTES {
+        return None;
+    }
+    let ext = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("bin");
+    Some(bytes_to_data_url(ext, &bytes))
+}
+
+fn fetch_and_cache_image(cfg: &CloudConfig, source_url: &str) -> Result<String, EngineError> {
+    let url = source_url.trim();
+    if url.is_empty() {
+        return Err(EngineError::msg("空图片 URL"));
+    }
+    if url.starts_with("data:") {
+        return Ok(url.to_string());
+    }
+    // Validate host allowlist (same as skin previews)
+    let _ = validate_download_url(url, cfg)?;
+
+    if let Some(cached) = load_cached_data_url(url) {
+        return Ok(cached);
+    }
+
+    let resp = get_bytes_allowlisted_with_cap(cfg, url, None, MAX_PREVIEW_BYTES)?;
+    if resp.bytes.is_empty() {
+        return Err(EngineError::msg("联系图片为空"));
+    }
+    let ext = ext_from_url_or_bytes(&resp.final_url, &resp.bytes);
+    let key = url_cache_key(url);
+    let root = about_images_root();
+    fs::create_dir_all(&root)
+        .map_err(|e| EngineError::msg(format!("mkdir about-images: {e}")))?;
+    // Drop previous extensions for this key
+    for old_ext in ["jpg", "jpeg", "png", "webp", "gif", "svg", "bin"] {
+        let p = image_path_for(&key, old_ext);
+        let _ = fs::remove_file(p);
+    }
+    let img_path = image_path_for(&key, &ext);
+    fs::write(&img_path, &resp.bytes)
+        .map_err(|e| EngineError::msg(format!("写联系图片: {e}")))?;
+    let meta = json!({
+        "sourceUrl": url,
+        "finalUrl": resp.final_url,
+        "size": resp.bytes.len(),
+        "ext": ext,
+    });
+    let _ = write_text_atomic(
+        &meta_path_for(&key),
+        &format!("{}\n", serde_json::to_string_pretty(&meta).unwrap_or_default()),
+    );
+    Ok(bytes_to_data_url(&ext, &resp.bytes))
+}
+
+fn resolve_image_src(cfg: Option<&CloudConfig>, allow_network: bool, src: &str) -> String {
+    let s = src.trim();
+    if s.is_empty() || s.starts_with("data:") || s.starts_with("asset:") || s.starts_with("blob:") {
+        return s.to_string();
+    }
+    if !(s.starts_with("http://") || s.starts_with("https://")) {
+        return s.to_string();
+    }
+    if let Some(cached) = load_cached_data_url(s) {
+        return cached;
+    }
+    if allow_network {
+        if let Some(cfg) = cfg {
+            if let Ok(data) = fetch_and_cache_image(cfg, s) {
+                return data;
+            }
+        }
+    }
+    // Leave remote URL — WebView CSP will block; UI still has alt text.
+    s.to_string()
+}
+
+/// Rewrite remote `src="http(s)://…"` in contact HTML to data-URLs when possible.
+fn rewrite_html_img_srcs(cfg: Option<&CloudConfig>, allow_network: bool, html: &str) -> String {
+    // Simple attribute scan — contact HTML is small and already sanitized on the frontend.
+    let mut out = String::with_capacity(html.len());
+    let bytes = html.as_bytes();
+    let lower = html.to_ascii_lowercase();
+    let mut i = 0;
+    while i < bytes.len() {
+        if let Some(rel) = lower[i..].find("src=") {
+            let start = i + rel;
+            out.push_str(&html[i..start]);
+            let after = start + 4; // past "src="
+            if after >= bytes.len() {
+                out.push_str(&html[start..]);
+                break;
+            }
+            let quote = html.as_bytes()[after] as char;
+            if quote == '"' || quote == '\'' {
+                if let Some(end_rel) = html[after + 1..].find(quote) {
+                    let val_start = after + 1;
+                    let val_end = val_start + end_rel;
+                    let raw_src = &html[val_start..val_end];
+                    let resolved = resolve_image_src(cfg, allow_network, raw_src);
+                    out.push_str("src=");
+                    out.push(quote);
+                    out.push_str(&resolved);
+                    out.push(quote);
+                    i = val_end + 1;
+                    continue;
+                }
+            }
+            // Unquoted or malformed — copy through
+            out.push_str(&html[start..start + 4]);
+            i = after;
+            continue;
+        }
+        out.push_str(&html[i..]);
+        break;
+    }
+    out
+}
+
+fn materialize_contact_images(cfg: &CloudConfig, allow_network: bool, mut about: Value) -> Value {
+    let Some(contact) = about.get_mut("contact") else {
+        return about;
+    };
+    if !contact.is_object() {
+        return about;
+    }
+
+    let mode = contact
+        .get("mode")
+        .and_then(|v| v.as_str())
+        .unwrap_or("fields")
+        .to_ascii_lowercase();
+
+    if mode == "html" {
+        if let Some(html) = contact.get("html").and_then(|v| v.as_str()).map(|s| s.to_string()) {
+            let rewritten = rewrite_html_img_srcs(Some(cfg), allow_network, &html);
+            if let Some(obj) = contact.as_object_mut() {
+                obj.insert("html".into(), json!(rewritten));
+            }
+        }
+        return about;
+    }
+
+    // fields mode — rewrite type=image values
+    let fields = match contact.get_mut("fields").and_then(|v| v.as_array_mut()) {
+        Some(arr) => arr,
+        None => return about,
+    };
+    for field in fields.iter_mut() {
+        let ty = field
+            .get("type")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_ascii_lowercase();
+        if ty != "image" {
+            continue;
+        }
+        let value = field
+            .get("value")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        if value.is_empty() {
+            continue;
+        }
+        let resolved = resolve_image_src(Some(cfg), allow_network, &value);
+        if let Some(obj) = field.as_object_mut() {
+            // Keep original for debugging / re-fetch; GUI uses value.
+            if resolved.starts_with("data:") && !value.starts_with("data:") {
+                obj.insert("sourceUrl".into(), json!(value));
+            }
+            obj.insert("value".into(), json!(resolved));
+        }
+    }
+    about
+}
+
+fn materialize_contact_images_disk_only(mut about: Value) -> Value {
+    let Some(contact) = about.get_mut("contact") else {
+        return about;
+    };
+    if !contact.is_object() {
+        return about;
+    }
+    let mode = contact
+        .get("mode")
+        .and_then(|v| v.as_str())
+        .unwrap_or("fields")
+        .to_ascii_lowercase();
+
+    if mode == "html" {
+        if let Some(html) = contact.get("html").and_then(|v| v.as_str()).map(|s| s.to_string()) {
+            let rewritten = rewrite_html_img_srcs(None, false, &html);
+            if let Some(obj) = contact.as_object_mut() {
+                obj.insert("html".into(), json!(rewritten));
+            }
+        }
+        return about;
+    }
+
+    let fields = match contact.get_mut("fields").and_then(|v| v.as_array_mut()) {
+        Some(arr) => arr,
+        None => return about,
+    };
+    for field in fields.iter_mut() {
+        let ty = field
+            .get("type")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_ascii_lowercase();
+        if ty != "image" {
+            continue;
+        }
+        let value = field
+            .get("value")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        if value.is_empty() {
+            continue;
+        }
+        let resolved = resolve_image_src(None, false, &value);
+        if let Some(obj) = field.as_object_mut() {
+            if resolved.starts_with("data:") && !value.starts_with("data:") {
+                obj.insert("sourceUrl".into(), json!(value));
+            }
+            obj.insert("value".into(), json!(resolved));
+        }
+    }
+    about
 }
