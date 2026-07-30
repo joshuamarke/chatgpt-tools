@@ -1,27 +1,19 @@
-# ChatGPT Tools — signed installer upload to GitHub Releases
-# Triggers: release published OR manual workflow_dispatch(tag)
-# Outputs: Windows setup/portable, macOS dmg, latest.json, latest.mirror.json
-
 name: Build and upload release
 
 on:
   release:
     types: [published]
-  # Manual / API re-run for an existing tag (e.g. v1.1.12) when release.published was missed
   workflow_dispatch:
     inputs:
       tag:
-        description: "Release tag to build and upload (e.g. v1.1.12)"
+        description: Release tag to build (example v1.1.12)
         required: true
-        type: string
 
 permissions:
   contents: write
 
 env:
   CARGO_TERM_COLOR: always
-  # Unified tag for checkout / upload (release event or manual dispatch)
-  RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.event.release.tag_name }}
 
 jobs:
   windows-installer:
@@ -31,7 +23,7 @@ jobs:
       - name: Checkout release tag
         uses: actions/checkout@v4
         with:
-          ref: ${{ env.RELEASE_TAG }}
+          ref: ${{ github.event.inputs.tag || github.event.release.tag_name }}
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -74,7 +66,7 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
-          $version = "${{ env.RELEASE_TAG }}".TrimStart("v", "V")
+          $version = "${{ github.event.inputs.tag || github.event.release.tag_name }}".TrimStart("v", "V")
           $dist = "dist/windows"
           New-Item -ItemType Directory -Force $dist | Out-Null
 
@@ -187,7 +179,7 @@ Version: $version
       - name: Upload Windows assets to GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ env.RELEASE_TAG }}
+          tag_name: ${{ github.event.inputs.tag || github.event.release.tag_name }}
           # false: MSI may be absent depending on Tauri bundle targets
           fail_on_unmatched_files: false
           token: ${{ secrets.GITHUB_TOKEN }}
@@ -215,7 +207,7 @@ Version: $version
       - name: Checkout release tag
         uses: actions/checkout@v4
         with:
-          ref: ${{ env.RELEASE_TAG }}
+          ref: ${{ github.event.inputs.tag || github.event.release.tag_name }}
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -261,7 +253,7 @@ Version: $version
         shell: bash
         run: |
           set -euo pipefail
-          VERSION="${{ env.RELEASE_TAG }}"
+          VERSION="${{ github.event.inputs.tag || github.event.release.tag_name }}"
           VERSION="${VERSION#v}"
           VERSION="${VERSION#V}"
           DIST="dist/macos"
@@ -314,7 +306,7 @@ Version: $version
       - name: Upload macOS assets to GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ env.RELEASE_TAG }}
+          tag_name: ${{ github.event.inputs.tag || github.event.release.tag_name }}
           fail_on_unmatched_files: false
           token: ${{ secrets.GITHUB_TOKEN }}
           files: |
@@ -334,7 +326,7 @@ Version: $version
       - name: Checkout (for build-latest-json script)
         uses: actions/checkout@v4
         with:
-          ref: ${{ env.RELEASE_TAG }}
+          ref: ${{ github.event.inputs.tag || github.event.release.tag_name }}
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -346,7 +338,7 @@ Version: $version
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
-          TAG: ${{ env.RELEASE_TAG }}
+          TAG: ${{ github.event.inputs.tag || github.event.release.tag_name }}
           # Optional override; empty → https://ghfast.top/ in the script below
           GITHUB_RELEASE_MIRROR_PREFIX: ${{ secrets.GITHUB_RELEASE_MIRROR_PREFIX }}
         shell: bash
