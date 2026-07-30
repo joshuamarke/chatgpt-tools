@@ -4,7 +4,7 @@
 # 2) Build / sign installers + Windows portable zip
 # 3) Upload assets (.exe setup, portable zip, dmg, .sig)
 # 4) Write Tauri static updater manifest → latest.json
-name: Release assets
+name: Build and upload release
 
 on:
   release:
@@ -23,7 +23,7 @@ permissions:
 env:
   CARGO_TERM_COLOR: always
   # Unified tag for checkout / upload (release event or manual dispatch)
-  RELEASE_TAG: ${{ github.event.release.tag_name || inputs.tag }}
+  RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.event.release.tag_name }}
 
 jobs:
   windows-installer:
