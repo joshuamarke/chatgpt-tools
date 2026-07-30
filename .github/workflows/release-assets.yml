@@ -1,4 +1,5 @@
 # Release flow + Tauri updater artifacts:
+# Re-enabled for v1.1.12 release rebuild.
 # 1) Publish a GitHub Release (tag + changelog body)
 # 2) Build / sign installers + Windows portable zip
 # 3) Upload assets (.exe setup, portable zip, dmg, .sig)

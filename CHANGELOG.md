@@ -4,10 +4,10 @@
 
 ## 1.1.12 - 2026-07-29
 
-- 多功能桌面工具箱：皮肤引擎、会话管理、供应商 / 本地路由等模块。
-- 换肤热路径以纯 Rust CDP 为主（apply / status / restore 等）。
-- 新增 GitHub Actions：`Release assets`（发布 Release 后自动上传 Win/macOS 安装包）与 `PR build artifacts`（PR/main 冒烟构建）。
-- GitHub Release 增加 Windows **免安装 portable zip**；应用检查更新使用 **`tauri-plugin-updater`**（`latest.json` + minisign 签名）。
+- 多功能桌面工具箱：皮肤引擎、会话管理、供应商 / 本地路由等模块，不修改客户端通过CDP注入实现。
+- 换肤热路径以纯 Rust CDP 为主（apply / status / restore 等），主题模式切换需要经过ChatGPT/Codex的配置文件切换，因此dark/light模式切换必须要重启客户端。
+- 新增 会话管理，支持ChatGPT/Codex和Grok Build。
+- 新增供应商管理，当开启本地路由功能之后可以实现多个第三方中转站热切换。
 
 ## 如何写下一版
 
