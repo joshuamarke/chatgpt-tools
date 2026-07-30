@@ -4,7 +4,7 @@
 //! - `summary.json` — metadata (id, cwd, title, timestamps, model)
 //! - `chat_history.jsonl` — conversation lines (`type`: user/assistant/system/tool)
 //!
-//! Adapted from cc-switch `session_manager::providers::grokbuild`.
+//! Grok Build session scan / delete / Markdown export under `~/.grok/sessions`.
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -413,7 +413,7 @@ fn load_messages_from_chat(chat_path: &Path) -> Result<Vec<(String, String)>, St
         let kind = value.get("type").and_then(Value::as_str).unwrap_or("");
         let role = match kind {
             "system" | "user" | "assistant" | "tool" => kind,
-            // Skip reasoning / internal records (same as cc-switch).
+            // Skip reasoning / internal records.
             _ => continue,
         };
         let content = value

@@ -999,23 +999,35 @@ fn background_cold_apply(
         let again = wait_until_injectable(port, 30_000, 300, 3, 1_000);
         append_diag(&format!("background_cold_apply injectable retry={again}"));
         if !again {
-            finish_apply_operation(
-                port,
-                op_token,
-                false,
-                "宿主尚未就绪",
-            );
-            if let Some(mut st) = read_state() {
-                if let Some(obj) = st.as_object_mut() {
-                    obj.insert("phase".into(), json!("error"));
-                    obj.insert(
-                        "lastError".into(),
-                        json!("宿主页面尚未完成启动，皮肤注入超时。请稍后再试或重新换肤。"),
-                    );
+            // Host update (Codex 26.7+) often exposes app:// early while SPA remounts,
+            // or ranks aux pages first. If CDP renderer is up, attempt inject anyway —
+            // soft_inject_shell will no-op cleanly when the document is still empty.
+            let probe = probe_host_lifecycle_force(port);
+            let force_try = probe.renderer_ready || probe.debug_port_open;
+            append_diag(&format!(
+                "background_cold_apply injectable hard-fail force_try={force_try} lifecycle={} renderer={}",
+                probe.lifecycle, probe.renderer_ready
+            ));
+            if !force_try {
+                finish_apply_operation(
+                    port,
+                    op_token,
+                    false,
+                    "宿主尚未就绪",
+                );
+                if let Some(mut st) = read_state() {
+                    if let Some(obj) = st.as_object_mut() {
+                        obj.insert("phase".into(), json!("error"));
+                        obj.insert(
+                            "lastError".into(),
+                            json!("宿主页面尚未完成启动，皮肤注入超时。请稍后再试或重新换肤。"),
+                        );
+                    }
+                    let _ = write_state(&st);
                 }
-                let _ = write_state(&st);
+                return;
             }
-            return;
+            append_diag("background_cold_apply: proceeding with soft inject despite stable-probe miss");
         }
     }
 
@@ -1485,6 +1497,10 @@ pub fn apply_skin_native_opts(skin_id: &str, restart: bool) -> Result<Value, Eng
         apply_t0.elapsed().as_millis()
     ));
 
+    // Ensure third-party model unlock is queued/applied after host is up
+    // (shell inject may have already tried; this covers launch-only + retries).
+    crate::providers::model_unlock::on_host_ready();
+
     Ok(json!({
         "ok": true,
         "skinId": id,
@@ -1654,6 +1670,9 @@ pub fn start_host_native() -> Result<Value, EngineError> {
     ensure_debug_port(port, false)?;
     invalidate_host_probe_cache();
     let life = probe_host_lifecycle_force(port);
+    // Third-party model whitelist: inject once host debug port is up (or queue
+    // via keep thread if the renderer is still booting).
+    crate::providers::model_unlock::on_host_ready();
     Ok(json!({
         "ok": true,
         "started": true,

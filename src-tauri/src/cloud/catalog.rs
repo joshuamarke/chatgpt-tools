@@ -287,8 +287,14 @@ pub fn merge_remote_into_status(status: &mut Value, catalog: Option<&Value>, cfg
         });
         if !preview_url.is_empty() {
             if let Some(obj) = card.as_object_mut() {
-                // remote preview only if host-allowed; frontend may still fail CSP — optional
+                // Host will cache → previewUrl data-URL; raw URL kept for ensure path.
+                // Do not put remote http(s) into previewUrl (WebView CSP blocks it).
                 obj.insert("remotePreviewUrl".into(), json!(preview_url));
+            }
+        }
+        if let Some(prev) = remote.get("preview").cloned() {
+            if let Some(obj) = card.as_object_mut() {
+                obj.insert("remotePreview".into(), prev);
             }
         }
         if let Some(pkg) = remote.get("package").cloned() {

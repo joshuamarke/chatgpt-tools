@@ -10,11 +10,11 @@
 | 目标 | 路径 |
 |------|------|
 | 本机安装探测（桌面 / CLI / Grok） | `src-tauri/src/env/mod.rs` |
-| Tauri 命令 | `env_check`（`lib.rs` 注册） |
-| 前端 API | `src/skin-api.js` → `envCheck({ force })` |
-| 侧栏「概览」+ 内容区 | `src/index.html#overviewView` · `src/app.js`（`setMainView("overview")` · `loadEnvironment`） |
-| 样式 | `src/styles.css`（`.overview-view` · `.ov-card` …） |
-| 说明 | 皮肤仅桌面端；**Codex CLI 不支持皮肤** |
+| Tauri 命令 | `env_check`（全量）· `env_check_tool`（单环境卡片刷新，`lib.rs` 注册） |
+| 前端 API | `src/skin-api.js` → `envCheck({ force })` · `envCheckTool(id)` |
+| 侧栏「概览」+ 内容区 | `src/index.html#overviewView` · `src/app.js`（`setMainView("overview")` · `loadEnvironment` / `loadEnvironmentTool`） |
+| 样式 | `src/styles.css`（`.overview-view` · `.ov-card` · `.ov-card-refresh` …） |
+| 说明 | 皮肤仅桌面端；**Codex CLI 不支持皮肤**；卡片右上角刷新只探测该项，运行环境条「刷新检测」才全量扫描 |
 
 ## 0b. 会话管理
 
@@ -101,7 +101,9 @@ GUI apply
 
 ```bash
 npm run doctor:selectors
-npm run test:engine
-npm run check:payloads
+npm run test:engine          # injector --self-test
+npm run verify:engine       # CLI 冒烟
+npm run check:gui
+npm run check:payloads      # list-skins
 node engine/cli.mjs check-payload --skin-id dream
 ```

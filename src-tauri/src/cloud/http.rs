@@ -111,19 +111,30 @@ pub fn get_text(
     Err(EngineError::msg("重定向次数过多"))
 }
 
-/// Download binary with size cap; each redirect hop re-checked against allowlist.
+/// Download binary with package-size cap (skin packages).
 pub fn get_bytes_allowlisted(
     cfg: &CloudConfig,
     url: &str,
     expected_size: Option<u64>,
 ) -> Result<HttpBytesResponse, EngineError> {
+    get_bytes_allowlisted_with_cap(cfg, url, expected_size, MAX_PACKAGE_BYTES)
+}
+
+/// Download binary with a custom hard cap (packages vs preview thumbnails).
+/// Each redirect hop is re-checked against the host allowlist.
+pub fn get_bytes_allowlisted_with_cap(
+    cfg: &CloudConfig,
+    url: &str,
+    expected_size: Option<u64>,
+    max_bytes: u64,
+) -> Result<HttpBytesResponse, EngineError> {
     let mut current = validate_download_url(url, cfg)?.as_str().to_string();
 
     if let Some(sz) = expected_size {
-        if sz > MAX_PACKAGE_BYTES {
+        if sz > max_bytes {
             return Err(EngineError::msg(format!(
                 "声明体积 {} 超过硬限 {} 字节",
-                sz, MAX_PACKAGE_BYTES
+                sz, max_bytes
             )));
         }
     }
@@ -131,7 +142,7 @@ pub fn get_bytes_allowlisted(
     let ag = agent(cfg);
     for _hop in 0..=MAX_REDIRECTS {
         let req = apply_common_headers(ag.get(&current), cfg)
-            .set("Accept", "application/zip, application/octet-stream, */*");
+            .set("Accept", "image/*, application/zip, application/octet-stream, */*");
 
         match req.call() {
             Ok(resp) => {
@@ -152,17 +163,17 @@ pub fn get_bytes_allowlisted(
                     .header("content-length")
                     .and_then(|s| s.parse::<u64>().ok())
                 {
-                    if cl > MAX_PACKAGE_BYTES {
+                    if cl > max_bytes {
                         return Err(EngineError::msg(format!(
                             "Content-Length {cl} 超过硬限 {} 字节",
-                            MAX_PACKAGE_BYTES
+                            max_bytes
                         )));
                     }
                 }
 
                 let limit = expected_size
-                    .filter(|s| *s > 0 && *s <= MAX_PACKAGE_BYTES)
-                    .unwrap_or(MAX_PACKAGE_BYTES)
+                    .filter(|s| *s > 0 && *s <= max_bytes)
+                    .unwrap_or(max_bytes)
                     .saturating_add(1024);
 
                 let mut buf = Vec::new();
@@ -171,10 +182,10 @@ pub fn get_bytes_allowlisted(
                     .read_to_end(&mut buf)
                     .map_err(|e| EngineError::msg(format!("读取下载内容: {e}")))?;
 
-                if buf.len() as u64 > MAX_PACKAGE_BYTES {
+                if buf.len() as u64 > max_bytes {
                     return Err(EngineError::msg(format!(
                         "下载超过硬限 {} 字节",
-                        MAX_PACKAGE_BYTES
+                        max_bytes
                     )));
                 }
                 if let Some(sz) = expected_size {

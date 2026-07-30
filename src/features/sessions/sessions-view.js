@@ -39,6 +39,10 @@
   let expandedProjects = new Set();
   /** @type {{ token: string, title: string, dbPath?: string } | null} */
   let lastUndo = null;
+  /** Auto-hide undo chip after this many ms (does not clear server backup). */
+  const UNDO_VISIBLE_MS = 45_000;
+  /** @type {ReturnType<typeof setTimeout> | null} */
+  let undoHideTimer = null;
   /** @type {{ targets: any[], currentProvider: string } | null} */
   let providerTargets = null;
   /** @type {{ snapshotSha256: string, candidates: any[] } | null} */
@@ -125,7 +129,7 @@
   }
 
   /**
-   * CLI resume command (aligned with cc-switch session manager).
+   * CLI resume command for the selected provider.
    * Codex: `codex resume <id>` · Grok Build: `grok --resume <id>`
    */
   function resumeCommandOf(session) {
@@ -220,18 +224,12 @@
     const lead = $("sessLead");
     if (lead) {
       lead.textContent = grok
-        ? "读取 Grok Build 本机历史会话（~/.grok/sessions）。支持导出 Markdown 与删除（删除不可撤销）。"
-        : "读取 ChatGPT / Codex 本地 SQLite 会话库。支持导出 Markdown、删除（可撤销）、历史 provider 修复与 session_index 清理。";
+        ? "读取 Grok Build 本机历史会话（不参与网络同步）。支持导出 Markdown 与删除（删除不可撤销）。"
+        : "读取 ChatGPT / Codex 本机历史会话。支持导出 Markdown、删除（可撤销）、历史 provider 修复与 session_index 清理。";
     }
-
-    const pathLabel = $("sessMetricPathLabel");
-    if (pathLabel) pathLabel.textContent = grok ? "Grok 目录" : "数据库";
 
     const tools = $("sessCodexTools");
     if (tools) tools.hidden = grok;
-
-    const undoBar = $("sessUndoBar");
-    if (undoBar && grok) undoBar.hidden = true;
 
     const hint = $("sessHint");
     if (hint) {
@@ -240,7 +238,7 @@
         : "提示：Codex 删除备份在应用状态目录 <code>session-backups</code>。索引清理前请完全退出客户端。导出不会修改本地数据。";
     }
 
-    updateMetrics();
+    updateChrome();
   }
 
   function filteredSessions() {
@@ -313,32 +311,41 @@
     fillProjectFilter();
   }
 
-  function updateMetrics() {
+  function clearUndoHideTimer() {
+    if (undoHideTimer != null) {
+      clearTimeout(undoHideTimer);
+      undoHideTimer = null;
+    }
+  }
+
+  /** Show compact undo chip in the toolbar; auto-hide after UNDO_VISIBLE_MS. */
+  function scheduleUndoExpiry() {
+    clearUndoHideTimer();
+    if (!lastUndo || isGrok()) return;
+    undoHideTimer = setTimeout(() => {
+      lastUndo = null;
+      undoHideTimer = null;
+      updateChrome();
+    }, UNDO_VISIBLE_MS);
+  }
+
+  function syncUndoChip() {
+    const undoBtn = $("btnSessUndo");
+    if (!undoBtn) return;
+    const show = !isGrok() && !!lastUndo;
+    undoBtn.hidden = !show;
+    if (!show) return;
+    const title = lastUndo.title || "会话";
+    const short =
+      title.length > 16 ? `${title.slice(0, 14)}…` : title;
+    undoBtn.title = `撤销删除「${title}」（约 ${Math.round(UNDO_VISIBLE_MS / 1000)} 秒内有效）`;
+    const label = $("sessUndoLabel");
+    if (label) label.textContent = `撤销「${short}」`;
+  }
+
+  function updateChrome() {
     const pageItems = sessions;
     const items = filteredSessions();
-    const active = pageItems.filter((s) => !s.archived).length;
-    const archived = pageItems.length - active;
-    const elCount = $("sessMetricCount");
-    const elActive = $("sessMetricActive");
-    const elArchived = $("sessMetricArchived");
-    const elDb = $("sessMetricDb");
-    if (elCount) elCount.textContent = `${pageItems.length} 个`;
-    if (elActive) elActive.textContent = `${active} 个`;
-    if (elArchived) elArchived.textContent = `${archived} 个`;
-    if (elDb) {
-      let path = "未检测到";
-      if (isGrok()) {
-        path =
-          lastPayload?.grokHome ||
-          (Array.isArray(lastPayload?.sessionRoots) && lastPayload.sessionRoots[0]) ||
-          "未检测到";
-      } else {
-        path = lastPayload?.dbPath || lastPayload?.codexHome || "未检测到";
-      }
-      path = normalizeDisplayPath(path) || path;
-      elDb.textContent = path;
-      elDb.title = path;
-    }
     const pageLabel = $("sessPageLabel");
     if (pageLabel) pageLabel.textContent = `第 ${currentPage()} 页`;
     const prev = $("btnSessPrev");
@@ -357,15 +364,7 @@
     }
     const refreshBtn = $("btnSessRefresh");
     if (refreshBtn) refreshBtn.disabled = anyBusy();
-    const undoBar = $("sessUndoBar");
-    if (undoBar) {
-      // Undo only applies to Codex deletes in the current UI session.
-      undoBar.hidden = isGrok() || !lastUndo;
-      const undoLabel = $("sessUndoLabel");
-      if (undoLabel && lastUndo && !isGrok()) {
-        undoLabel.textContent = `已删除「${lastUndo.title}」，可撤销`;
-      }
-    }
+    syncUndoChip();
     const repairBtn = $("btnSessRepair");
     if (repairBtn) repairBtn.disabled = busyRepair || isGrok();
     const previewBtn = $("btnSessIndexPreview");
@@ -378,6 +377,11 @@
         !indexPreview ||
         !(indexPreview.candidates || []).length;
     }
+  }
+
+  /** @deprecated use updateChrome — kept as alias for any missed call sites */
+  function updateMetrics() {
+    updateChrome();
   }
 
   function fillProviderSelect() {
@@ -398,9 +402,12 @@
       ];
       selected = current || "";
     } else {
+      // value/id = model_providers.<id> key only (never the inner name UI label).
       options = targets.map((t) => ({
         value: t.id,
-        label: t.isCurrentProvider ? `${t.id}（当前）` : t.id,
+        label: t.isCurrentProvider
+          ? `${t.id}（当前 model_provider）`
+          : t.id,
       }));
       if (prev && targets.some((t) => t.id === prev)) selected = prev;
       else if (current) selected = current;
@@ -764,7 +771,8 @@
       title: session?.title || session?.id || "会话",
       dbPath: session?.dbPath || null,
     };
-    updateMetrics();
+    scheduleUndoExpiry();
+    updateChrome();
   }
 
   async function deleteOne(session) {
@@ -834,7 +842,8 @@
       });
       toast(`已恢复「${lastUndo.title}」`, "ok");
       lastUndo = null;
-      updateMetrics();
+      clearUndoHideTimer();
+      updateChrome();
       await loadSessions(offset);
     } catch (err) {
       toast(err?.message || String(err), "error");
@@ -918,7 +927,9 @@
     const ok = await confirm({
       title: "修复历史会话",
       message:
-        `将历史 rollout / 数据库中的 provider 标记整理为「${target || "当前配置"}」。\n\n` +
+        `将历史 rollout / 数据库（含 local_thread_catalog）中的 model_provider 整理为「${target || "当前配置"}」。\n\n` +
+        `注意：这里的 provider 是 config.toml 里 model_providers.<id> 的 <id>（例如 chatgpt-tools-proxy / custom / openai），` +
+        `不是 model_providers.<id>.name 显示名（本工具固定为 OpenAI）。写错会导致 Codex 无法识别会话。\n\n` +
         `会改写本机 Codex 会话元数据并创建备份。建议先完全退出 Codex / ChatGPT 客户端。`,
       confirmText: "开始修复",
       variant: "warn",

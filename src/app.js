@@ -16,7 +16,7 @@ const overviewView = document.getElementById("overviewView");
 const overviewGrid = document.getElementById("overviewGrid");
 
 /** 关于页展示版本（与 package.json 对齐；版本检查走云端 catalog） */
-const APP_VERSION = "2.2.0";
+const APP_VERSION = "1.1.12";
 const APP_RELEASE_DATE = "2026-07-23";
 
 /** @type {{ skins: any[], codexRunning?: boolean, debugReady?: boolean } | null} */
@@ -36,6 +36,10 @@ let activeView = "overview";
 /** @type {any | null} last env_check payload */
 let latestEnv = null;
 let envCheckInflight = null;
+/** Per-card single-tool env probes currently in flight (tool id → Promise) */
+const envToolInflight = new Map();
+/** Tool ids currently showing card-level probing UI */
+const probingToolIds = new Set();
 let searchQuery = "";
 /** Busy overlay active — pause host polling */
 let uiBusy = false;
@@ -45,6 +49,12 @@ let hostPollTimer = null;
 let hostPollFailCount = 0;
 /** Last skins signature so host-only updates do not rebuild the grid */
 let lastSkinsSig = "";
+/** In-flight catalog preview ensure (single-flight progressive fill) */
+let previewEnsureInflight = null;
+/** Another ensure requested while one is running */
+let previewEnsureQueued = false;
+/** Ids that failed last ensure pass — avoid tight retry loops */
+let previewEnsureCooldown = new Map();
 /** Follow artPending → settled without full catalog refresh (timer id) */
 let artPendingWatchTimer = null;
 /** Default banner copy when no cloud announcements */
@@ -1105,11 +1115,19 @@ function renderSkins(status) {
   for (const skin of filtered) {
     const card = document.createElement("article");
     card.className = `card${skin.active ? " active" : ""}`;
-    const previewImg = skin.previewUrl
+    if (skin.id) card.dataset.skinId = String(skin.id);
+    const hasPreview = Boolean(skin.previewUrl);
+    const isRemote = skin.source === "remote" || skin.installState === "remote";
+    const expectCloudPreview =
+      !hasPreview &&
+      (isRemote ||
+        Boolean(skin.remotePreviewUrl) ||
+        Boolean(skin.remotePreview?.url) ||
+        skin.installState === "updateAvailable");
+    const previewImg = hasPreview
       ? `<img class="preview-img" src="${skin.previewUrl}" alt="${escapeHtml(skin.name)}" draggable="false" loading="lazy" />`
       : "";
     const isFav = favorites.has(skin.id);
-    const isRemote = skin.source === "remote" || skin.installState === "remote";
     const needUpdate = Boolean(skin.updateAvailable || skin.installState === "updateAvailable");
     const useLabel = isRemote
       ? "下载皮肤"
@@ -1134,9 +1152,11 @@ function renderSkins(status) {
         ? `<button type="button" class="use-btn is-download" data-download="${escapeHtml(skin.id)}" data-name="${escapeHtml(skin.name)}">${useLabel}</button>`
         : `<button type="button" class="use-btn" data-apply="${escapeHtml(skin.id)}" data-name="${escapeHtml(skin.name)}">${useLabel}</button>`;
 
+    const previewCls = expectCloudPreview ? "preview is-loading-preview" : "preview";
     card.innerHTML = `
-      <div class="preview" style="background:${skin.previewGradient || "#eceff6"}">
+      <div class="${previewCls}" style="background:${skin.previewGradient || "#eceff6"}">
         ${previewImg}
+        ${expectCloudPreview ? `<span class="preview-loading-hint" aria-hidden="true">预览加载中</span>` : ""}
         ${skin.active ? `<span class="badge on">使用中</span>` : ""}
         <div class="preview-actions">
           ${primaryAction}
@@ -1166,6 +1186,8 @@ function renderSkins(status) {
   }
 
   bindCardActions();
+  // Progressive fill: only visible (filtered) cards that still lack previewUrl.
+  scheduleEnsureCloudPreviews(filtered);
 }
 
 /** @param {any} skin */
@@ -1181,6 +1203,158 @@ function skinSourceLabel(skin) {
     return { label: "内置", cls: "" };
   }
   return { label: "已导入", cls: "" };
+}
+
+/** Safe attribute selector for skin id (ids are sanitized server-side). */
+function skinCardSelector(id) {
+  const safe = String(id || "").replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+  return `[data-skin-id="${safe}"]`;
+}
+
+/**
+ * @param {any[]} skins
+ * @returns {string[]}
+ */
+function skinsNeedingCloudPreview(skins) {
+  const now = Date.now();
+  return (skins || [])
+    .filter((s) => {
+      if (!s?.id || s.previewUrl) return false;
+      const coolUntil = previewEnsureCooldown.get(String(s.id)) || 0;
+      if (coolUntil > now) return false;
+      return (
+        s.source === "remote" ||
+        s.installState === "remote" ||
+        s.remotePreviewUrl ||
+        s.remotePreview?.url ||
+        s.installState === "updateAvailable"
+      );
+    })
+    .map((s) => String(s.id));
+}
+
+/** Clear loading shimmer on a card when preview is done or failed. */
+function clearPreviewLoading(card) {
+  if (!card) return;
+  const box = card.querySelector(".preview");
+  if (!box) return;
+  box.classList.remove("is-loading-preview");
+  box.querySelector(".preview-loading-hint")?.remove();
+}
+
+/**
+ * Patch DOM + latestStatus when preview data-URLs arrive (avoid full grid rebuild).
+ * @param {Record<string, string>} map
+ */
+function applyCloudPreviewMap(map) {
+  if (!map || typeof map !== "object") return false;
+  let changed = false;
+  const skins = latestStatus?.skins;
+  for (const [id, url] of Object.entries(map)) {
+    if (!id || typeof url !== "string" || !url) continue;
+    previewEnsureCooldown.delete(id);
+    if (Array.isArray(skins)) {
+      const skin = skins.find((s) => s.id === id);
+      if (skin && skin.previewUrl !== url) {
+        skin.previewUrl = url;
+        skin.previewKind = skin.previewKind || "cloud-cache";
+        changed = true;
+      }
+    }
+    const card = grid?.querySelector?.(skinCardSelector(id));
+    if (!card) continue;
+    const box = card.querySelector(".preview");
+    if (!box) continue;
+    clearPreviewLoading(card);
+    let img = box.querySelector("img.preview-img");
+    if (!img) {
+      img = document.createElement("img");
+      img.className = "preview-img";
+      img.draggable = false;
+      img.loading = "lazy";
+      img.alt = card.querySelector("h2")?.textContent || id;
+      box.insertBefore(img, box.firstChild);
+    }
+    if (img.getAttribute("src") !== url) {
+      img.setAttribute("src", url);
+      changed = true;
+    }
+  }
+  if (changed) {
+    // Allow a later full render to pick up previewUrl in signature.
+    lastSkinsSig = "";
+  }
+  return changed;
+}
+
+/**
+ * After list paint: ensure missing catalog previews are fetched/cached in Rust,
+ * then progressively fill card thumbnails (CSP-safe data URLs).
+ * @param {any[]} [skins]
+ */
+function scheduleEnsureCloudPreviews(skins) {
+  if (typeof window.skinAPI?.cloudEnsurePreviews !== "function") return;
+  const pool = skins || latestStatus?.skins || [];
+  const need = skinsNeedingCloudPreview(pool);
+  if (!need.length) return;
+
+  if (previewEnsureInflight) {
+    previewEnsureQueued = true;
+    return;
+  }
+
+  previewEnsureInflight = (async () => {
+    let pending = [];
+    try {
+      const res = await window.skinAPI.cloudEnsurePreviews(need);
+      const map =
+        res?.previews && typeof res.previews === "object" ? res.previews : null;
+      if (map && Object.keys(map).length) {
+        applyCloudPreviewMap(map);
+      }
+      // Failures: cool down so we do not hammer CDN / host allowlist misses.
+      const failed = Array.isArray(res?.failed) ? res.failed : [];
+      const coolMs = 45_000;
+      const until = Date.now() + coolMs;
+      for (const f of failed) {
+        const id = f?.id != null ? String(f.id) : "";
+        if (!id) continue;
+        previewEnsureCooldown.set(id, until);
+        clearPreviewLoading(grid?.querySelector?.(skinCardSelector(id)));
+      }
+      // Network budget leftover → retry later without cooldown.
+      pending = Array.isArray(res?.pending)
+        ? res.pending.map(String).filter(Boolean)
+        : [];
+      // Cards still missing and not failed: drop shimmer if nothing more coming this pass.
+      for (const id of need) {
+        if (map?.[id]) continue;
+        if (pending.includes(id)) continue;
+        if (failed.some((f) => String(f?.id) === id)) continue;
+        // No result and not pending — treat as soft fail (e.g. no catalog entry).
+        if (!map?.[id]) {
+          clearPreviewLoading(grid?.querySelector?.(skinCardSelector(id)));
+        }
+      }
+    } catch (err) {
+      console.warn("cloudEnsurePreviews failed", err);
+      const until = Date.now() + 60_000;
+      for (const id of need) {
+        previewEnsureCooldown.set(id, until);
+        clearPreviewLoading(grid?.querySelector?.(skinCardSelector(id)));
+      }
+    } finally {
+      previewEnsureInflight = null;
+      const queued = previewEnsureQueued;
+      previewEnsureQueued = false;
+      // Drain queue (list changed mid-flight) or continue pending network budget.
+      if (queued) {
+        window.setTimeout(() => scheduleEnsureCloudPreviews(latestStatus?.skins), 200);
+      } else if (pending.length) {
+        window.setTimeout(() => scheduleEnsureCloudPreviews(latestStatus?.skins), 1200);
+      }
+    }
+  })();
 }
 
 function bindCardActions() {
@@ -1640,10 +1814,15 @@ function setMainView(view, opts = {}) {
       /* ignore */
     }
   }
+  // Overview: only re-paint cached env on switch — never re-probe.
+  // Full env_check runs only when user clicks「刷新检测」(manual).
   if (activeView === "overview") {
-    loadEnvironment({ force: prev !== "overview" }).catch((err) => {
-      console.warn("env check failed", err);
-    });
+    try {
+      if (latestEnv) renderOverview(latestEnv);
+      else ensureOverviewScaffold();
+    } catch (err) {
+      console.warn("overview repaint failed", err);
+    }
   }
 }
 
@@ -1653,18 +1832,39 @@ window.showConfirm = showConfirm;
 
 /* ── 环境概览 ─────────────────────────────────────────── */
 
+/** Brand marks shared with providers / sessions tabs (filled paths). */
+function ovLogoSvgChatgpt() {
+  return `<svg viewBox="0 0 180 180" aria-hidden="true" focusable="false"><path fill="currentColor" d="M101.228 164.247C96.2776 164.247 91.5751 163.307 87.1201 161.426C82.6651 159.545 78.7051 156.921 75.2401 153.555C71.4781 154.842 67.5676 155.486 63.5086 155.486C56.8756 155.486 50.7376 153.852 45.0946 150.585C39.4516 147.318 34.8976 142.863 31.4326 137.22C28.0666 131.577 26.3836 125.291 26.3836 118.361C26.3836 115.49 26.7796 112.371 27.5716 109.005C23.6116 105.342 20.5426 101.135 18.3646 96.3828C16.1866 91.5318 15.0976 86.4828 15.0976 81.2358C15.0976 75.8898 16.2361 70.7418 18.5131 65.7918C20.7901 60.8418 23.9581 56.5848 28.0171 53.0208C32.1751 49.3578 36.9766 46.8333 42.4216 45.4473C43.5106 39.8043 45.7876 34.7553 49.2526 30.3003C52.8166 25.7463 57.1726 22.1823 62.3206 19.6083C67.4686 17.0343 72.9631 15.7473 78.8041 15.7473C83.7541 15.7473 88.4566 16.6878 92.9116 18.5688C97.3666 20.4498 101.327 23.0733 104.792 26.4393C108.554 25.1523 112.464 24.5088 116.523 24.5088C123.156 24.5088 129.294 26.1423 134.937 29.4093C140.58 32.6763 145.085 37.1313 148.451 42.7743C151.916 48.4173 153.648 54.7038 153.648 61.6338C153.648 64.5048 153.252 67.6233 152.46 70.9893C156.42 74.6523 159.489 78.9093 161.667 83.7603C163.845 88.5123 164.934 93.5118 164.934 98.7588C164.934 104.105 163.796 109.253 161.519 114.203C159.242 119.153 156.024 123.459 151.866 127.122C147.807 130.686 143.055 133.161 137.61 134.547C136.521 140.19 134.195 145.239 130.631 149.694C127.166 154.248 122.859 157.812 117.711 160.386C112.563 162.96 107.069 164.247 101.228 164.247ZM64.5481 145.685C69.4981 145.685 73.8046 144.645 77.4676 142.566L105.386 126.528C106.376 125.835 106.871 124.895 106.871 123.707V110.936L70.9336 131.577C68.7556 132.864 66.5776 132.864 64.3996 131.577L36.3331 115.391C36.3331 115.688 36.2836 116.034 36.1846 116.43C36.1846 116.826 36.1846 117.42 36.1846 118.212C36.1846 123.261 37.3726 127.914 39.7486 132.171C42.2236 136.329 45.6391 139.596 49.9951 141.972C54.3511 144.447 59.2021 145.685 64.5481 145.685ZM66.0331 121.479C66.6271 121.776 67.1716 121.925 67.6666 121.925C68.1616 121.925 68.6566 121.776 69.1516 121.479L80.2891 115.094L44.5006 94.3038C42.3226 93.0168 41.2336 91.0863 41.2336 88.5123V56.2878C36.2836 58.4658 32.3236 61.8318 29.3536 66.3858C26.3836 70.8408 24.8986 75.7908 24.8986 81.2358C24.8986 86.0868 26.1361 90.7398 28.6111 95.1948C31.0861 99.6498 34.3036 103.016 38.2636 105.293L66.0331 121.479ZM101.228 154.446C106.475 154.446 111.227 153.258 115.484 150.882C119.741 148.506 123.107 145.239 125.582 141.081C128.057 136.923 129.294 132.27 129.294 127.122V95.0463C129.294 93.8583 128.799 92.9673 127.809 92.3733L116.523 85.8393V127.271C116.523 129.845 115.434 131.775 113.256 133.062L85.1896 149.249C90.0406 152.714 95.3866 154.446 101.228 154.446ZM106.871 100.095V79.8993L90.09 70.3953L73.1611 79.8993V100.095L90.09 109.599L106.871 100.095ZM63.5086 52.7238C63.5086 50.1498 64.5976 48.2193 66.7756 46.9323L94.8421 30.7458C89.9911 27.2808 84.6451 25.5483 78.8041 25.5483C73.5571 25.5483 68.8051 26.7363 64.5481 29.1123C60.2911 31.4883 56.9251 34.7553 54.4501 38.9133C52.0741 43.0713 50.8861 47.7243 50.8861 52.8723V84.7998C50.8861 85.9878 51.3811 86.9283 52.3711 87.6213L63.5086 94.1553V52.7238ZM138.947 123.707C143.897 121.529 147.807 118.163 150.678 113.609C153.648 109.055 155.133 104.105 155.133 98.7588C155.133 93.9078 153.896 89.2548 151.421 84.7998C148.946 80.3448 145.728 76.9788 141.768 74.7018L113.999 58.6638C113.405 58.2678 112.86 58.1193 112.365 58.2183C111.87 58.2183 111.375 58.3668 110.88 58.6638L99.7426 64.9008L135.68 85.8393C136.769 86.4333 137.561 87.2253 138.056 88.2153C138.65 89.1063 138.947 90.1953 138.947 91.4823V123.707ZM109.098 48.2688C111.276 46.8828 113.454 46.8828 115.632 48.2688L143.847 64.7523C143.847 64.0593 143.847 63.1683 143.847 62.0793C143.847 57.3273 142.659 52.8228 140.283 48.5658C138.006 44.2098 134.69 40.7448 130.334 38.1708C126.077 35.5968 121.127 34.3098 115.484 34.3098C110.534 34.3098 106.227 35.3493 102.564 37.4283L74.6461 53.4663C73.6561 54.1593 73.1611 55.0998 73.1611 56.2878V69.0588L109.098 48.2688Z"/></svg>`;
+}
+
+function ovLogoSvgGrok() {
+  return `<svg viewBox="0 0 34 33" aria-hidden="true" focusable="false"><path fill="currentColor" d="M13.2371 21.0407L24.3186 12.8506C24.8619 12.4491 25.6384 12.6057 25.8973 13.2294C27.2597 16.5185 26.651 20.4712 23.9403 23.1851C21.2297 25.8989 17.4581 26.4941 14.0108 25.1386L10.2449 26.8843C15.6463 30.5806 22.2053 29.6665 26.304 25.5601C29.5551 22.3051 30.562 17.8683 29.6205 13.8673L29.629 13.8758C28.2637 7.99809 29.9647 5.64871 33.449 0.844576C33.5314 0.730667 33.6139 0.616757 33.6964 0.5L29.1113 5.09055V5.07631L13.2343 21.0436"/><path fill="currentColor" d="M10.9503 23.0313C7.07343 19.3235 7.74185 13.5853 11.0498 10.2763C13.4959 7.82722 17.5036 6.82767 21.0021 8.2971L24.7595 6.55998C24.0826 6.07017 23.215 5.54334 22.2195 5.17313C17.7198 3.31926 12.3326 4.24192 8.67479 7.90126C5.15635 11.4239 4.0499 16.8403 5.94992 21.4622C7.36924 24.9165 5.04257 27.3598 2.69884 29.826C1.86829 30.7002 1.0349 31.5745 0.36364 32.5L10.9474 23.0341"/></svg>`;
+}
+
+/** Codex CLI mark (OpenAI Codex glyph) — brand color is pink, not black. */
+function ovLogoSvgCodex() {
+  return `<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path fill="currentColor" fill-rule="evenodd" clip-rule="evenodd" d="M8.086.457a6.105 6.105 0 013.046-.415c1.333.153 2.521.72 3.564 1.7a.117.117 0 00.107.029c1.408-.346 2.762-.224 4.061.366l.063.03.154.076c1.357.703 2.33 1.77 2.918 3.198.278.679.418 1.388.421 2.126a5.655 5.655 0 01-.18 1.631.167.167 0 00.04.155 5.982 5.982 0 011.578 2.891c.385 1.901-.01 3.615-1.183 5.14l-.182.22a6.063 6.063 0 01-2.934 1.851.162.162 0 00-.108.102c-.255.736-.511 1.364-.987 1.992-1.199 1.582-2.962 2.462-4.948 2.451-1.583-.008-2.986-.587-4.21-1.736a.145.145 0 00-.14-.032c-.518.167-1.04.191-1.604.185a5.924 5.924 0 01-2.595-.622 6.058 6.058 0 01-2.146-1.781c-.203-.269-.404-.522-.551-.821a7.74 7.74 0 01-.495-1.283 6.11 6.11 0 01-.017-3.064.166.166 0 00.008-.074.115.115 0 00-.037-.064 5.958 5.958 0 01-1.38-2.202 5.196 5.196 0 01-.333-1.589 6.915 6.915 0 01.188-2.132c.45-1.484 1.309-2.648 2.577-3.493.282-.188.55-.334.802-.438.286-.12.573-.22.861-.304a.129.129 0 00.087-.087A6.016 6.016 0 015.635 2.31C6.315 1.464 7.132.846 8.086.457zm-.804 7.85a.848.848 0 00-1.473.842l1.694 2.965-1.688 2.848a.849.849 0 001.46.864l1.94-3.272a.849.849 0 00.007-.854l-1.94-3.393zm5.446 6.24a.849.849 0 000 1.695h4.848a.849.849 0 000-1.696h-4.848z"/></svg>`;
+}
+
+/**
+ * @typedef {{ className: string, brand?: boolean, svg?: string, markup?: string }} OvIcon
+ * brand icons: filled path via currentColor; stroke icons: outline glyphs.
+ */
 const OV_TOOL_ICONS = {
   "chatgpt-desktop": {
-    className: "ov-card-ico",
-    svg: `<rect x="3.5" y="4.5" width="17" height="12.5" rx="2"/><path d="M8 20.5h8M12 17v3.5"/>`,
+    className: "ov-card-ico ico-brand-logo ico-logo-chatgpt",
+    brand: true,
+    markup: () => ovLogoSvgChatgpt(),
   },
   "codex-cli": {
-    className: "ov-card-ico ico-cli",
-    svg: `<path d="M5 8.5 9 12l-4 3.5"/><path d="M11.5 16.5h7.5"/><rect x="3.5" y="4.5" width="17" height="15" rx="2"/>`,
+    className: "ov-card-ico ico-brand-logo ico-logo-codex",
+    brand: true,
+    markup: () => ovLogoSvgCodex(),
   },
   "grok-build": {
-    className: "ov-card-ico ico-grok",
-    svg: `<circle cx="12" cy="12" r="8.5"/><path d="M8.5 12.5c1.2 1.8 3 2.8 5 2.8s3.8-1 5-2.8"/><circle cx="9.2" cy="10" r="1"/><circle cx="14.8" cy="10" r="1"/>`,
+    className: "ov-card-ico ico-brand-logo ico-logo-grok",
+    brand: true,
+    markup: () => ovLogoSvgGrok(),
   },
   node: {
     className: "ov-card-ico ico-runtime",
@@ -1694,6 +1894,135 @@ const OV_FALLBACK_INSTALL = {
   },
 };
 
+/** Always-visible tool cards before / while env_check runs. */
+const OV_SCAFFOLD_TOOLS = [
+  {
+    id: "chatgpt-desktop",
+    name: "ChatGPT / Codex 桌面端",
+    kind: "desktop",
+    skinSupported: true,
+    installed: null,
+    note: "支持本工具皮肤注入",
+  },
+  {
+    id: "codex-cli",
+    name: "Codex CLI",
+    kind: "cli",
+    skinSupported: false,
+    installed: null,
+    note: "命令行 Codex 不支持皮肤注入（仅桌面端可换肤）",
+  },
+  {
+    id: "grok-build",
+    name: "Grok Build",
+    kind: "cli",
+    skinSupported: false,
+    installed: null,
+    note: "CLI / 本地 Grok Build 环境",
+  },
+];
+
+const OV_SCAFFOLD_RUNTIMES = [
+  { id: "node", name: "Node.js", installed: null, kind: "runtime" },
+  { id: "npm", name: "npm", installed: null, kind: "runtime" },
+];
+
+function ovScaffoldPayload(extra = {}) {
+  return {
+    ok: false,
+    // Idle until user clicks「刷新检测」— no auto probe on boot.
+    probing: false,
+    tools: OV_SCAFFOLD_TOOLS.map((t) => ({ ...t })),
+    runtimes: OV_SCAFFOLD_RUNTIMES.map((r) => ({ ...r })),
+    summary: { npmInstalled: true, nodeInstalled: true },
+    ...extra,
+  };
+}
+
+/**
+ * @param {string} id
+ * @returns {string}
+ */
+function ovIconHtml(id) {
+  const ico = OV_TOOL_ICONS[id] || OV_TOOL_ICONS["chatgpt-desktop"];
+  if (ico.brand && typeof ico.markup === "function") {
+    return `<span class="${ico.className}" aria-hidden="true">${ico.markup()}</span>`;
+  }
+  return `<span class="${ico.className}" aria-hidden="true"><svg viewBox="0 0 24 24">${ico.svg || ""}</svg></span>`;
+}
+
+/**
+ * Full-environment probing chrome (runtimes strip「刷新检测」).
+ * Does not show a page-level status paragraph — only button + card states.
+ * @param {boolean} on
+ * @param {string} [label]
+ */
+function setOverviewProbing(on, label) {
+  overviewView?.classList.toggle("is-probing", !!on);
+  const btn = document.getElementById("btnEnvRefresh");
+  if (btn) {
+    btn.classList.toggle("is-busy", !!on);
+    if (on) {
+      btn.setAttribute("aria-busy", "true");
+      btn.dataset.label = btn.dataset.label || btn.textContent || "刷新检测";
+      btn.textContent = label || "检测中…";
+      btn.disabled = true;
+    } else if (btn.dataset.label) {
+      btn.textContent = btn.dataset.label;
+      btn.removeAttribute("aria-busy");
+      btn.disabled = false;
+      delete btn.dataset.label;
+    } else {
+      btn.disabled = false;
+    }
+  }
+  // When full refresh is running, mark every card refresh as busy.
+  // Per-card-only probes use setCardProbing instead and leave other cards free.
+  if (on) {
+    overviewGrid?.querySelectorAll(".ov-card-refresh").forEach((el) => {
+      el.classList.add("is-busy");
+      el.setAttribute("aria-busy", "true");
+      el.setAttribute("disabled", "");
+      el.setAttribute("title", "正在检测…");
+      el.setAttribute("aria-label", "正在检测…");
+    });
+  }
+}
+
+/**
+ * Card-level probing chrome for a single tool id.
+ * @param {string} toolId
+ * @param {boolean} on
+ */
+function setCardProbing(toolId, on) {
+  const id = String(toolId || "").trim();
+  if (!id) return;
+  if (on) probingToolIds.add(id);
+  else probingToolIds.delete(id);
+
+  // Prefer live DOM tweak before next full renderOverview; ids are allow-listed.
+  const card = overviewGrid?.querySelector(`.ov-card[data-tool-id="${id}"]`);
+  if (!card) return;
+  const btn = card.querySelector(".ov-card-refresh");
+  if (on) {
+    card.classList.add("is-probing");
+    card.classList.remove("is-idle");
+    if (btn) {
+      btn.classList.add("is-busy");
+      btn.setAttribute("aria-busy", "true");
+      btn.setAttribute("disabled", "");
+      btn.setAttribute("title", "正在检测…");
+      btn.setAttribute("aria-label", "正在检测…");
+    }
+  } else if (btn && !envCheckInflight) {
+    btn.classList.remove("is-busy");
+    btn.removeAttribute("aria-busy");
+    btn.removeAttribute("disabled");
+    btn.setAttribute("title", "仅刷新检测此项");
+    btn.setAttribute("aria-label", "仅刷新检测此项");
+  }
+}
+
 function kindLabel(kind) {
   if (kind === "desktop") return "桌面应用";
   if (kind === "cli") return "命令行工具";
@@ -1721,7 +2050,20 @@ function sourceLabel(source) {
 }
 
 /**
+ * Paint scaffold immediately so overview never waits on env_check.
+ * Safe to call multiple times; keeps latestEnv when already known.
+ */
+function ensureOverviewScaffold() {
+  if (latestEnv) {
+    renderOverview(latestEnv);
+    return;
+  }
+  renderOverview(ovScaffoldPayload());
+}
+
+/**
  * @param {{ force?: boolean }} [opts]
+ * Non-blocking: shows scaffold / stale data first, then fills in asynchronously.
  */
 async function loadEnvironment(opts = {}) {
   const force = opts.force === true;
@@ -1730,9 +2072,17 @@ async function loadEnvironment(opts = {}) {
     renderOverview(latestEnv);
     return latestEnv;
   }
-  if (overviewGrid && !latestEnv) {
-    overviewGrid.innerHTML = `<div class="overview-loading muted">正在检测本地环境…</div>`;
+
+  // Always keep cards visible — never replace the grid with a full-page spinner.
+  if (!latestEnv) {
+    // Manual trigger: flip idle scaffold into probing UI while env_check runs.
+    renderOverview(ovScaffoldPayload({ probing: true }));
+  } else {
+    // Stale-while-revalidate: keep last result while re-probing.
+    renderOverview({ ...latestEnv, probing: true });
   }
+  setOverviewProbing(true, force && latestEnv ? "刷新中…" : "检测中…");
+
   envCheckInflight = (async () => {
     try {
       if (typeof window.skinAPI?.envCheck !== "function") {
@@ -1740,32 +2090,146 @@ async function loadEnvironment(opts = {}) {
       }
       const data = await window.skinAPI.envCheck({ force });
       latestEnv = data;
+      probingToolIds.clear();
       renderOverview(data);
       return data;
     } catch (err) {
       const msg = err?.message || String(err);
-      if (overviewGrid) {
-        overviewGrid.innerHTML = `<div class="overview-loading" style="color:#b45309">环境检测失败：${escapeHtml(msg)}</div>`;
-      }
-      const runtimesEl = document.getElementById("overviewRuntimes");
-      if (runtimesEl) {
-        runtimesEl.hidden = true;
-        runtimesEl.innerHTML = "";
+      // Keep scaffold / last good data — surface error via toast (no status bar).
+      if (!latestEnv) {
+        renderOverview(
+          ovScaffoldPayload({
+            probeError: msg,
+            note: `环境检测失败：${msg}`,
+          })
+        );
       }
       throw err;
     } finally {
       envCheckInflight = null;
+      setOverviewProbing(false);
     }
   })();
   return envCheckInflight;
 }
 
 /**
+ * Merge a single-tool probe result into latestEnv (or scaffold).
+ * @param {string} toolId
+ * @param {any} toolPayload tool object from env_check_tool
+ * @param {"tool"|"runtime"} [kind]
+ */
+function mergeEnvToolResult(toolId, toolPayload, kind = "tool") {
+  const base = latestEnv
+    ? { ...latestEnv, tools: [...(latestEnv.tools || [])], runtimes: [...(latestEnv.runtimes || [])] }
+    : ovScaffoldPayload();
+  const listKey = kind === "runtime" ? "runtimes" : "tools";
+  const list = Array.isArray(base[listKey]) ? [...base[listKey]] : [];
+  const idx = list.findIndex((t) => t?.id === toolId);
+  if (idx >= 0) list[idx] = { ...list[idx], ...toolPayload };
+  else list.push(toolPayload);
+  base[listKey] = list;
+  base.ok = true;
+  base.probing = false;
+  delete base.probeError;
+  // Light summary sync for npm gate on install CTAs.
+  if (kind === "runtime" || listKey === "runtimes") {
+    const npmRt = list.find((r) => r.id === "npm");
+    const nodeRt = list.find((r) => r.id === "node");
+    base.summary = {
+      ...(base.summary || {}),
+      npmInstalled: npmRt?.installed === true,
+      nodeInstalled: nodeRt?.installed === true,
+      runtimeReady: npmRt?.installed === true && nodeRt?.installed === true,
+    };
+  } else {
+    const tools = base.tools || [];
+    base.summary = {
+      ...(base.summary || {}),
+      installedCount: tools.filter((t) => t?.installed === true).length,
+      toolCount: tools.length,
+      skinCapable: tools.some((t) => t?.installed === true && t?.skinSupported === true),
+    };
+  }
+  latestEnv = base;
+  return base;
+}
+
+/**
+ * Probe one Overview tool card (does not re-scan all environments).
+ * @param {string} toolId
+ */
+async function loadEnvironmentTool(toolId) {
+  const id = String(toolId || "").trim();
+  if (!id) return null;
+  if (envToolInflight.has(id)) return envToolInflight.get(id);
+  // Full refresh already covers this card — wait for it instead of double work.
+  if (envCheckInflight) return envCheckInflight;
+
+  setCardProbing(id, true);
+  // Re-paint so this card shows probing meta without touching others.
+  if (latestEnv) {
+    renderOverview({ ...latestEnv, probing: false });
+  } else {
+    renderOverview(ovScaffoldPayload({ probing: false }));
+  }
+
+  const job = (async () => {
+    try {
+      if (typeof window.skinAPI?.envCheckTool !== "function") {
+        throw new Error("envCheckTool API 不可用");
+      }
+      const data = await window.skinAPI.envCheckTool(id);
+      const tool = data?.tool;
+      if (!tool || typeof tool !== "object") {
+        throw new Error("单环境检测返回无效");
+      }
+      const kind = data?.kind === "runtime" ? "runtime" : "tool";
+      const merged = mergeEnvToolResult(id, tool, kind);
+      // Drop probing flag before final paint so the card settles immediately.
+      probingToolIds.delete(id);
+      renderOverview(merged);
+      return merged;
+    } catch (err) {
+      probingToolIds.delete(id);
+      // Keep last paint; caller toasts.
+      if (latestEnv) renderOverview(latestEnv);
+      else renderOverview(ovScaffoldPayload());
+      throw err;
+    } finally {
+      envToolInflight.delete(id);
+      probingToolIds.delete(id);
+    }
+  })();
+
+  envToolInflight.set(id, job);
+  return job;
+}
+
+/** Circular-arrow glyph for per-card env refresh (top-right of ov-card). */
+const OV_REFRESH_SVG =
+  `<svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true" focusable="false"><path fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" d="M20.5 12a8.5 8.5 0 1 1-2.48-6.02"/><path fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" d="M20.5 3.5V9h-5.5"/></svg>`;
+
+/**
+ * Top-right refresh control on each tool card (single-tool probe).
+ * @param {{ probing?: boolean, known?: boolean, toolId?: string }} [opts]
+ */
+function buildCardRefreshHtml(opts = {}) {
+  const probing = opts.probing === true;
+  const toolId = opts.toolId ? escapeHtml(String(opts.toolId)) : "";
+  const busy = probing ? " is-busy" : "";
+  const title = probing ? "正在检测…" : "仅刷新检测此项";
+  const dataAttr = toolId ? ` data-tool-id="${toolId}"` : "";
+  return `<button type="button" class="icon-btn ov-card-refresh${busy}" title="${title}" aria-label="${title}"${dataAttr} ${probing ? 'aria-busy="true" disabled' : ""}>${OV_REFRESH_SVG}</button>`;
+}
+
+/**
  * @param {any} tool
- * @param {{ npmInstalled?: boolean }} [ctx]
+ * @param {{ npmInstalled?: boolean, probing?: boolean }} [ctx]
  */
 function buildInstallActionHtml(tool, ctx = {}) {
-  if (tool?.installed) return "";
+  // Only after a successful probe that confirms missing — never on idle / probing.
+  if (tool?.installed !== false) return "";
   const install = tool?.install && typeof tool.install === "object"
     ? tool.install
     : OV_FALLBACK_INSTALL[tool?.id] || null;
@@ -1819,42 +2283,67 @@ function buildInstallActionHtml(tool, ctx = {}) {
 /**
  * @param {any} data
  */
+/** Static copy under「运行环境」— Node is optional for this app itself. */
+const OV_RUNTIMES_SUB_IDLE =
+  "CLI 安装依赖 Node.js 与 npm 本工具可不依赖 node 运行";
+const OV_RUNTIMES_SUB_PROBING = "正在后台检测 Node.js / npm…";
+
 function renderOverviewRuntimes(data) {
   const el = document.getElementById("overviewRuntimes");
   if (!el) return;
-  const runtimes = Array.isArray(data?.runtimes) ? data.runtimes : [];
-  if (!runtimes.length) {
-    el.hidden = true;
-    el.innerHTML = "";
-    return;
-  }
+  const runtimes = Array.isArray(data?.runtimes) ? data.runtimes : OV_SCAFFOLD_RUNTIMES;
+  // Always visible — never hide the runtime strip while waiting on probe.
   el.hidden = false;
-  el.innerHTML = `
-    <div class="overview-runtimes-head">
-      <span class="overview-runtimes-title">运行环境</span>
-      <span class="overview-runtimes-sub muted">CLI 安装依赖 Node.js 与 npm</span>
-    </div>
-    <div class="overview-runtimes-list">
-      ${runtimes
-        .map((rt) => {
-          const id = rt.id || "";
-          const ico = OV_TOOL_ICONS[id] || OV_TOOL_ICONS.node;
-          const installed = Boolean(rt.installed);
-          const version = rt.version ? escapeHtml(String(rt.version)) : "—";
-          const path = rt.path ? escapeHtml(String(rt.path)) : "";
-          return `
-            <div class="ov-runtime-chip ${installed ? "is-ok" : "is-miss"}" data-runtime-id="${escapeHtml(id)}" title="${path || version}">
-              <span class="${ico.className}" aria-hidden="true">
-                <svg viewBox="0 0 24 24">${ico.svg}</svg>
-              </span>
+  const probing = data?.probing === true;
+
+  // Only refresh list + subtitle. Keep head button / 窗口与托盘 block intact
+  // so #btnEnvRefresh and #chkMinimizeToTray stay bound.
+  const subEl = document.getElementById("overviewRuntimesSub");
+  if (subEl) {
+    subEl.textContent = probing ? OV_RUNTIMES_SUB_PROBING : OV_RUNTIMES_SUB_IDLE;
+  }
+
+  let listEl = document.getElementById("overviewRuntimesList");
+  if (!listEl) {
+    listEl = document.createElement("div");
+    listEl.className = "overview-runtimes-list";
+    listEl.id = "overviewRuntimesList";
+    const head = el.querySelector(".overview-runtimes-head");
+    if (head?.nextSibling) el.insertBefore(listEl, head.nextSibling);
+    else el.appendChild(listEl);
+  }
+
+  listEl.innerHTML = runtimes
+    .map((rt) => {
+      const id = rt.id || "";
+      const known = rt.installed === true || rt.installed === false;
+      const installed = rt.installed === true;
+      const version = rt.version ? escapeHtml(String(rt.version)) : "—";
+      const path = rt.path ? escapeHtml(String(rt.path)) : "";
+      const chipState = !known
+        ? probing
+          ? "is-probing"
+          : "is-idle"
+        : installed
+          ? "is-ok"
+          : "is-miss";
+      const statusText = !known
+        ? probing
+          ? "检测中…"
+          : "未检测"
+        : installed
+          ? `已安装 · ${version}`
+          : "未检测到";
+      return `
+            <div class="ov-runtime-chip ${chipState}" data-runtime-id="${escapeHtml(id)}" title="${path || version}">
+              ${ovIconHtml(id)}
               <div class="ov-runtime-meta">
                 <strong>${escapeHtml(rt.name || id)}</strong>
-                <span>${installed ? `已安装 · ${version}` : "未检测到"}</span>
+                <span>${statusText}</span>
               </div>
             </div>`;
-        })
-        .join("")}
-    </div>`;
+    })
+    .join("");
 }
 
 /**
@@ -1866,52 +2355,80 @@ function renderOverview(data) {
   renderOverviewRuntimes(data);
 
   const summary = data.summary || {};
-  const npmInstalled = summary.npmInstalled !== false;
-  // Prefer explicit runtime probe when present
+  const globalProbing = data.probing === true;
   const npmRt = Array.isArray(data.runtimes)
     ? data.runtimes.find((r) => r.id === "npm")
     : null;
-  const npmOk = npmRt ? Boolean(npmRt.installed) : npmInstalled;
+  let npmOk;
+  if (globalProbing && (!npmRt || npmRt.installed == null)) {
+    npmOk = undefined; // unknown — install buttons stay enabled
+  } else if (npmRt && (npmRt.installed === true || npmRt.installed === false)) {
+    npmOk = Boolean(npmRt.installed);
+  } else {
+    npmOk = summary.npmInstalled !== false;
+  }
 
   if (!overviewGrid) return;
-  const tools = Array.isArray(data.tools) ? data.tools : [];
-  if (!tools.length) {
-    overviewGrid.innerHTML = `<div class="overview-loading muted">未返回组件信息</div>`;
-    return;
-  }
+  const tools = Array.isArray(data.tools) && data.tools.length
+    ? data.tools
+    : OV_SCAFFOLD_TOOLS;
 
   overviewGrid.innerHTML = tools
     .map((tool) => {
       const id = tool.id || "";
-      const ico = OV_TOOL_ICONS[id] || OV_TOOL_ICONS["chatgpt-desktop"];
-      const installed = Boolean(tool.installed);
+      const probing = globalProbing || probingToolIds.has(id);
+      const known = tool.installed === true || tool.installed === false;
+      const installed = tool.installed === true;
       const skinOk = Boolean(tool.skinSupported);
+      const statusBadge = !known
+        ? probing
+          ? `<span class="ov-badge is-probing">检测中</span>`
+          : `<span class="ov-badge is-idle">未检测</span>`
+        : probing
+          ? `<span class="ov-badge is-probing">刷新中</span>`
+          : `<span class="ov-badge ${installed ? "is-ok" : "is-miss"}">${installed ? "已安装" : "未安装"}</span>`;
       const badges = [
-        `<span class="ov-badge ${installed ? "is-ok" : "is-miss"}">${installed ? "已安装" : "未安装"}</span>`,
+        statusBadge,
         skinOk
           ? `<span class="ov-badge is-skin">支持皮肤</span>`
           : `<span class="ov-badge is-noskin">不支持皮肤</span>`,
       ].join("");
-      const version = tool.version ? escapeHtml(String(tool.version)) : "—";
-      const path = tool.path ? escapeHtml(String(tool.path)) : "—";
-      const source = tool.source ? escapeHtml(sourceLabel(tool.source)) : "—";
-      const note = tool.note ? `<p class="ov-card-note">${escapeHtml(String(tool.note))}</p>` : "";
-      const err = tool.error
-        ? `<p class="ov-card-err">诊断：${escapeHtml(String(tool.error))}</p>`
-        : "";
-      const actions = buildInstallActionHtml(tool, { npmInstalled: npmOk });
-      return `
-        <article class="ov-card" role="listitem" data-tool-id="${escapeHtml(id)}">
-          <div class="ov-card-head">
-            <span class="${ico.className}" aria-hidden="true">
-              <svg viewBox="0 0 24 24">${ico.svg}</svg>
-            </span>
-            <div class="ov-card-titles">
-              <h2>${escapeHtml(tool.name || id)}</h2>
-              <div class="ov-card-kind">${escapeHtml(kindLabel(tool.kind))}</div>
-              <div class="ov-badges">${badges}</div>
-            </div>
-          </div>
+      // Idle (not yet refreshed): keep card minimal — no meta / note / install.
+      // After probe: show details; install CTA only when confirmed missing.
+      let bodyHtml = "";
+      if (!known && !probing) {
+        bodyHtml = `<p class="ov-card-idle-hint muted">点击右上角刷新，仅检测本项是否已安装</p>`;
+      } else if (probing && !known) {
+        bodyHtml = `
+          <dl class="ov-meta-list">
+            <div class="ov-meta-row"><dt>版本</dt><dd>检测中…</dd></div>
+            <div class="ov-meta-row"><dt>路径</dt><dd>检测中…</dd></div>
+            <div class="ov-meta-row"><dt>来源</dt><dd>—</dd></div>
+          </dl>`;
+      } else if (probing && known) {
+        // Stale-while-revalidate: keep last known details while this card re-probes.
+        const version = tool.version ? escapeHtml(String(tool.version)) : "—";
+        const path = tool.path ? escapeHtml(String(tool.path)) : "—";
+        const source = tool.source ? escapeHtml(sourceLabel(tool.source)) : "—";
+        bodyHtml = `
+          <dl class="ov-meta-list">
+            <div class="ov-meta-row"><dt>版本</dt><dd>${version}</dd></div>
+            <div class="ov-meta-row"><dt>路径</dt><dd title="${path}">${path}</dd></div>
+            <div class="ov-meta-row"><dt>来源</dt><dd>${source}</dd></div>
+          </dl>
+          <p class="ov-card-idle-hint muted">正在刷新本项…</p>`;
+      } else {
+        const version = tool.version ? escapeHtml(String(tool.version)) : "—";
+        const path = tool.path ? escapeHtml(String(tool.path)) : "—";
+        const source = tool.source ? escapeHtml(sourceLabel(tool.source)) : "—";
+        const note = tool.note
+          ? `<p class="ov-card-note">${escapeHtml(String(tool.note))}</p>`
+          : "";
+        const err = tool.error
+          ? `<p class="ov-card-err">诊断：${escapeHtml(String(tool.error))}</p>`
+          : "";
+        const actions = buildInstallActionHtml(tool, { npmInstalled: npmOk });
+        bodyHtml = `
           <dl class="ov-meta-list">
             <div class="ov-meta-row"><dt>版本</dt><dd>${version}</dd></div>
             <div class="ov-meta-row"><dt>路径</dt><dd title="${path}">${path}</dd></div>
@@ -1919,7 +2436,25 @@ function renderOverview(data) {
           </dl>
           ${note}
           ${err}
-          ${actions}
+          ${actions}`;
+      }
+      const cardCls = probing
+        ? "ov-card is-probing"
+        : !known
+          ? "ov-card is-idle"
+          : "ov-card";
+      return `
+        <article class="${cardCls}" role="listitem" data-tool-id="${escapeHtml(id)}">
+          ${buildCardRefreshHtml({ probing, known, toolId: id })}
+          <div class="ov-card-head">
+            ${ovIconHtml(id)}
+            <div class="ov-card-titles">
+              <h2>${escapeHtml(tool.name || id)}</h2>
+              <div class="ov-card-kind">${escapeHtml(kindLabel(tool.kind))}</div>
+              <div class="ov-badges">${badges}</div>
+            </div>
+          </div>
+          ${bodyHtml}
         </article>`;
     })
     .join("");
@@ -1965,23 +2500,76 @@ async function onOverviewInstallClick(ev) {
   }
 }
 
+/**
+ * Full env refresh from the runtimes strip「刷新检测」button.
+ * @param {HTMLElement | null} [triggerBtn]
+ */
+function triggerOverviewRefresh(triggerBtn) {
+  const headBtn = document.getElementById("btnEnvRefresh");
+  if (triggerBtn) triggerBtn.disabled = true;
+  if (headBtn) headBtn.disabled = true;
+  loadEnvironment({ force: true })
+    .then(() => {
+      showToast("环境信息已刷新");
+    })
+    .catch((err) => {
+      showToast(err?.message || "刷新失败", "error");
+    })
+    .finally(() => {
+      if (headBtn && !envCheckInflight) headBtn.disabled = false;
+      // Card refresh buttons are re-rendered by renderOverview; no need to re-enable.
+    });
+}
+
+/**
+ * Per-card single-tool refresh (does not call full env_check).
+ * @param {string} toolId
+ * @param {HTMLElement | null} [triggerBtn]
+ */
+function triggerOverviewToolRefresh(toolId, triggerBtn) {
+  const id = String(toolId || "").trim();
+  if (!id) return;
+  if (triggerBtn) triggerBtn.disabled = true;
+  const names = {
+    "chatgpt-desktop": "ChatGPT / Codex 桌面端",
+    "codex-cli": "Codex CLI",
+    "grok-build": "Grok Build",
+  };
+  const label = names[id] || id;
+  loadEnvironmentTool(id)
+    .then(() => {
+      showToast(`${label} 已刷新`);
+    })
+    .catch((err) => {
+      showToast(err?.message || `${label} 刷新失败`, "error");
+    });
+}
+
 overviewGrid?.addEventListener("click", (ev) => {
+  const refreshBtn = ev.target?.closest?.(".ov-card-refresh");
+  if (refreshBtn) {
+    if (refreshBtn.disabled || refreshBtn.classList.contains("is-busy")) return;
+    const card = refreshBtn.closest?.("[data-tool-id]");
+    const toolId =
+      refreshBtn.getAttribute("data-tool-id") ||
+      card?.getAttribute("data-tool-id") ||
+      "";
+    if (toolId) {
+      triggerOverviewToolRefresh(toolId, refreshBtn);
+    } else {
+      // Fallback: full refresh only if card id is missing.
+      triggerOverviewRefresh(refreshBtn);
+    }
+    return;
+  }
   onOverviewInstallClick(ev).catch((err) => {
     console.warn("install action failed", err);
   });
 });
 
-document.getElementById("btnEnvRefresh")?.addEventListener("click", async () => {
-  const btn = document.getElementById("btnEnvRefresh");
-  if (btn) btn.disabled = true;
-  try {
-    await loadEnvironment({ force: true });
-    showToast("环境信息已刷新");
-  } catch (err) {
-    showToast(err?.message || "刷新失败", "error");
-  } finally {
-    if (btn) btn.disabled = false;
-  }
+document.getElementById("btnEnvRefresh")?.addEventListener("click", () => {
+  // Full scan: Node/npm + all tool cards. Card icons use env_check_tool instead.
+  triggerOverviewRefresh(document.getElementById("btnEnvRefresh"));
 });
 
 function syncAboutVersionUi() {
@@ -1992,6 +2580,99 @@ function syncAboutVersionUi() {
   if (badge) badge.textContent = ver;
   if (text) text.textContent = ver;
   if (dateEl) dateEl.textContent = APP_RELEASE_DATE;
+}
+
+/** @type {boolean} */
+let minimizeToTrayOnClose = true;
+
+async function getInvokeFn() {
+  const core = window.__TAURI__?.core;
+  if (core?.invoke) return core.invoke.bind(core);
+  throw new Error("Tauri API 不可用");
+}
+
+async function loadTrayUiSettings() {
+  try {
+    const inv = await getInvokeFn();
+    const s = await inv("get_app_ui_settings");
+    minimizeToTrayOnClose = s?.minimizeToTrayOnClose !== false;
+  } catch {
+    minimizeToTrayOnClose = true;
+  }
+  const chk = document.getElementById("chkMinimizeToTray");
+  if (chk) chk.checked = minimizeToTrayOnClose;
+  syncCloseButtonTitle();
+}
+
+function syncCloseButtonTitle() {
+  const btn = document.getElementById("btnWinClose");
+  if (!btn) return;
+  btn.title = minimizeToTrayOnClose
+    ? "关闭到系统托盘（本地路由保持运行）"
+    : "退出应用";
+  btn.setAttribute(
+    "aria-label",
+    minimizeToTrayOnClose ? "关闭到系统托盘" : "退出应用"
+  );
+}
+
+function bindTraySettingsUi() {
+  const chk = document.getElementById("chkMinimizeToTray");
+  if (!chk || chk.dataset.bound === "1") return;
+  chk.dataset.bound = "1";
+  chk.addEventListener("change", async () => {
+    const enabled = !!chk.checked;
+    chk.disabled = true;
+    try {
+      const inv = await getInvokeFn();
+      const s = await inv("set_minimize_to_tray_on_close_cmd", { enabled });
+      minimizeToTrayOnClose = s?.minimizeToTrayOnClose !== false;
+      chk.checked = minimizeToTrayOnClose;
+      syncCloseButtonTitle();
+      showToast(
+        minimizeToTrayOnClose
+          ? "已开启：关闭窗口将最小化到托盘"
+          : "已关闭：关闭窗口将退出应用",
+        "ok"
+      );
+    } catch (err) {
+      chk.checked = minimizeToTrayOnClose;
+      showToast(err?.message || String(err), "error");
+    } finally {
+      chk.disabled = false;
+    }
+  });
+}
+
+/** Listen for tray / backend provider switches while the window is open or hidden. */
+function bindProviderTrayEvents() {
+  const eventApi = window.__TAURI__?.event;
+  if (!eventApi?.listen || bindProviderTrayEvents._done) return;
+  bindProviderTrayEvents._done = true;
+
+  eventApi
+    .listen("provider-switched", (ev) => {
+      const p = ev?.payload || {};
+      const msg = p.message || (p.providerId ? `已切换供应商：${p.providerId}` : "供应商已切换");
+      // Only toast when the main window is likely visible enough for feedback;
+      // providers view reloads on next enter either way.
+      showToast(msg, "ok");
+      try {
+        if (activeView === "providers" && window.providersView?.reload) {
+          window.providersView.reload();
+        }
+      } catch {
+        /* ignore */
+      }
+    })
+    .catch(() => {});
+
+  eventApi
+    .listen("provider-switch-failed", (ev) => {
+      const err = ev?.payload?.error || "托盘切换供应商失败";
+      showToast(String(err), "error");
+    })
+    .catch(() => {});
 }
 
 /**
@@ -2025,11 +2706,13 @@ searchInput?.addEventListener("input", () => {
   if (latestStatus) render(latestStatus);
 });
 
-/* 关于页：检查更新（云端 catalog / version） */
+/* 关于页：检查更新（tauri-plugin-updater → latest.json，多 endpoint fallback） */
 const btnCheckUpdate = document.getElementById("btnCheckUpdate");
 const aboutUpdateStatus = document.getElementById("aboutUpdateStatus");
-/** @type {any|null} last result that truly has an update (for reopening dialog) */
+/** @type {any|null} last updater metadata that has a real update (for reopening dialog) */
 let lastUpdateResult = null;
+/** @type {boolean} prevent double install */
+let updateInstallInFlight = false;
 
 /** Loose semver compare: a < b → -1, a==b → 0, a > b → 1 */
 function compareAppVersions(a, b) {
@@ -2052,34 +2735,36 @@ function compareAppVersions(a, b) {
 }
 
 /**
- * Whether the check result means the user should update.
- * Trusts server flags, but rejects "updateAvailable" when latest ≤ current.
- * Cloud admin `message` alone must never imply an update.
+ * Normalize tauri-plugin-updater check() payload into a stable UI shape.
+ * `null` / empty → no update.
  */
+function normalizeUpdaterResult(raw) {
+  if (!raw || typeof raw !== "object") return null;
+  const latest = String(raw.version || raw.latest || "").replace(/^v/i, "");
+  const current = String(raw.currentVersion || raw.current || APP_VERSION).replace(
+    /^v/i,
+    ""
+  );
+  if (!latest) return null;
+  if (compareAppVersions(current, latest) >= 0) return null;
+  return {
+    rid: raw.rid,
+    current,
+    latest,
+    notes: String(raw.body || raw.notes || raw.releaseNotes || "").trim(),
+    date: raw.date || null,
+    updateAvailable: true,
+    raw,
+  };
+}
+
 function hasActualUpdate(result) {
   if (!result || typeof result !== "object") return false;
+  if (result.rid == null && !result.latest) return false;
   const current = String(result.current || APP_VERSION).replace(/^v/i, "");
-  const latest = result.latest != null && result.latest !== ""
-    ? String(result.latest).replace(/^v/i, "")
-    : "";
-
-  // Force update by minAppVersion (server)
-  if (result.updateRequired === true) {
-    if (result.minAppVersion) {
-      return compareAppVersions(current, result.minAppVersion) < 0;
-    }
-    return true;
-  }
-
-  // Optional update: latest must be strictly newer
-  if (latest) {
-    if (compareAppVersions(current, latest) < 0) return true;
-    return false;
-  }
-
-  // No latest to compare — only honor explicit true if not contradicted
-  if (result.updateAvailable === true) return false;
-  return false;
+  const latest = String(result.latest || "").replace(/^v/i, "");
+  if (!latest) return false;
+  return compareAppVersions(current, latest) < 0;
 }
 
 function clearUpdateStatusInteractive() {
@@ -2091,12 +2776,10 @@ function clearUpdateStatusInteractive() {
 }
 
 /**
- * 发现新版本弹窗：仅在 hasActualUpdate 时调用
- * @param {object} result cloudCheckUpdate 结果
- * @returns {Promise<"open"|"later">}
+ * 发现新版本弹窗（官方 updater）
+ * @returns {Promise<"install"|"later">}
  */
 function showUpdateDialog(result = {}) {
-  // Hard guard: never open update UI when there is no real update
   if (!hasActualUpdate(result)) {
     return Promise.resolve("later");
   }
@@ -2112,39 +2795,25 @@ function showUpdateDialog(result = {}) {
 
   const latest = result?.latest ? String(result.latest) : "";
   const current = result?.current ? String(result.current) : APP_VERSION;
-  const required = Boolean(result?.updateRequired) && hasActualUpdate(result);
-  // Prompt only for update path (backend already scopes message; re-assert here)
-  const msg =
-    (result?.message && String(result.message).trim()) ||
-    (latest ? `发现新版本 ${latest}` : "发现新版本");
-  const notes = String(result?.releaseNotes || result?.notes || "").trim();
-  const downloadUrl = String(result?.downloadUrl || "").trim();
+  const msg = latest ? `发现新版本 ${latest}，可在应用内直接安装。` : "发现新版本";
+  const notes = String(result?.notes || result?.releaseNotes || "").trim();
+  const canInstall = result?.rid != null;
 
   if (!modal || !btnLater) {
-    const body = notes ? `${msg}\n\n更新说明：\n${notes}` : msg;
-    if (downloadUrl) {
-      return showConfirm({
-        title: required ? "需要更新" : "发现新版本",
-        message: `${body}\n\n是否打开下载页？`,
-        confirmText: "打开下载页",
-        cancelText: "稍后",
-        variant: required ? "warn" : "primary",
-      }).then((ok) => (ok ? "open" : "later"));
-    }
     return showConfirm({
-      title: required ? "需要更新" : "发现新版本",
-      message: body,
-      confirmText: "知道了",
-      cancelText: "关闭",
-      variant: required ? "warn" : "primary",
-    }).then(() => "later");
+      title: "发现新版本",
+      message: notes ? `${msg}\n\n更新说明：\n${notes}` : msg,
+      confirmText: canInstall ? "立即更新" : "知道了",
+      cancelText: "稍后",
+      variant: "primary",
+    }).then((ok) => (ok && canInstall ? "install" : "later"));
   }
 
   if (typeof showUpdateDialog._dismiss === "function") {
     showUpdateDialog._dismiss("later");
   }
 
-  if (titleEl) titleEl.textContent = required ? "需要更新" : "发现新版本";
+  if (titleEl) titleEl.textContent = "发现新版本";
   if (versionsEl) {
     versionsEl.textContent = latest
       ? `当前 v${current.replace(/^v/i, "")}  →  最新 v${latest.replace(/^v/i, "")}`
@@ -2163,14 +2832,12 @@ function showUpdateDialog(result = {}) {
   }
 
   if (btnOpen) {
-    if (downloadUrl) {
-      btnOpen.hidden = false;
-      btnOpen.textContent = "打开下载页";
-    } else {
-      btnOpen.hidden = true;
-    }
+    btnOpen.hidden = !canInstall;
+    btnOpen.textContent = "立即更新";
+    btnOpen.disabled = false;
   }
-  btnLater.textContent = downloadUrl ? "稍后" : "知道了";
+  btnLater.textContent = "稍后";
+  btnLater.disabled = false;
 
   return new Promise((resolve) => {
     let settled = false;
@@ -2184,10 +2851,10 @@ function showUpdateDialog(result = {}) {
       modal.removeEventListener("click", onBackdrop);
       document.removeEventListener("keydown", onKey, true);
       if (showUpdateDialog._dismiss === dismiss) showUpdateDialog._dismiss = null;
-      resolve(action === "open" ? "open" : "later");
+      resolve(action === "install" ? "install" : "later");
     };
     const onLater = () => dismiss("later");
-    const onOpen = () => dismiss("open");
+    const onOpen = () => dismiss("install");
     const onBackdrop = (e) => {
       if (e.target === modal) dismiss("later");
     };
@@ -2207,14 +2874,80 @@ function showUpdateDialog(result = {}) {
 
     modal.hidden = false;
     modal.classList.add("show");
-    (downloadUrl && btnOpen ? btnOpen : btnLater).focus?.();
+    (canInstall && btnOpen ? btnOpen : btnLater).focus?.();
   });
 }
 
 /**
- * 展示更新结果：状态行固定文案（有更新 / 已是最新），不展示云端 message。
- * 弹窗内仍可用云端提示与更新说明。
- * @param {object} result
+ * Download + install via tauri-plugin-updater, then relaunch.
+ */
+async function performAppUpdateInstall(result) {
+  if (!result || result.rid == null) {
+    throw new Error("没有可安装的更新包");
+  }
+  if (updateInstallInFlight) return;
+  updateInstallInFlight = true;
+  const btnOpen = document.getElementById("btnUpdateOpen");
+  const btnLater = document.getElementById("btnUpdateLater");
+  try {
+    if (aboutUpdateStatus) {
+      aboutUpdateStatus.className = "about-update-status is-checking";
+      aboutUpdateStatus.textContent = "正在下载更新…";
+      clearUpdateStatusInteractive();
+    }
+    if (btnOpen) {
+      btnOpen.disabled = true;
+      btnOpen.textContent = "下载中…";
+    }
+    if (btnLater) btnLater.disabled = true;
+    showToast("开始下载更新…", "ok");
+
+    await window.skinAPI.installAppUpdate(result.rid, (ev) => {
+      // Progress events: Started | Progress { chunkLength, contentLength } | Finished
+      try {
+        const event = ev?.event || ev;
+        if (event === "Started" || event?.Started != null) {
+          if (aboutUpdateStatus) aboutUpdateStatus.textContent = "开始下载…";
+          return;
+        }
+        const prog = event?.Progress || (event === "Progress" ? ev?.data : null);
+        if (prog && aboutUpdateStatus) {
+          const total = Number(prog.contentLength || 0);
+          const chunk = Number(prog.chunkLength || 0);
+          if (total > 0 && chunk >= 0) {
+            // chunkLength is per-chunk; keep generic text if we lack cumulative
+            aboutUpdateStatus.textContent = "正在下载更新…";
+          } else {
+            aboutUpdateStatus.textContent = "正在下载更新…";
+          }
+        }
+        if (event === "Finished" || event?.Finished != null) {
+          if (aboutUpdateStatus) aboutUpdateStatus.textContent = "正在安装…";
+          if (btnOpen) btnOpen.textContent = "安装中…";
+        }
+      } catch {
+        /* ignore progress parse errors */
+      }
+    });
+
+    if (aboutUpdateStatus) {
+      aboutUpdateStatus.className = "about-update-status is-latest";
+      aboutUpdateStatus.textContent = "更新完成，即将重启…";
+    }
+    showToast("更新完成，正在重启…", "ok");
+    await window.skinAPI.relaunchApp();
+  } finally {
+    updateInstallInFlight = false;
+    if (btnOpen) {
+      btnOpen.disabled = false;
+      btnOpen.textContent = "立即更新";
+    }
+    if (btnLater) btnLater.disabled = false;
+  }
+}
+
+/**
+ * @param {object|null} result normalized updater result
  * @param {{ silent?: boolean }} [opts]
  */
 async function presentUpdateResult(result, opts = {}) {
@@ -2223,7 +2956,6 @@ async function presentUpdateResult(result, opts = {}) {
 
   if (hasUpdate) {
     lastUpdateResult = result;
-    // 状态行固定文案，不同步云端「检查更新提示文案」
     if (aboutUpdateStatus) {
       aboutUpdateStatus.className = "about-update-status is-update";
       aboutUpdateStatus.textContent = "发现新版本，点击查看";
@@ -2233,14 +2965,13 @@ async function presentUpdateResult(result, opts = {}) {
     }
     if (!silent) {
       const action = await showUpdateDialog(result);
-      if (action === "open" && result?.downloadUrl) {
-        await openExternalUrl(result.downloadUrl);
+      if (action === "install") {
+        await performAppUpdateInstall(result);
       }
     }
     return;
   }
 
-  // 无更新：固定文案，不弹窗
   lastUpdateResult = null;
   if (aboutUpdateStatus) {
     aboutUpdateStatus.className = "about-update-status is-latest";
@@ -2250,16 +2981,14 @@ async function presentUpdateResult(result, opts = {}) {
 }
 
 async function runCheckUpdate({ reopenOnly = false } = {}) {
-  // 状态行点击：仅当上次结果确实有更新时复开弹窗
   if (reopenOnly) {
     if (lastUpdateResult && hasActualUpdate(lastUpdateResult)) {
       const action = await showUpdateDialog(lastUpdateResult);
-      if (action === "open" && lastUpdateResult.downloadUrl) {
-        await openExternalUrl(lastUpdateResult.downloadUrl);
+      if (action === "install") {
+        await performAppUpdateInstall(lastUpdateResult);
       }
       return;
     }
-    // 无有效缓存：不强制重检，避免误弹
     return;
   }
 
@@ -2274,16 +3003,15 @@ async function runCheckUpdate({ reopenOnly = false } = {}) {
     clearUpdateStatusInteractive();
   }
   try {
-    if (typeof window.skinAPI?.cloudCheckUpdate !== "function") {
-      throw new Error("云端版本检查不可用");
+    if (typeof window.skinAPI?.checkAppUpdate !== "function") {
+      throw new Error("应用更新检查不可用");
     }
-    const result = await window.skinAPI.cloudCheckUpdate();
+    const raw = await window.skinAPI.checkAppUpdate();
+    const result = normalizeUpdaterResult(raw);
     const hasUpdate = hasActualUpdate(result);
     await presentUpdateResult(result);
     if (!hasUpdate) {
       showToast("已是最新版本", "ok");
-    } else if (result?.updateRequired) {
-      showToast("需要更新", "error");
     }
   } catch (err) {
     lastUpdateResult = null;
@@ -2343,6 +3071,285 @@ aboutView?.addEventListener("click", (e) => {
 });
 
 syncAboutVersionUi();
+
+/**
+ * Wire About → GitHub button from src/repo-meta.json
+ * (stamped by scripts/stamp-repo-meta.mjs / CI from GITHUB_REPOSITORY).
+ */
+async function applyRepoMetaUi() {
+  const btn = document.getElementById("btnAboutGithub");
+  if (!btn) return;
+  try {
+    const res = await fetch("repo-meta.json", { cache: "no-store" });
+    if (!res.ok) return;
+    const meta = await res.json();
+    const url =
+      (meta?.url && String(meta.url).trim()) ||
+      (meta?.owner && meta?.name
+        ? `https://github.com/${meta.owner}/${meta.name}`
+        : "");
+    if (!url || !/^https:\/\/github\.com\//i.test(url)) {
+      btn.hidden = true;
+      btn.removeAttribute("data-external");
+      return;
+    }
+    btn.hidden = false;
+    btn.setAttribute("data-external", url);
+    btn.title = `在 GitHub 上查看源码（${meta.repository || meta.owner + "/" + meta.name}）`;
+  } catch {
+    btn.hidden = true;
+  }
+}
+applyRepoMetaUi();
+
+/** Built-in local preset when cloud about is unavailable (static HTML in index). */
+const DEFAULT_ABOUT_CONTACT = {
+  mode: "fields",
+  intro: "如有问题或建议，欢迎与我们联系",
+  fields: [
+    {
+      id: "email",
+      label: "邮箱",
+      value: "support@chatgpt-skins.com",
+      type: "email",
+      href: "mailto:support@chatgpt-skins.com",
+    },
+    {
+      id: "website",
+      label: "网站",
+      value: "www.chatgpt-skins.com",
+      type: "link",
+      href: "https://www.chatgpt-skins.com",
+    },
+  ],
+  html: "",
+  css: "",
+};
+
+function sanitizeAboutContactHtml(html) {
+  return String(html || "")
+    .replace(/<\s*(script|iframe|object|embed|link|meta|base)[\s\S]*?>/gi, "")
+    .replace(/<\s*\/\s*(script|iframe|object|embed|link|meta|base)\s*>/gi, "")
+    .replace(/\son[a-z]+\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi, "")
+    .replace(/(href|src)\s*=\s*(['"])\s*javascript:[^'"]*\2/gi, '$1="#"');
+}
+
+function sanitizeAboutContactCss(css) {
+  return String(css || "")
+    .replace(/@import\b[^;]*;?/gi, "")
+    .replace(/expression\s*\(/gi, "/* blocked */(")
+    .replace(/javascript\s*:/gi, "blocked:")
+    .replace(/-moz-binding\s*:/gi, "blocked:");
+}
+
+function escapeAboutText(s) {
+  return String(s || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+/**
+ * Mount remote HTML mode into host (hides local preset).
+ * @param {string} html
+ * @param {string} css
+ * @returns {boolean}
+ */
+function mountAboutContactRemote(html, css) {
+  const remote = document.getElementById("aboutContactRemote");
+  const body = document.getElementById("aboutContactRemoteBody");
+  const fallback = document.getElementById("aboutContactFallback");
+  const imageWrap = document.getElementById("aboutContactImageWrap");
+  const card = document.getElementById("aboutContactCard");
+  if (!remote || !body) return false;
+
+  const htmlTrim = String(html || "").trim();
+  if (!htmlTrim) {
+    remote.hidden = true;
+    body.innerHTML = "";
+    remote.querySelector("style[data-about-contact-css]")?.remove();
+    if (fallback) fallback.hidden = false;
+    card?.classList.remove("is-remote");
+    return false;
+  }
+
+  let styleEl = remote.querySelector("style[data-about-contact-css]");
+  if (!styleEl) {
+    styleEl = document.createElement("style");
+    styleEl.setAttribute("data-about-contact-css", "1");
+    remote.insertBefore(styleEl, body);
+  }
+  styleEl.textContent = sanitizeAboutContactCss(css || "");
+  body.innerHTML = sanitizeAboutContactHtml(htmlTrim);
+
+  remote.hidden = false;
+  if (fallback) fallback.hidden = true;
+  if (imageWrap) imageWrap.hidden = true;
+  card?.classList.add("is-remote");
+  return true;
+}
+
+/**
+ * Render free-form fields into the local-style list (no fixed email/website keys).
+ * @param {{ intro?: string, fields?: object[] }} contact
+ */
+function renderAboutContactFields(contact) {
+  const noteEl = document.getElementById("aboutContactNote");
+  const list = document.getElementById("aboutContactList");
+  const fallback = document.getElementById("aboutContactFallback");
+  const remote = document.getElementById("aboutContactRemote");
+  const imageWrap = document.getElementById("aboutContactImageWrap");
+  const card = document.getElementById("aboutContactCard");
+
+  if (remote) {
+    remote.hidden = true;
+    remote.querySelector("style[data-about-contact-css]")?.remove();
+    const body = document.getElementById("aboutContactRemoteBody");
+    if (body) body.innerHTML = "";
+  }
+  if (imageWrap) imageWrap.hidden = true;
+  if (fallback) fallback.hidden = false;
+  card?.classList.remove("is-remote");
+
+  const intro = String(contact?.intro || "").trim();
+  if (noteEl) {
+    noteEl.textContent = intro || DEFAULT_ABOUT_CONTACT.intro;
+    noteEl.hidden = !intro && !DEFAULT_ABOUT_CONTACT.intro;
+  }
+
+  if (!list) return;
+  let fields = Array.isArray(contact?.fields) ? contact.fields.filter(Boolean) : [];
+  if (!fields.length) fields = DEFAULT_ABOUT_CONTACT.fields;
+
+  list.innerHTML = fields
+    .map((f) => {
+      const label = escapeAboutText(f.label || "");
+      const value = escapeAboutText(f.value || "");
+      const type = String(f.type || "text").toLowerCase();
+      const href = String(f.href || "").trim();
+
+      if (type === "image" && f.value) {
+        return `<li class="about-contact-field about-contact-field-image">
+          ${label ? `<span class="about-contact-label">${label}：</span>` : ""}
+          <img class="about-contact-field-img" src="${escapeAboutText(f.value)}" alt="${label || "图片"}" loading="lazy" decoding="async" />
+        </li>`;
+      }
+
+      const icon =
+        type === "email"
+          ? `<svg viewBox="0 0 24 24"><rect x="3.5" y="5.5" width="17" height="13" rx="2"/><path d="m4.5 7.5 7.5 6 7.5-6"/></svg>`
+          : type === "link"
+            ? `<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5" fill="none"/><path d="M3.5 12h17M12 3.5c2.4 2.6 3.6 5.4 3.6 8.5s-1.2 5.9-3.6 8.5M12 3.5C9.6 6.1 8.4 8.9 8.4 12s1.2 5.9 3.6 8.5"/></svg>`
+            : `<svg viewBox="0 0 24 24"><path d="M5 12h14M12 5v14" fill="none"/></svg>`;
+
+      let actionAttr = "";
+      if (type === "email" || href.startsWith("mailto:")) {
+        const mail = href.replace(/^mailto:/i, "") || f.value || "";
+        if (mail) actionAttr = ` href="#" data-mailto="${escapeAboutText(mail)}"`;
+      } else if (href && /^https?:\/\//i.test(href)) {
+        actionAttr = ` href="#" data-external="${escapeAboutText(href)}"`;
+      } else if (type === "link" && f.value && /^https?:\/\//i.test(f.value)) {
+        actionAttr = ` href="#" data-external="${escapeAboutText(f.value)}"`;
+      }
+
+      const display = value || escapeAboutText(href) || label;
+      const content = actionAttr
+        ? `<a class="about-contact-link"${actionAttr}>${display}</a>`
+        : `<span class="about-contact-text">${display}</span>`;
+
+      return `<li class="about-contact-field">
+        <span class="about-contact-ico" aria-hidden="true">${icon}</span>
+        ${label ? `<span class="about-contact-label">${label}：</span>` : ""}
+        ${content}
+      </li>`;
+    })
+    .join("");
+}
+
+/**
+ * Apply cloud about.contact — mode html | fields (mutual exclusive).
+ * @param {object|null|undefined} contact
+ */
+function applyAboutContact(contact) {
+  const c = contact && typeof contact === "object" ? contact : null;
+  if (!c) {
+    renderAboutContactFields(DEFAULT_ABOUT_CONTACT);
+    return;
+  }
+
+  let mode = String(c.mode || "").toLowerCase();
+  const html = String(c.html || "").trim();
+  if (mode !== "html" && mode !== "fields") {
+    mode = html ? "html" : "fields";
+  }
+
+  // HTML mode: only remote structure, hide preset fields
+  if (mode === "html" && html) {
+    mountAboutContactRemote(html, c.css || "");
+    return;
+  }
+
+  // Fields mode: free-form custom fields (no fixed email/website attributes)
+  let fields = Array.isArray(c.fields) ? c.fields : [];
+  // Legacy migration if server still sent old keys
+  if (!fields.length && (c.email || c.website || c.imageUrl)) {
+    if (c.email) {
+      fields.push({
+        id: "legacy_email",
+        label: "邮箱",
+        value: c.email,
+        type: "email",
+        href: `mailto:${c.email}`,
+      });
+    }
+    if (c.website) {
+      fields.push({
+        id: "legacy_website",
+        label: "网站",
+        value: c.websiteLabel || c.website,
+        type: "link",
+        href: c.website,
+      });
+    }
+    if (c.imageUrl) {
+      fields.push({
+        id: "legacy_image",
+        label: c.imageAlt || "图片",
+        value: c.imageUrl,
+        type: "image",
+        href: "",
+      });
+    }
+  }
+
+  renderAboutContactFields({
+    intro: c.intro || c.note || "",
+    fields,
+  });
+}
+
+/**
+ * Load about/contact from cloud (disk cache or network).
+ * @param {{ refresh?: boolean }} [opts]
+ */
+async function loadAboutContactFromCloud(opts = {}) {
+  if (typeof window.skinAPI?.cloudAbout !== "function") return;
+  try {
+    const res = await window.skinAPI.cloudAbout({ refresh: opts.refresh === true });
+    const contact = res?.contact;
+    if (contact && typeof contact === "object") {
+      applyAboutContact(contact);
+    } else if (res?.ok === false) {
+      /* keep defaults */
+    }
+  } catch {
+    /* offline: keep built-in defaults */
+  }
+}
+
+// Initial paint uses HTML defaults; refresh from disk/cloud when ready
+loadAboutContactFromCloud({ refresh: false });
 
 /* —— DevTools 独立窗口（自定义皮肤弹窗顶部；不绑定 F12，避免占用系统/WebView 调试快捷键） —— */
 /** 防止连点并发 invoke；后端也会单例复用 `devtools` 窗口 */
@@ -2560,6 +3567,11 @@ async function refreshCloudAndSkins(forceNetwork) {
       if (snap?.announcements) {
         applyAnnouncementsToBanner(snap.announcements);
       }
+      if (snap?.about?.contact) {
+        applyAboutContact(snap.about.contact);
+      } else {
+        await loadAboutContactFromCloud({ refresh: true });
+      }
     } catch {
       /* offline: still refresh local skins from disk merge */
     }
@@ -2570,6 +3582,7 @@ async function refreshCloudAndSkins(forceNetwork) {
     } catch {
       /* ignore */
     }
+    await loadAboutContactFromCloud({ refresh: false });
   }
   return refresh();
 }
@@ -2587,20 +3600,27 @@ async function bootCloud() {
     if (typeof window.skinAPI?.cloudStatus === "function") {
       const snap = await window.skinAPI.cloudStatus({ force: false });
       if (snap?.announcements) applyAnnouncementsToBanner(snap.announcements);
+      if (snap?.about?.contact) applyAboutContact(snap.about.contact);
     }
   } catch {
     paintPromo(0);
   }
 
-  // Deferred soft network: skin update flags + announcements after GUI is ready
+  // Deferred soft network: skin update flags + announcements + about after GUI is ready
   if (typeof window.skinAPI?.cloudRefresh !== "function") return;
   window.setTimeout(() => {
     if (document.visibilityState === "hidden") return;
+    // About is independent of catalog soft-TTL: always try network once on boot
+    // so CODEX_SKIN_CLOUD_URL / new CDN contact is not stuck on stale disk cache.
+    loadAboutContactFromCloud({ refresh: true });
     window.skinAPI
       .cloudRefresh({ force: false })
       .then((res) => {
         const snap = res?.snapshot || res;
         if (snap?.announcements) applyAnnouncementsToBanner(snap.announcements);
+        if (snap?.about?.contact) {
+          applyAboutContact(snap.about.contact);
+        }
         // Soft sync may be skipped (cache-fresh) — only rebuild list when catalog may change
         const skipped = res?.sync?.skipped === true || snap?.sync?.skipped === true;
         if (!skipped) return refresh();
@@ -2939,8 +3959,12 @@ async function setupWindowControls() {
   btnClose?.addEventListener("click", (e) => {
     e.preventDefault();
     e.stopPropagation();
+    // CloseRequested is handled in Rust: hide-to-tray (default) or real exit.
     appWindow.close().catch(() => {});
   });
+
+  // Keep close-button tooltip aligned with tray setting.
+  syncCloseButtonTitle();
 
   // 双击标题栏空白区域切换最大化（排除输入/按钮）
   // 拖拽交给 data-tauri-drag-region + CSS app-region:drag，避免与 startDragging 双重触发
@@ -2987,6 +4011,15 @@ window.addEventListener("focus", () => {
     /* ignore */
   }
 
+  // Tray / close-to-tray prefs + provider switch events from tray menu
+  try {
+    bindTraySettingsUi();
+    bindProviderTrayEvents();
+    await loadTrayUiSettings();
+  } catch {
+    /* ignore */
+  }
+
   // Sidebar categories from skin-categories.json (not hardcoded skin membership)
   try {
     await loadSkinCategories();
@@ -2997,13 +4030,13 @@ window.addEventListener("focus", () => {
   // Default promo until cloud responds
   paintPromo(0);
 
-  // 默认进入概览：检测本机环境（与皮肤列表并行）
+  // 默认进入概览：先画常驻骨架；环境检测改为手动「刷新检测」（启动不自动跑）
   try {
+    ensureOverviewScaffold();
     setMainView("overview");
   } catch {
     /* ignore */
   }
-  loadEnvironment({ force: true }).catch(() => {});
 
   try {
     pillCodex.textContent = "连接中…";

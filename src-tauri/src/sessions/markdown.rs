@@ -1,5 +1,5 @@
 //! Export local Codex sessions to Markdown.
-//! Adapted from CodexPlusPlus `codex-plus-data::markdown`.
+//! Markdown export for Codex session transcripts.
 
 use super::models::{ExportResult, ExportStatus, SessionRef};
 use rusqlite::Connection;

@@ -101,7 +101,7 @@ status / hostStatus 含 `paused` / `protocol` / `lifecycle` / `lifecycleRaw` / `
 | 项 | Dream Skin | 本项目 |
 |----|------------|--------|
 | GUI | 托盘/菜单栏 | Tauri 多皮肤管理 |
-| 主题模型 | 单活动主题库 | 多皮肤 + .cgskin |
+| 主题模型 | 单活动主题库 | 多皮肤 + .skin |
 | 注入硬化 | 深度 | **已对齐核心**（身份/载荷/shell-guard） |
 | 渲染 | 平台分叉 CSS | **统一 core + 每皮肤 plugin** |
 | 宿主选择器 | 每端 selectors.json | **统一** `engine/runtime/selectors.json` + doctor |
@@ -134,21 +134,21 @@ status / hostStatus 含 `paused` / `protocol` / `lifecycle` / `lifecycleRaw` / `
 |----|------|
 | 载荷 + CDP 身份 + 共享 core | 完成 |
 | 两阶段 shell→art | 完成 |
-| 慢启动 lifecycle 探测 | **2.2 完成** |
-| 大图原图 + 缩放超时 + 分块解码 | **2.2 完成** |
-| watch fs.watch + 降频轮询 | **2.2 完成** |
-| 长驻 injector 热换（control 文件 switch） | **2.3 完成** |
-| slim core 常驻 + deltaShell | **2.3 完成** |
+| 慢启动 lifecycle 探测 | **1.1.2 完成** |
+| 大图原图 + 缩放超时 + 分块解码 | **1.1.2 完成** |
+| watch fs.watch + 降频轮询 | **1.1.2 完成** |
+| 长驻 injector 热换（control 文件 switch） | **1.1.3 完成** |
+| slim core 常驻 + deltaShell | **1.1.3 完成** |
 | GUI pause/resume | CLI 已有；GUI 可选 |
-| 纯 Rust CDP 热路径（去系统 Node spawn） | **2.3 阶段 1–2**：host ready 时 apply；status/detect/version/paths/resolve-asset/settings/delete/restore 走 `src-tauri/src/cdp/` |
-| 冷启动 / restart 原生化 | **2.3.1**：`host` 三信号 lifecycle + `launch::ensure_debug_port`；apply/restore 互斥 |
-| 进程内 re-inject + 导入导出 | **2.3.2**：`keep` 后台线程刷新保持；`package` 原生 `.cgskin` export/import/inspect；design-wallpaper 仍可回退 Node |
-| 稳态宿主 + keep 退避 | **2.4**：页内 warm→steady 生命周期（无全树 MO）；keep 指数退避 + 可选 art 恢复；冷路径条件化 repair |
-| selectors 契约 + 模板 + Operation UI | **2.3.3**：`selectors.json` / `_template` / 页内操作反馈 |
-| macOS 启动链 + Win Store schema3 | **2.3.3**：`open -a` 调试启动；包身份写入 state；stale 自动 re-resolve |
-| delta 命中率 | **2.3.3**：同 revision CSS 短路 `deltaHit`；inject 上报 `shellMode`/`deltaHits` |
-| GUI / Store UX | **2.3.3+**：status 暴露 `storePackage`/`shellMode`；多包确认框；apply toast 带热切换提示 |
-| macOS 可选 launchd | **2.3.3+**：`scripts/macos/install-debug-launch-agent.sh`（默认仍走 open -a） |
+| 纯 Rust CDP 热路径（去系统 Node spawn） | **1.1.3 阶段 1–2**：host ready 时 apply；status/detect/version/paths/resolve-asset/settings/delete/restore 走 `src-tauri/src/cdp/` |
+| 冷启动 / restart 原生化 | **1.1.3.1**：`host` 三信号 lifecycle + `launch::ensure_debug_port`；apply/restore 互斥 |
+| 进程内 re-inject + 导入导出 | **1.1.3.2**：`keep` 后台线程刷新保持；`package` 原生 `.skin` export/import/inspect；design-wallpaper 仍可回退 Node |
+| 稳态宿主 + keep 退避 | **1.1.4**：页内 warm→steady 生命周期（无全树 MO）；keep 指数退避 + 可选 art 恢复；冷路径条件化 repair |
+| selectors 契约 + 模板 + Operation UI | **1.1.5**：`selectors.json` / `_template` / 页内操作反馈 |
+| macOS 启动链 + Win Store schema3 | **1.1.5**：`open -a` 调试启动；包身份写入 state；stale 自动 re-resolve |
+| delta 命中率 | **1.1.5**：同 revision CSS 短路 `deltaHit`；inject 上报 `shellMode`/`deltaHits` |
+| GUI / Store UX | **1.1.6**：status 暴露 `storePackage`/`shellMode`；多包确认框；apply toast 带热切换提示 |
+| macOS 可选 launchd | **1.1.7**：`scripts/macos/install-debug-launch-agent.sh`（默认仍走 open -a） |
 | **会话管理（列表/删除/备份）** | **已落地**：侧栏入口 + `src-tauri/sessions` + `sessionAPI`；见 [../features/sessions.md](../features/sessions.md) |
 | 会话导出 / provider 修复 / index 清理 | **Phase 2 已落地**：Markdown 导出、GUI 撤销、provider 历史修复、`session_index` 孤儿清理 |
 | 更多工具功能域 | 按 [features.md](./features.md) 扩展 |

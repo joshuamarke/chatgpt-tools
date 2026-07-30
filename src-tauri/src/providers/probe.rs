@@ -1,8 +1,7 @@
 //! Provider connectivity probe + OpenAI-compatible model list fetch.
 //!
-//! Ported/simplified from cc-switch:
-//! - `services/stream_check.rs` (lightweight base_url reachability)
-//! - `services/model_fetch.rs` (GET /v1/models with candidate URLs)
+//! - Lightweight base_url reachability
+//! - GET /v1/models with candidate URL fallbacks
 //!
 //! Uses `ureq` (same HTTP stack as cloud/CDP) — no extra deps.
 
@@ -65,11 +64,7 @@ fn normalize_probe_url(raw: &str) -> Result<String, String> {
 }
 
 /// Probe base_url reachability (GET, any HTTP status = success).
-pub fn test_connectivity(base_url: &str, timeout_secs: Option<u64>) -> ConnectivityResult {
-    test_connectivity_with_ua(base_url, timeout_secs, None)
-}
-
-/// Same as [`test_connectivity`], optionally applying a custom User-Agent.
+/// Optional `custom_user_agent` is applied when providers require a specific UA.
 pub fn test_connectivity_with_ua(
     base_url: &str,
     timeout_secs: Option<u64>,
@@ -224,7 +219,7 @@ struct ModelEntry {
     owned_by: Option<String>,
 }
 
-/// Reject control characters (same spirit as cc-switch parse_custom_user_agent).
+/// Reject control characters in custom User-Agent strings.
 pub fn sanitize_user_agent(raw: Option<&str>) -> Option<String> {
     let s = raw?.trim();
     if s.is_empty() {
@@ -237,14 +232,6 @@ pub fn sanitize_user_agent(raw: Option<&str>) -> Option<String> {
 }
 
 /// Fetch available models via OpenAI-compatible `GET …/models` candidates.
-pub fn fetch_models(
-    base_url: &str,
-    api_key: &str,
-    models_url_override: Option<&str>,
-) -> Result<Vec<FetchedModel>, String> {
-    fetch_models_with_ua(base_url, api_key, models_url_override, None)
-}
-
 pub fn fetch_models_with_ua(
     base_url: &str,
     api_key: &str,

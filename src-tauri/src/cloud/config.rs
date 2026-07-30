@@ -1,4 +1,9 @@
 //! Cloud endpoint configuration + host allowlist.
+//!
+//! Production base URL / extra hosts are **not** hardcoded. They are embedded at
+//! package time via `scripts/inject-release-config.mjs` → `gen/release-config.json`
+//! → `build.rs` (`CHATGPT_TOOLS_CLOUD_*` rustc-env). Treat those values like
+//! signing private keys: CI Secrets or `keys/release.env` only.
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -11,14 +16,18 @@ use crate::engine::EngineError;
 /// Protocol version this client speaks (must match CDN `protocol: 1`).
 pub const CLOUD_PROTOCOL: u32 = 1;
 
-/// Default development preview API (local chatgpt-tools-cdn `npm run serve`).
+/// Local CDN preview when no package-time cloud URL was embedded.
 pub const DEFAULT_DEV_BASE_URL: &str = "http://127.0.0.1:8788/v1";
 
 /// Default production-style channel.
 pub const DEFAULT_CHANNEL: &str = "stable";
 
-/// Hard cap for a single .cgskin download (bytes).
+/// Hard cap for a single .skin download (bytes).
 pub const MAX_PACKAGE_BYTES: u64 = 48 * 1024 * 1024;
+
+/// Hard cap for a single catalog preview / screenshot thumbnail (bytes).
+/// Keep small so list enrich + IPC stay snappy (full art stays in the package).
+pub const MAX_PREVIEW_BYTES: u64 = 2 * 1024 * 1024;
 
 /// Max HTTP redirects when following package URLs.
 pub const MAX_REDIRECTS: u32 = 3;
@@ -40,24 +49,50 @@ pub struct CloudConfig {
     pub engine_protocol: u32,
 }
 
+/// Package-time cloud API base (empty in pure dev builds).
+fn embedded_cloud_base_url() -> String {
+    option_env!("CHATGPT_TOOLS_CLOUD_BASE_URL")
+        .unwrap_or("")
+        .trim()
+        .to_string()
+}
+
+/// Package-time extra allowlist hosts (comma-separated).
+fn embedded_cloud_extra_hosts() -> Vec<String> {
+    option_env!("CHATGPT_TOOLS_CLOUD_EXTRA_HOSTS")
+        .unwrap_or("")
+        .split([',', ';', '\n'])
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect()
+}
+
+fn default_base_url() -> String {
+    let embedded = embedded_cloud_base_url();
+    if !embedded.is_empty() {
+        return normalize_base_url(&embedded);
+    }
+    DEFAULT_DEV_BASE_URL.to_string()
+}
+
 impl Default for CloudConfig {
     fn default() -> Self {
         Self {
             enabled: true,
-            base_url: DEFAULT_DEV_BASE_URL.to_string(),
+            base_url: default_base_url(),
             channel: DEFAULT_CHANNEL.to_string(),
             timeout_ms: DEFAULT_TIMEOUT_MS,
             allowed_hosts: default_allowed_hosts(),
             protocol: CLOUD_PROTOCOL,
             // Keep in sync with GUI `APP_VERSION` / package.json (not crate 1.0.0).
-            app_version: "2.2.0".to_string(),
+            app_version: "1.1.12".to_string(),
             engine_protocol: cdp::native_engine_protocol(),
         }
     }
 }
 
 fn default_allowed_hosts() -> Vec<String> {
-    vec![
+    let mut hosts: Vec<String> = vec![
         "127.0.0.1".into(),
         "localhost".into(),
         "cdn.example.com".into(),
@@ -68,7 +103,22 @@ fn default_allowed_hosts() -> Vec<String> {
         // Cloudflare R2 public buckets (wildcard match via host_allowed)
         "r2.dev".into(),
         "cloudflarestorage.com".into(),
-    ]
+    ];
+    for h in embedded_cloud_extra_hosts() {
+        if !hosts.iter().any(|x| x.eq_ignore_ascii_case(&h)) {
+            hosts.push(h);
+        }
+    }
+    // Always allow host of the effective default base URL (embedded or dev).
+    if let Ok(parsed) = url::Url::parse(&default_base_url()) {
+        if let Some(host) = parsed.host_str() {
+            let h = host.trim().to_string();
+            if !h.is_empty() && !hosts.iter().any(|x| x.eq_ignore_ascii_case(&h)) {
+                hosts.push(h);
+            }
+        }
+    }
+    hosts
 }
 
 fn settings_path() -> PathBuf {
@@ -82,7 +132,25 @@ fn read_settings_json() -> Value {
         .unwrap_or_else(|| serde_json::json!({}))
 }
 
-/// Load cloud config: defaults → settings.json → env overrides.
+fn push_host_unique(hosts: &mut Vec<String>, host: &str) {
+    let h = host.trim();
+    if h.is_empty() {
+        return;
+    }
+    if !hosts.iter().any(|x| x.eq_ignore_ascii_case(h)) {
+        hosts.push(h.to_string());
+    }
+}
+
+fn allow_url_host(cfg: &mut CloudConfig, base_url: &str) {
+    if let Ok(parsed) = url::Url::parse(base_url) {
+        if let Some(host) = parsed.host_str() {
+            push_host_unique(&mut cfg.allowed_hosts, host);
+        }
+    }
+}
+
+/// Load cloud config: package-time defaults → settings.json → env overrides.
 pub fn load_cloud_config() -> CloudConfig {
     let mut cfg = CloudConfig::default();
     // Prefer GUI/about APP_VERSION when settings pin it
@@ -100,6 +168,8 @@ pub fn load_cloud_config() -> CloudConfig {
         if let Some(u) = cloud.get("baseUrl").and_then(|v| v.as_str()) {
             if !u.trim().is_empty() {
                 cfg.base_url = normalize_base_url(u);
+                let base = cfg.base_url.clone();
+                allow_url_host(&mut cfg, &base);
             }
         }
         if let Some(c) = cloud.get("channel").and_then(|v| v.as_str()) {
@@ -125,6 +195,11 @@ pub fn load_cloud_config() -> CloudConfig {
                         list.push(h.into());
                     }
                 }
+                // Keep package-time hosts so production CDN still works if settings
+                // only lists a subset.
+                for h in embedded_cloud_extra_hosts() {
+                    push_host_unique(&mut list, &h);
+                }
                 cfg.allowed_hosts = list;
             }
         }
@@ -135,7 +210,7 @@ pub fn load_cloud_config() -> CloudConfig {
         }
     }
 
-    // Env overrides (dev / CI)
+    // Env overrides (dev / CI) — runtime only, never committed defaults
     if matches!(
         std::env::var("CODEX_SKIN_CLOUD_DISABLED")
             .unwrap_or_default()
@@ -149,6 +224,8 @@ pub fn load_cloud_config() -> CloudConfig {
         if !url.trim().is_empty() {
             cfg.base_url = normalize_base_url(&url);
             cfg.enabled = true;
+            let base = cfg.base_url.clone();
+            allow_url_host(&mut cfg, &base);
         }
     }
     if let Ok(ch) = std::env::var("CODEX_SKIN_CLOUD_CHANNEL") {
@@ -194,7 +271,8 @@ pub fn host_allowed(host: &str, allowed: &[String]) -> bool {
 
 /// Validate absolute http(s) URL against scheme + host allowlist.
 pub fn validate_download_url(url: &str, cfg: &CloudConfig) -> Result<url::Url, EngineError> {
-    let parsed = url::Url::parse(url).map_err(|e| EngineError::msg(format!("无效下载 URL: {e}")))?;
+    let parsed =
+        url::Url::parse(url).map_err(|e| EngineError::msg(format!("无效下载 URL: {e}")))?;
     let scheme = parsed.scheme();
     let host = parsed
         .host_str()
@@ -215,17 +293,12 @@ pub fn validate_download_url(url: &str, cfg: &CloudConfig) -> Result<url::Url, E
     }
 
     if !host_allowed(host, &cfg.allowed_hosts) {
-        return Err(EngineError::msg(format!(
-            "下载 host 不在白名单: {host}"
-        )));
+        return Err(EngineError::msg(format!("下载 host 不在白名单: {host}")));
     }
 
-    // Block userinfo / odd ports abuse lightly
     if !parsed.username().is_empty() || parsed.password().is_some() {
         return Err(EngineError::msg("拒绝带认证信息的下载 URL"));
     }
 
     Ok(parsed)
 }
-
-

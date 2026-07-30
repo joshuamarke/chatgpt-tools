@@ -78,6 +78,45 @@
     presets: (app) => invoke("list_provider_presets", { app }),
     /** Force re-write current provider to live config. @param {"codex"|"grok"} app */
     reapply: (app) => invoke("reapply_current_provider", { app }),
+    /** Codex: keep ChatGPT OAuth in auth.json when enabling third-party. */
+    getPreserveCodexAuth: () => invoke("get_preserve_codex_official_auth"),
+    /** @param {boolean} enabled */
+    setPreserveCodexAuth: (enabled) =>
+      invoke("set_preserve_codex_official_auth", { enabled: !!enabled }),
+    /** Local routing */
+    getProxyStatus: () => invoke("get_proxy_status"),
+    getProxyConfig: () => invoke("get_proxy_config"),
+    updateProxyConfig: (config) => invoke("update_proxy_config", { config }),
+    getTakeoverStatus: () => invoke("get_proxy_takeover_status"),
+    setTakeover: (app, enabled) =>
+      invoke("set_proxy_takeover", { app, enabled: !!enabled }),
+    getAppProxySettings: (app) => invoke("get_app_proxy_settings", { app }),
+    updateAppProxySettings: (settings) =>
+      invoke("update_app_proxy_settings", { settings }),
+    setAutoFailover: (app, enabled) =>
+      invoke("set_auto_failover", { app, enabled: !!enabled }),
+    getFailoverQueue: (app) => invoke("get_failover_queue", { app }),
+    addToFailover: (app, providerId) =>
+      invoke("add_to_failover_queue", { app, providerId }),
+    removeFromFailover: (app, providerId) =>
+      invoke("remove_from_failover_queue", { app, providerId }),
+    reorderFailover: (app, providerIds) =>
+      invoke("reorder_failover_queue", { app, providerIds }),
+    resetCircuit: (app, providerId) =>
+      invoke("reset_provider_circuit", { app, providerId }),
+    stopProxyWithRestore: () => invoke("stop_proxy_with_restore"),
+    repairTakeover: (app) => invoke("repair_proxy_takeover", { app }),
+    /** @param {string} host @param {number} port */
+    checkListenPort: (host, port) =>
+      invoke("check_proxy_listen_port", { host, port: Number(port) || 0 }),
+    /** Proxy request logs */
+    listRequestLogs: (filters) =>
+      invoke("list_proxy_request_logs", { filters: filters || {} }),
+    getRequestLog: (id) => invoke("get_proxy_request_log", { id }),
+    clearRequestLogs: () => invoke("clear_proxy_request_logs"),
+    getLogRetentionDays: () => invoke("get_proxy_log_retention_days"),
+    setLogRetentionDays: (days) =>
+      invoke("set_proxy_log_retention_days", { days: Number(days) || 7 }),
     /**
      * Lightweight base_url reachability probe (any HTTP response = reachable).
      * @param {string} baseUrl
@@ -105,5 +144,10 @@
         modelsUrl: modelsUrl || null,
         customUserAgent: customUserAgent || null,
       }),
+    /**
+     * Re-inject Codex desktop model whitelist from live catalog (best-effort).
+     * @returns {Promise<{attempted:boolean,ok:boolean,models:string[],message:string}>}
+     */
+    refreshModelUnlock: () => invoke("refresh_codex_model_unlock"),
   };
 })();

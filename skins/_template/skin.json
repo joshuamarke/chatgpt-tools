@@ -39,7 +39,7 @@
     "appearanceLightChromeTheme": "{ accent = \"#6688FF\", contrast = 64, fonts = { code = \"SF Mono\", ui = \"PingFang SC\" }, ink = \"#1a1a2e\", opaqueWindows = true, semanticColors = { diffAdded = \"#BCE8CF\", diffRemoved = \"#F7B8CE\", skill = \"#88aaff\" }, surface = \"#F7F8FF\" }"
   },
   "_authorNotes": {
-    "doNotShip": "删除 _authorNotes 字段后再发布 .cgskin（可选；引擎会忽略未知字段）",
+    "doNotShip": "删除 _authorNotes 字段后再发布 .skin（可选；引擎会忽略未知字段）",
     "editMap": {
       "显示名/标签/构图": "本文件 skin.json",
       "GUI 侧栏分类": "本文件 categories（匹配 src/skin-categories.json 的 filter id）",

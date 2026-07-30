@@ -142,6 +142,10 @@ pub async fn status() -> Result<Value, String> {
         if cfg.enabled {
             let cat = crate::cloud::load_catalog_disk();
             crate::cloud::merge_remote_into_status(&mut status, cat.as_ref(), &cfg);
+            // Catalog preview meta on every card (remote + local missing assets).
+            crate::cloud::attach_remote_preview_meta(&mut status, cat.as_ref());
+            // Instant fill from disk preview cache — no network on status path.
+            crate::cloud::attach_disk_previews(&mut status);
         }
         Ok(status)
     })
@@ -216,13 +220,13 @@ pub async fn start_host() -> Result<Value, String> {
 
 #[tauri::command]
 pub async fn export_skin(app: AppHandle, skin_id: String) -> Result<Value, String> {
-    let default_name = format!("{skin_id}.cgskin");
+    let default_name = format!("{skin_id}.skin");
     let file = app
         .dialog()
         .file()
         .set_title("导出皮肤")
         .set_file_name(&default_name)
-        .add_filter("ChatGPT 皮肤包", &["cgskin", "zip"])
+        .add_filter("ChatGPT 皮肤包", &["skin", "zip"])
         .blocking_save_file();
 
     let Some(path) = file else {
@@ -266,7 +270,7 @@ pub async fn import_skin(app: AppHandle) -> Result<Value, String> {
         .dialog()
         .file()
         .set_title("导入皮肤")
-        .add_filter("ChatGPT 皮肤包", &["cgskin", "zip"])
+        .add_filter("ChatGPT 皮肤包", &["skin", "zip", "cgskin"])
         .blocking_pick_file();
     let Some(path) = file else {
         return Ok(json!({ "ok": false, "canceled": true }));
@@ -722,6 +726,20 @@ pub async fn cloud_download_skin(skin_id: String) -> Result<Value, String> {
     .map_err(|e| e.to_string())?
 }
 
+/// Ensure catalog preview thumbnails are cached and return data-URLs for GUI cards.
+/// `skin_ids`: optional subset; omit/empty = all catalog skins with `preview.url`.
+/// Network only on cache miss; safe to call after list paint (progressive fill).
+#[tauri::command]
+pub async fn cloud_ensure_previews(skin_ids: Option<Vec<String>>) -> Result<Value, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let cfg = crate::cloud::load_cloud_config();
+        let ids = skin_ids.and_then(|v| if v.is_empty() { None } else { Some(v) });
+        Ok::<Value, String>(crate::cloud::ensure_missing_previews(&cfg, ids))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 #[tauri::command]
 pub async fn cloud_check_update() -> Result<Value, String> {
     tauri::async_runtime::spawn_blocking(|| {
@@ -741,9 +759,23 @@ pub async fn cloud_check_update() -> Result<Value, String> {
     .map_err(|e| e.to_string())?
 }
 
+/// About / contact from CDN (`/v1/about.json`) — not mixed with app version.
+#[tauri::command]
+pub async fn cloud_about(refresh: Option<bool>) -> Result<Value, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let cfg = crate::cloud::load_cloud_config();
+        let network = refresh.unwrap_or(false);
+        Ok::<Value, String>(crate::cloud::get_about(&cfg, network))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 #[tauri::command]
 pub async fn cloud_clear_skin_cache(skin_id: Option<String>) -> Result<Value, String> {
     tauri::async_runtime::spawn_blocking(move || {
+        // Keep preview thumbnails by default so list still shows art after package purge.
+        // Pass through package cache clear only.
         crate::cloud::clear_skin_cache(skin_id.as_deref()).map_err(map_err)
     })
     .await

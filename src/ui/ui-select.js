@@ -164,7 +164,12 @@
 
     const wrap = document.createElement("div");
     wrap.className = "ui-select" + (opts?.className ? ` ${opts.className}` : "");
-    if (select.classList.contains("sess-select")) wrap.classList.add("ui-select--toolbar");
+    // Toolbar density: data attr, legacy sess-select, or sessions tools field
+    const toolbarVariant =
+      select.getAttribute("data-ui-select-variant") === "toolbar" ||
+      select.classList.contains("sess-select") ||
+      !!select.closest(".sess-field, .sessions-tools-row");
+    if (toolbarVariant) wrap.classList.add("ui-select--toolbar");
     if (select.disabled) wrap.classList.add("is-disabled");
 
     const trigger = document.createElement("button");

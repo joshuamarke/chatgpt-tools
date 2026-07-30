@@ -1,5 +1,5 @@
 //! Resolve Codex user home (`CODEX_HOME` or `~/.codex`).
-//! Adapted from CodexPlusPlus `codex-plus-core::codex_home`.
+//! Resolve Codex home (`CODEX_HOME` or `~/.codex`).
 
 use std::path::PathBuf;
 

@@ -24,6 +24,8 @@ pub fn ensure_cloud_layout() -> Result<(), EngineError> {
         cloud_root(),
         cache_skins_dir(),
         cache_tmp_dir(),
+        // Catalog screenshot thumbnails (independent of full .skin package cache)
+        cdp::native_state_root().join("cache").join("previews"),
         cloud_root().join("meta"),
     ] {
         fs::create_dir_all(&d)
@@ -46,6 +48,15 @@ pub fn announcements_path() -> PathBuf {
 
 pub fn announcements_etag_path() -> PathBuf {
     cloud_root().join("announcements.etag")
+}
+
+/// About / contact (independent of version.json).
+pub fn about_path() -> PathBuf {
+    cloud_root().join("about.json")
+}
+
+pub fn about_etag_path() -> PathBuf {
+    cloud_root().join("about.etag")
 }
 
 /// Last successful network sync timestamp (unix seconds, plain text).

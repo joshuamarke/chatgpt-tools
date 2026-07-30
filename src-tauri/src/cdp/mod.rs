@@ -4,16 +4,16 @@
 //! for the main user path. Import/export/design still fall back to Node CLI.
 
 mod host;
-mod http;
+pub(crate) mod http;
 mod image;
 mod inject;
 pub mod inspect;
 mod keep;
 mod launch;
-mod native;
+pub(crate) mod native;
 mod package;
 mod payload;
-mod session;
+pub(crate) mod session;
 mod theme;
 #[cfg(windows)]
 mod win_native;

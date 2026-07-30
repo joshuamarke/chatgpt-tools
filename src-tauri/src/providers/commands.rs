@@ -10,6 +10,12 @@ use super::models::{
 use super::presets;
 use super::store;
 use serde_json::Value;
+use tauri::AppHandle;
+
+/// Keep the tray menu in sync after archive / current-provider mutations.
+fn notify_tray(app: &AppHandle) {
+    crate::tray::notify_providers_changed(app);
+}
 
 fn parse_app(app: &str) -> Result<AppKind, String> {
     AppKind::from_str_loose(app)
@@ -41,60 +47,167 @@ fn is_ready(kind: AppKind, p: &Provider) -> bool {
     }
 }
 
-fn live_status_for(kind: AppKind, current: &str, providers: &[Provider]) -> LiveStatus {
+fn live_status_for(
+    kind: AppKind,
+    current: &str,
+    providers: &[Provider],
+    takeover: bool,
+) -> LiveStatus {
+    let proxy_cfg = store::load().map(|f| f.proxy).unwrap_or_default();
+    let active_id = crate::proxy::proxy_status_snapshot()
+        .active_targets
+        .iter()
+        .find(|t| t.app_type == kind.as_str())
+        .map(|t| t.provider_id.clone());
+
+    let build = |snap_base: Option<String>,
+                 snap_model: Option<String>,
+                 snap_wire: Option<String>,
+                 config_exists: bool,
+                 auth_exists: bool,
+                 has_api_key: bool,
+                 direct_matches: bool|
+     -> LiveStatus {
+        let proxy_live = snap_base
+            .as_deref()
+            .map(|u| crate::proxy::is_proxy_base_url(u, &proxy_cfg))
+            .unwrap_or(false);
+        let host = crate::proxy::proxy_connect_host(&proxy_cfg);
+        let port = proxy_cfg.listen_port;
+
+        let (mode, detail_code, matches, summary) = if takeover && proxy_live {
+            let desync = active_id
+                .as_ref()
+                .map(|a| a != current && !current.is_empty())
+                .unwrap_or(false);
+            if desync {
+                (
+                    "takeover",
+                    "route_desync",
+                    false,
+                    format!(
+                        "本地路由已开，但当前上游与启用的供应商不一致，可点「修复路由」· {host}:{port}"
+                    ),
+                )
+            } else {
+                (
+                    "takeover",
+                    "ok",
+                    true,
+                    format!("本地路由已开启 · {host}:{port}"),
+                )
+            }
+        } else if takeover && !proxy_live {
+            (
+                "broken",
+                "route_half",
+                false,
+                "本地路由标记异常，请点「修复路由」".into(),
+            )
+        } else if !takeover && proxy_live {
+            (
+                "broken",
+                "route_half",
+                false,
+                "本机仍指向本地代理，但路由已关闭，请点「修复路由」或重新启用供应商".into(),
+            )
+        } else if !config_exists {
+            (
+                "direct",
+                "missing",
+                false,
+                if kind == AppKind::Grok {
+                    "尚未检测到 Grok 本机配置".into()
+                } else {
+                    "尚未检测到 Codex 本机配置".into()
+                },
+            )
+        } else if current.is_empty() {
+            // No archive marked enabled — not the same as “Official drifted”.
+            (
+                "direct",
+                "unlinked",
+                false,
+                "本机已有配置，可「从本机配置导入」或添加后启用".into(),
+            )
+        } else if direct_matches {
+            (
+                "direct",
+                "ok",
+                true,
+                "当前供应商与本机配置一致".into(),
+            )
+        } else {
+            (
+                "direct",
+                "drift",
+                false,
+                // Drift = routing (base_url / official shape), never default model alone.
+                if kind == AppKind::Grok {
+                    "供应商与本机配置不一致（渠道地址可能已在外部更改）".into()
+                } else {
+                    "供应商与本机配置不一致（渠道地址可能已在外部更改）".into()
+                },
+            )
+        };
+
+        LiveStatus {
+            config_exists,
+            auth_exists,
+            base_url: snap_base,
+            model: snap_model,
+            wire_api: snap_wire,
+            has_api_key,
+            current_matches_live: matches,
+            summary: Some(summary),
+            mode: Some(mode.into()),
+            detail_code: Some(detail_code.into()),
+        }
+    };
+
     match kind {
         AppKind::Codex => {
             let snap = codex::read_live_snapshot();
             let current_p = providers.iter().find(|p| p.id == current);
-            let matches = current_p
+            let direct = current_p
                 .map(|p| codex::matches_live(p, &snap))
                 .unwrap_or(false);
-            let summary = if !snap.config_exists {
-                Some("尚未检测到 ~/.codex/config.toml".into())
-            } else if matches {
-                Some("当前档案与本机正在使用的配置一致".into())
-            } else {
-                Some("档案与本机配置不一致（可能在外部改过 config.toml / auth.json）".into())
-            };
-            LiveStatus {
-                config_exists: snap.config_exists,
-                auth_exists: snap.auth_exists,
-                base_url: snap.base_url,
-                model: snap.model,
-                wire_api: snap.wire_api,
-                has_api_key: snap.has_api_key,
-                current_matches_live: matches,
-                summary,
-            }
+            build(
+                snap.base_url,
+                snap.model,
+                snap.wire_api,
+                snap.config_exists,
+                snap.auth_exists,
+                snap.has_api_key,
+                direct,
+            )
         }
         AppKind::Grok => {
             let snap = grok::read_live_snapshot();
             let current_p = providers.iter().find(|p| p.id == current);
-            let matches = current_p
+            let direct = current_p
                 .map(|p| grok::matches_live(p, &snap))
                 .unwrap_or(false);
-            let summary = if !snap.config_exists {
-                Some("尚未检测到 ~/.grok/config.toml".into())
-            } else if matches {
-                Some("当前档案与本机正在使用的配置一致".into())
-            } else {
-                Some("档案与本机配置不一致（可能在外部改过 ~/.grok/config.toml）".into())
-            };
-            LiveStatus {
-                config_exists: snap.config_exists,
-                auth_exists: false,
-                base_url: snap.base_url,
-                model: snap.model,
-                wire_api: None,
-                has_api_key: snap.has_api_key,
-                current_matches_live: matches,
-                summary,
-            }
+            build(
+                snap.base_url,
+                snap.model,
+                None,
+                snap.config_exists,
+                false,
+                snap.has_api_key,
+                direct,
+            )
         }
     }
 }
 
-fn to_summary(kind: AppKind, p: &Provider, current: &str, matches_live: bool) -> ProviderSummary {
+fn to_summary(
+    kind: AppKind,
+    p: &Provider,
+    current: &str,
+    matches_live: bool,
+    app_store: &crate::providers::models::AppProviderStore,
+) -> ProviderSummary {
     let (key, base, model) = match kind {
         AppKind::Codex => codex::summarize(p),
         AppKind::Grok => grok::summarize(p),
@@ -102,6 +215,19 @@ fn to_summary(kind: AppKind, p: &Provider, current: &str, matches_live: bool) ->
     let wire = match kind {
         AppKind::Codex => codex::summarize_wire(p),
         AppKind::Grok => None,
+    };
+    let failover_priority =
+        crate::proxy::commands::failover_priority(app_store, &p.id);
+    // Circuit health is only relevant while local routing can actually walk the queue.
+    let health = if app_store.takeover_enabled
+        && (p.in_failover_queue || app_store.auto_failover_enabled)
+    {
+        Some(crate::proxy::commands::enrich_provider_health(
+            kind.as_str(),
+            &p.id,
+        ))
+    } else {
+        None
     };
     ProviderSummary {
         id: p.id.clone(),
@@ -116,6 +242,9 @@ fn to_summary(kind: AppKind, p: &Provider, current: &str, matches_live: bool) ->
         model,
         wire_api: wire,
         ready: is_ready(kind, p),
+        in_failover_queue: p.in_failover_queue,
+        failover_priority,
+        health,
         created_at: p.created_at,
         updated_at: p.updated_at,
     }
@@ -128,13 +257,14 @@ pub fn list_providers(app: String) -> Result<ProviderListResponse, String> {
     let file = store::load()?;
     let app_store = file.for_kind(kind);
     let current = app_store.current.clone();
-    let live = live_status_for(kind, &current, &app_store.providers);
+    let takeover = app_store.takeover_enabled;
+    let live = live_status_for(kind, &current, &app_store.providers, takeover);
     let matches = live.current_matches_live;
 
     let mut providers: Vec<ProviderSummary> = app_store
         .providers
         .iter()
-        .map(|p| to_summary(kind, p, &current, matches))
+        .map(|p| to_summary(kind, p, &current, matches, app_store))
         .collect();
     providers.sort_by(|a, b| {
         let ao = app_store
@@ -152,13 +282,32 @@ pub fn list_providers(app: String) -> Result<ProviderListResponse, String> {
         ao.cmp(&bo)
             .then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
     });
+    let proxy_running = crate::proxy::runtime().is_running();
     Ok(ProviderListResponse {
         app: kind.as_str().into(),
         current,
         providers,
         live_paths: live_paths(kind),
         live_status: live,
+        preserve_codex_official_auth: file.preserve_codex_official_auth,
+        takeover_enabled: takeover,
+        auto_failover_enabled: app_store.auto_failover_enabled,
+        proxy: file.proxy.clone(),
+        proxy_running,
+        proxy_status: Some(crate::proxy::proxy_status_snapshot()),
     })
+}
+
+/// Whether third-party Codex enables leave `auth.json` OAuth intact (default true).
+#[tauri::command(rename_all = "camelCase")]
+pub fn get_preserve_codex_official_auth() -> Result<bool, String> {
+    Ok(store::preserve_codex_official_auth())
+}
+
+/// Toggle Codex official-login preservation on third-party switch.
+#[tauri::command(rename_all = "camelCase")]
+pub fn set_preserve_codex_official_auth(enabled: bool) -> Result<bool, String> {
+    store::set_preserve_codex_official_auth(enabled)
 }
 
 /// Get full provider detail for the edit form (includes API key).
@@ -198,7 +347,12 @@ pub fn get_provider(app: String, id: String) -> Result<ProviderDetail, String> {
     };
     let (custom_user_agent, headers_json, body_json) = meta_form_fields(p);
     let model_catalog = model_catalog_rows(p);
-    let live = live_status_for(kind, &app_store.current, &app_store.providers);
+    let live = live_status_for(
+        kind,
+        &app_store.current,
+        &app_store.providers,
+        app_store.takeover_enabled,
+    );
     let matches = p.id == app_store.current && live.current_matches_live;
     Ok(ProviderDetail {
         id: p.id.clone(),
@@ -352,7 +506,9 @@ fn build_settings(
         )?,
     };
 
-    // Codex: attach modelCatalog for model_catalog_json projection (cc-switch SSOT).
+    // Codex: attach modelCatalog for model_catalog_json projection (profile SSOT).
+    // Always merge default model into mapping so enable never projects a GPT-only
+    // catalog when the user only filled the single "模型" field with a third-party id.
     if kind == AppKind::Codex {
         if let Some(obj) = settings.as_object_mut() {
             if let Some(rows) = request.model_catalog.as_ref() {
@@ -369,8 +525,26 @@ fn build_settings(
                 }
             }
         }
+
+        // Merge form default model (+ any catalog rows already present).
+        let mut merge = Vec::new();
+        if let Some(m) = request
+            .model
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+        {
+            merge.push(m.to_string());
+        }
+        // Also pull model= from generated config when form used structured fields.
+        if let Some(cfg) = settings.get("config").and_then(|v| v.as_str()) {
+            if let Some(m) = codex::extract_model(cfg) {
+                merge.push(m);
+            }
+        }
+        let _ = catalog::merge_models_into_settings(&mut settings, merge);
+
         // If mapping exists but top-level model is empty, fill from first mapped model.
-        // (Separate from the mut borrow above.)
         let config_snapshot = settings
             .get("config")
             .and_then(|v| v.as_str())
@@ -391,7 +565,11 @@ fn build_settings(
 
 /// Add a new provider profile.
 #[tauri::command]
-pub fn add_provider(app: String, request: ProviderUpsertRequest) -> Result<ProviderSummary, String> {
+pub fn add_provider(
+    app_handle: AppHandle,
+    app: String,
+    request: ProviderUpsertRequest,
+) -> Result<ProviderSummary, String> {
     let kind = parse_app(&app)?;
     let name = request.name.trim();
     if name.is_empty() {
@@ -442,34 +620,53 @@ pub fn add_provider(app: String, request: ProviderUpsertRequest) -> Result<Provi
         validate_switch(kind, &provider)?;
     }
 
+    let takeover_on = app_store.takeover_enabled;
     app_store.providers.push(provider.clone());
-    if activate {
-        // backfill outgoing then write
-        let prev = app_store.current.clone();
-        if !prev.is_empty() && prev != id {
-            if let Some(old) = store::find_provider_mut(app_store, &prev) {
-                let _ = backfill(kind, old);
-            }
-        }
-        let warnings = write_live_for(kind, &provider)?;
-        let _ = warnings;
-        app_store.current = id;
-    }
     store::save(&file)?;
+    if activate {
+        if takeover_on {
+            // Live first via hot_switch (sets current only after success).
+            crate::proxy::runtime().hot_switch_current(kind, &id)?;
+            file = store::load()?;
+        } else {
+            let mut file2 = store::load()?;
+            let app_store = file2.for_kind_mut(kind);
+            let prev = app_store.current.clone();
+            if !prev.is_empty() && prev != id {
+                if let Some(old) = store::find_provider_mut(app_store, &prev) {
+                    let _ = backfill(kind, old);
+                }
+            }
+            write_live_for(kind, &provider)?;
+            app_store.current = id;
+            store::save(&file2)?;
+            file = file2;
+        }
+    }
 
-    let current = file.for_kind(kind).current.clone();
-    let live = live_status_for(kind, &current, &file.for_kind(kind).providers);
-    Ok(to_summary(
+    let app_ref = file.for_kind(kind);
+    let current = app_ref.current.clone();
+    let live = live_status_for(
         kind,
-        store::find_provider(file.for_kind(kind), &provider.id).unwrap_or(&provider),
+        &current,
+        &app_ref.providers,
+        app_ref.takeover_enabled,
+    );
+    let summary = to_summary(
+        kind,
+        store::find_provider(app_ref, &provider.id).unwrap_or(&provider),
         &current,
         live.current_matches_live,
-    ))
+        app_ref,
+    );
+    notify_tray(&app_handle);
+    Ok(summary)
 }
 
 /// Update an existing provider.
 #[tauri::command]
 pub fn update_provider(
+    app_handle: AppHandle,
     app: String,
     id: String,
     request: ProviderUpsertRequest,
@@ -553,28 +750,52 @@ pub fn update_provider(
     let provider_clone = p.clone();
     let was_current = provider_clone.id == current_id;
 
+    let takeover_on = app_store.takeover_enabled;
+    store::save(&file)?;
     if activate {
         validate_switch(kind, &provider_clone)?;
-        if !was_current && !current_id.is_empty() {
-            if let Some(old) = store::find_provider_mut(app_store, &current_id) {
-                let _ = backfill(kind, old);
+        if takeover_on {
+            crate::proxy::runtime().hot_switch_current(kind, &id)?;
+            file = store::load()?;
+        } else {
+            let mut file2 = store::load()?;
+            let app_store = file2.for_kind_mut(kind);
+            if !was_current && !current_id.is_empty() {
+                if let Some(old) = store::find_provider_mut(app_store, &current_id) {
+                    let _ = backfill(kind, old);
+                }
             }
+            write_live_for(kind, &provider_clone)?;
+            app_store.current = id.clone();
+            store::save(&file2)?;
+            file = file2;
         }
-        write_live_for(kind, &provider_clone)?;
-        app_store.current = id.clone();
     } else if was_current {
-        // Re-project current provider so edits take effect
-        if let Err(e) = write_live_for(kind, &provider_clone) {
-            // Don't fail save if live write fails for incomplete edits
+        if takeover_on {
+            crate::proxy::runtime().hot_switch_current(kind, &id)?;
+            file = store::load()?;
+        } else if let Err(e) = write_live_for(kind, &provider_clone) {
             log_warn(&format!("更新后写 live 失败: {e}"));
         }
     }
-
-    store::save(&file)?;
-    let current = file.for_kind(kind).current.clone();
-    let live = live_status_for(kind, &current, &file.for_kind(kind).providers);
-    let p = store::find_provider(file.for_kind(kind), &id).unwrap();
-    Ok(to_summary(kind, p, &current, live.current_matches_live))
+    let app_ref = file.for_kind(kind);
+    let current = app_ref.current.clone();
+    let live = live_status_for(
+        kind,
+        &current,
+        &app_ref.providers,
+        app_ref.takeover_enabled,
+    );
+    let p = store::find_provider(app_ref, &id).unwrap();
+    let summary = to_summary(
+        kind,
+        p,
+        &current,
+        live.current_matches_live,
+        app_ref,
+    );
+    notify_tray(&app_handle);
+    Ok(summary)
 }
 
 fn log_warn(msg: &str) {
@@ -583,7 +804,7 @@ fn log_warn(msg: &str) {
 
 /// Delete a provider (cannot delete the active one or official seeds).
 #[tauri::command]
-pub fn delete_provider(app: String, id: String) -> Result<bool, String> {
+pub fn delete_provider(app_handle: AppHandle, app: String, id: String) -> Result<bool, String> {
     let kind = parse_app(&app)?;
     let mut file = store::load()?;
     let app_store = file.for_kind_mut(kind);
@@ -596,14 +817,52 @@ pub fn delete_provider(app: String, id: String) -> Result<bool, String> {
     }
     app_store.providers.retain(|x| x.id != id);
     store::save(&file)?;
+    notify_tray(&app_handle);
     Ok(true)
 }
 
 /// Switch active provider and write live config files.
 #[tauri::command]
-pub fn switch_provider(app: String, id: String) -> Result<SwitchResult, String> {
+pub fn switch_provider(
+    app_handle: AppHandle,
+    app: String,
+    id: String,
+) -> Result<SwitchResult, String> {
     let kind = parse_app(&app)?;
     let mut file = store::load()?;
+    let takeover = file.for_kind(kind).takeover_enabled;
+
+    // Local routing: hot-switch without dual-writing real upstream into live.
+    if takeover {
+        let warnings = crate::proxy::runtime().hot_switch_current(kind, &id)?;
+        let file2 = store::load()?;
+        let name = file2
+            .for_kind(kind)
+            .providers
+            .iter()
+            .find(|p| p.id == id)
+            .map(|p| p.name.clone())
+            .unwrap_or_else(|| id.clone());
+        // Unlock / clear already handled inside proxy hot_switch / apply_takeover.
+        let projected = if kind == AppKind::Codex {
+            catalog::model_slugs_from_catalog_file(&codex::codex_home_dir())
+        } else {
+            Vec::new()
+        };
+        let result = SwitchResult {
+            ok: true,
+            warnings,
+            message: format!(
+                "已热切换到「{name}」（本地路由模式，通常无需重启 {}）",
+                kind.display_name()
+            ),
+            live_paths: Some(live_paths(kind)),
+            projected_models: projected,
+        };
+        notify_tray(&app_handle);
+        return Ok(result);
+    }
+
     let app_store = file.for_kind_mut(kind);
     let provider = store::find_provider(app_store, &id)
         .ok_or_else(|| format!("供应商不存在: {id}"))?
@@ -611,7 +870,7 @@ pub fn switch_provider(app: String, id: String) -> Result<SwitchResult, String> 
 
     validate_switch(kind, &provider)?;
 
-    // Backfill outgoing current from live
+    // Backfill outgoing current from live (skip when live is loopback proxy)
     let prev = app_store.current.clone();
     if !prev.is_empty() && prev != id {
         if let Some(old) = store::find_provider_mut(app_store, &prev) {
@@ -619,20 +878,57 @@ pub fn switch_provider(app: String, id: String) -> Result<SwitchResult, String> 
         }
     }
 
-    let warnings = write_live_for(kind, &provider)?;
-    app_store.current = id;
+    let mut warnings = write_live_for(kind, &provider)?;
+    app_store.current = id.clone();
+
+    // Persist any modelCatalog merge (default model ∪ mapping) back into the archive
+    // so the next edit shows the same list that was projected to live.
+    if kind == AppKind::Codex && !provider.is_official() {
+        if let Some(p) = store::find_provider_mut(app_store, &id) {
+            let mut settings = p.settings_config.clone();
+            let mut merge = catalog::model_slugs_from_settings(&settings);
+            if let Some(m) = codex::extract_model(
+                settings
+                    .get("config")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or(""),
+            ) {
+                merge.push(m);
+            }
+            let live_slugs =
+                catalog::model_slugs_from_catalog_file(&codex::codex_home_dir());
+            merge.extend(live_slugs);
+            if catalog::merge_models_into_settings(&mut settings, merge) {
+                p.settings_config = settings;
+                p.updated_at = Some(chrono::Utc::now().timestamp_millis());
+            }
+        }
+    }
+
     store::save(&file)?;
 
-    Ok(SwitchResult {
+    let projected = if kind == AppKind::Codex && !provider.is_official() {
+        let models = catalog::model_slugs_from_catalog_file(&codex::codex_home_dir());
+        if models.is_empty() {
+            warnings.push("模型映射为空，请先添加可用模型。".into());
+        }
+        models
+    } else {
+        Vec::new()
+    };
+
+    // App-specific, short — no inject / catalog engineering text.
+    let msg = format!("已启用「{}」", provider.name);
+
+    let result = SwitchResult {
         ok: true,
         warnings,
-        message: format!(
-            "已切换到「{}」并写回 {} 本机配置",
-            provider.name,
-            kind.display_name()
-        ),
+        message: msg,
         live_paths: Some(live_paths(kind)),
-    })
+        projected_models: projected,
+    };
+    notify_tray(&app_handle);
+    Ok(result)
 }
 
 fn validate_switch(kind: AppKind, provider: &Provider) -> Result<(), String> {
@@ -659,6 +955,7 @@ fn write_live_for(kind: AppKind, provider: &Provider) -> Result<Vec<String>, Str
 /// Import current live config as a new named provider.
 #[tauri::command]
 pub fn import_live_as_provider(
+    app_handle: AppHandle,
     app: String,
     name: Option<String>,
 ) -> Result<ProviderSummary, String> {
@@ -732,9 +1029,15 @@ pub fn import_live_as_provider(
     provider.sort_index = Some(app_store.providers.len());
 
     let current = app_store.current.clone();
-    let summary = to_summary(kind, &provider, &current, false);
+    // Snapshot store for summary before move
+    let summary = {
+        let mut tmp_store = app_store.clone();
+        tmp_store.providers.push(provider.clone());
+        to_summary(kind, &provider, &current, false, &tmp_store)
+    };
     app_store.providers.push(provider);
     store::save(&file)?;
+    notify_tray(&app_handle);
     Ok(summary)
 }
 
@@ -771,7 +1074,12 @@ pub fn provider_paths_info(app: String) -> Result<serde_json::Value, String> {
     let file = store::load()?;
     let app_store = file.for_kind(kind);
     let paths = live_paths(kind);
-    let live = live_status_for(kind, &app_store.current, &app_store.providers);
+    let live = live_status_for(
+        kind,
+        &app_store.current,
+        &app_store.providers,
+        app_store.takeover_enabled,
+    );
     Ok(serde_json::json!({
         "app": kind.as_str(),
         "current": app_store.current,
@@ -779,6 +1087,8 @@ pub fn provider_paths_info(app: String) -> Result<serde_json::Value, String> {
         "livePaths": paths,
         "liveStatus": live,
         "count": app_store.providers.len(),
+        "takeoverEnabled": app_store.takeover_enabled,
+        "proxyRunning": crate::proxy::runtime().is_running(),
     }))
 }
 
@@ -791,7 +1101,7 @@ pub fn list_provider_presets(app: String) -> Result<Vec<presets::ProviderPreset>
 
 /// Re-apply current provider to live (repair / force sync).
 #[tauri::command]
-pub fn reapply_current_provider(app: String) -> Result<SwitchResult, String> {
+pub fn reapply_current_provider(app_handle: AppHandle, app: String) -> Result<SwitchResult, String> {
     let kind = parse_app(&app)?;
     let file = store::load()?;
     let app_store = file.for_kind(kind);
@@ -799,22 +1109,73 @@ pub fn reapply_current_provider(app: String) -> Result<SwitchResult, String> {
     if id.is_empty() {
         return Err("没有当前启用的供应商".into());
     }
+    let takeover = app_store.takeover_enabled;
     let provider = store::find_provider(app_store, &id)
         .ok_or_else(|| format!("当前供应商不存在: {id}"))?
         .clone();
+    if takeover {
+        let warnings = crate::proxy::runtime().hot_switch_current(kind, &id)?;
+        let projected = if kind == AppKind::Codex {
+            let models = catalog::model_slugs_from_catalog_file(&codex::codex_home_dir());
+            // Silent unlock / clear — do not toast inject diagnostics.
+            if provider.is_official() {
+                let _ = super::model_unlock::on_official_activated();
+            } else {
+                let _ = super::model_unlock::notify_provider_or_catalog_changed();
+            }
+            models
+        } else {
+            Vec::new()
+        };
+        let result = SwitchResult {
+            ok: true,
+            warnings,
+            message: format!("已重新应用「{}」", provider.name),
+            live_paths: Some(live_paths(kind)),
+            projected_models: projected,
+        };
+        notify_tray(&app_handle);
+        return Ok(result);
+    }
     validate_switch(kind, &provider)?;
-    let warnings = write_live_for(kind, &provider)?;
-    Ok(SwitchResult {
+    let mut warnings = write_live_for(kind, &provider)?;
+    let projected = if kind == AppKind::Codex {
+        catalog::model_slugs_from_catalog_file(&codex::codex_home_dir())
+    } else {
+        Vec::new()
+    };
+    if kind == AppKind::Codex && projected.is_empty() && !provider.is_official() {
+        warnings.push(
+            "模型映射为空：请拉取/添加第三方模型到映射表后重新应用。".into(),
+        );
+    }
+    let result = SwitchResult {
         ok: true,
         warnings,
-        message: format!("已将「{}」重新应用到本机配置", provider.name),
+        message: format!("已重新应用「{}」", provider.name),
         live_paths: Some(live_paths(kind)),
-    })
+        projected_models: projected,
+    };
+    notify_tray(&app_handle);
+    Ok(result)
+}
+
+/// Best-effort: re-inject Codex desktop model whitelist from live catalog.
+#[tauri::command]
+pub fn refresh_codex_model_unlock() -> Result<Value, String> {
+    let result = super::model_unlock::try_inject_from_live_catalog();
+    Ok(serde_json::json!({
+        "attempted": result.attempted,
+        "ok": result.ok,
+        "models": result.models,
+        "message": result.message,
+        "skippedUnchanged": result.skipped_unchanged,
+    }))
 }
 
 // ── Connectivity / model list (add-provider form helpers) ───────────────────
 
-/// Lightweight base_url reachability probe (ported from cc-switch stream_check).
+/// Lightweight base_url reachability probe.
 /// Any HTTP response = reachable; only network-level failures count as down.
 #[tauri::command(rename_all = "camelCase")]
 pub async fn test_provider_connectivity(

@@ -120,6 +120,33 @@ pub fn read_browser_identity(port: u16) -> Result<BrowserIdentity, CdpHttpError>
     })
 }
 
+/// Rank app:// targets so the main shell is first.
+///
+/// Newer Codex builds also expose aux pages (e.g. `?initialRoute=/avatar-overlay`)
+/// that share `app://` but never host the full chat UI. Probing/injecting the first
+/// CDP entry used to miss the main window and fail cold apply with「宿主尚未就绪」.
+fn app_target_rank(url: &str) -> u8 {
+    let lower = url.to_ascii_lowercase();
+    if lower.contains("avatar-overlay")
+        || lower.contains("initialroute=%2favatar")
+        || lower.contains("initialroute=/avatar")
+    {
+        return 90;
+    }
+    // Other compact / overlay routes (mascot, mini windows).
+    if lower.contains("compact")
+        || lower.contains("overlay")
+        || lower.contains("initialroute=")
+    {
+        return 50;
+    }
+    // Query-less main shell (`app://-/index.html`) ranks highest.
+    if !lower.contains('?') {
+        return 0;
+    }
+    20
+}
+
 pub fn list_app_targets(port: u16) -> Result<Vec<CdpTarget>, CdpHttpError> {
     let list = fetch_json(port, "/json/list", 3000)?;
     let arr = list
@@ -172,6 +199,12 @@ pub fn list_app_targets(port: u16) -> Result<Vec<CdpTarget>, CdpHttpError> {
             target_type: ty,
         });
     }
+    // Stable sort: primary shell first, aux windows last.
+    out.sort_by(|a, b| {
+        app_target_rank(&a.url)
+            .cmp(&app_target_rank(&b.url))
+            .then_with(|| a.url.cmp(&b.url))
+    });
     Ok(out)
 }
 

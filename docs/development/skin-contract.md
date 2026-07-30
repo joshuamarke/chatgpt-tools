@@ -140,7 +140,7 @@ html.codex-my-skin.skins-art-wide .composer-surface-chrome {
 1. 复制 `skins/dream` 结构，改 `id` / markers / 资源路径  
 2. 在框架基线之上**自己实现**样式（token + chromeHtml + art + 任意 CSS）  
 3. 若目标是全窗沉浸：优先 2560×1440 纯背景、左侧安全区、少把 UI 烤进图  
-4. `npm run test:engine` + `check-payload --skin-id <id>`  
+4. `npm run test:engine` + `npm run doctor:selectors` + `check-payload --skin-id <id>`  
 5. 实机自检：侧栏收起、建议卡对比度、任务侧栏关闭、composer、插件/PR  
 
 详见 [create-skin.md](./create-skin.md)。

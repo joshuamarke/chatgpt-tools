@@ -8,9 +8,9 @@
     "probedAt": "2026-07-25",
     "activeSkin": "bengong",
     "route": "home (app://-/index.html)",
-    "probeScript": "scripts/probe-contract-live.mjs",
+    "probeScript": null,
     "result": "All required L1 anchors present; L2 missing only route/overlay/settings scoped",
-    "notes": "升级 Codex/ChatGPT 桌面后：先 npm run doctor:selectors（静态），再 node scripts/probe-contract-live.mjs（实机）。引擎 token/class 现为 --skins-* / skins-*（legacy dream-* 仅清理兼容）。"
+    "notes": "升级 Codex/ChatGPT 桌面后先跑 npm run doctor:selectors（静态契约）。引擎 token/class 为 --skins-* / skins-*（legacy dream-* 仅清理兼容）。"
   },
   "appearanceSignal": {
     "dark": "html.electron-dark",

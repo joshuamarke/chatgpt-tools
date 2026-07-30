@@ -446,7 +446,6 @@ pub fn apply_desktop_theme(theme: &Value, state_root: &Path) -> Result<Value, En
     }
 
     let mut content_out = content.clone();
-    let keys = theme_keys();
 
     if let Some(header_pos) = find_desktop_header(&content_out) {
         let insert_at = header_pos.end;
@@ -466,7 +465,8 @@ pub fn apply_desktop_theme(theme: &Value, state_root: &Path) -> Result<Value, En
         {
             lines.pop();
         }
-        lines.retain(|line| !keys.iter().any(|k| line_starts_with_key(line, k)));
+        // Drop previous pin markers + appearance* scalars (not only bare keys).
+        lines.retain(|line| !is_our_theme_line(line));
         let mut out_lines: Vec<String> = lines.iter().map(|s| s.to_string()).collect();
         out_lines.extend(settings);
         content_out = format!(
@@ -484,8 +484,56 @@ pub fn apply_desktop_theme(theme: &Value, state_root: &Path) -> Result<Value, En
         );
     }
 
-    atomic_write_config(&path, &original, &content_out)?;
+    // Newer Codex rewrites chrome themes as dotted subtables
+    // (`[desktop.appearanceLightChromeTheme]`) after the user opens 外观.
+    // Those tables shadow our inline `appearanceLightChromeTheme = { … }` and
+    // leave code/chrome pins looking "stuck" until a manual UI click.
+    content_out = strip_desktop_appearance_subtables(&content_out, nl);
+
+    // Serialize with provider/proxy live writers (same config.toml).
+    crate::live_config::with_live_lock(&path, |_| {
+        atomic_write_config(&path, &original, &content_out).map_err(|e| e.to_string())
+    })
+    .map_err(EngineError::msg)?;
     Ok(serde_json::json!({ "ok": true, "path": path.to_string_lossy(), "atomic": true }))
+}
+
+/// Remove `[desktop.appearance*]` sibling tables while preserving other
+/// `[desktop.*]` sections (e.g. open-in-target-preferences).
+fn strip_desktop_appearance_subtables(text: &str, nl: &str) -> String {
+    let mut out: Vec<&str> = Vec::new();
+    let mut skipping = false;
+    for line in text.lines() {
+        let t = line.trim();
+        if t.starts_with('[') && t.ends_with(']') {
+            let header = t.trim_start_matches('[').trim_end_matches(']').trim();
+            // Match desktop.appearanceLightChromeTheme / appearanceDark* / quoted forms.
+            let bare = header.trim_matches('"').trim_matches('\'');
+            let is_appearance_sub = bare
+                .strip_prefix("desktop.")
+                .map(|rest| {
+                    let r = rest.trim_matches('"').trim_matches('\'');
+                    r.starts_with("appearance")
+                })
+                .unwrap_or(false);
+            skipping = is_appearance_sub;
+            if skipping {
+                continue;
+            }
+        }
+        if skipping {
+            continue;
+        }
+        out.push(line);
+    }
+    // Preserve a trailing newline when the original had one.
+    let mut joined = out.join(nl);
+    if text.ends_with('\n') || text.ends_with("\r\n") {
+        if !joined.ends_with(nl) {
+            joined.push_str(nl);
+        }
+    }
+    joined
 }
 
 /// Strip skin-written appearance* keys from [desktop].
@@ -597,15 +645,20 @@ pub fn restore_desktop_theme(state_root: &Path) -> Value {
         }
     }
 
-    let out = format!(
-        "{}{}{}{}",
-        &current[..insert_at],
-        lines.join(nl),
+    let out = strip_desktop_appearance_subtables(
+        &format!(
+            "{}{}{}{}",
+            &current[..insert_at],
+            lines.join(nl),
+            nl,
+            after
+        ),
         nl,
-        after
     );
-    if let Err(e) = atomic_write_config(&path, &original, &out) {
-        return serde_json::json!({ "restored": false, "reason": e.to_string() });
+    if let Err(e) = crate::live_config::with_live_lock(&path, |_| {
+        atomic_write_config(&path, &original, &out).map_err(|err| err.to_string())
+    }) {
+        return serde_json::json!({ "restored": false, "reason": e });
     }
     serde_json::json!({
         "restored": true,
@@ -974,6 +1027,72 @@ mod tests {
             text2.contains("[desktop.open-in-target-preferences]"),
             "subtable still there after restore: text2={text2}"
         );
+        let _ = fs::remove_dir_all(&dir);
+        std::env::remove_var("CODEX_CONFIG_PATH");
+    }
+
+    #[test]
+    fn strips_host_appearance_chrome_subtables() {
+        // Codex 26.7+ may rewrite chrome as [desktop.appearanceLightChromeTheme]
+        // after a settings click; that must not shadow skin inline pins.
+        let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let dir = std::env::temp_dir().join(format!(
+            "cgtools-theme-chrome-sub-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        ));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let cfg = dir.join("config.toml");
+        fs::write(
+            &cfg,
+            r##"[desktop]
+conversationDetailMode = "STEPS_COMMANDS"
+appearanceTheme = "light"
+appearanceLightCodeThemeId = "old"
+appearanceLightChromeTheme = { accent = "#111111" }
+[desktop.appearanceLightChromeTheme]
+accent = "#0169cc"
+surface = "#ffffff"
+[desktop.open-in-target-preferences]
+global = "fileManager"
+"##,
+        )
+        .unwrap();
+        std::env::set_var("CODEX_CONFIG_PATH", &cfg);
+        let theme = serde_json::json!({
+            "appearanceTheme": "light",
+            "appearanceLightCodeThemeId": "codex",
+            "appearanceLightChromeTheme": "{ accent = \"#6A9EAB\", surface = \"#EEF3F2\" }"
+        });
+        let r = apply_desktop_theme(&theme, &dir).unwrap();
+        assert!(
+            r.get("ok").and_then(|v| v.as_bool()).unwrap_or(false),
+            "apply result: {r}"
+        );
+        let text = fs::read_to_string(&cfg).unwrap();
+        assert!(
+            text.contains("appearanceLightCodeThemeId = \"codex\""),
+            "text={text}"
+        );
+        assert!(
+            text.contains("accent = \"#6A9EAB\""),
+            "skin chrome should win: text={text}"
+        );
+        assert!(
+            !text.contains("[desktop.appearanceLightChromeTheme]"),
+            "host chrome subtable must be stripped: text={text}"
+        );
+        assert!(
+            text.contains("[desktop.open-in-target-preferences]"),
+            "non-appearance subtable kept: text={text}"
+        );
+        // Pin markers must not stack forever.
+        let pins = text.matches("chatgpt-tools:appearance-pin").count();
+        assert_eq!(pins, 1, "expected single pin marker, text={text}");
         let _ = fs::remove_dir_all(&dir);
         std::env::remove_var("CODEX_CONFIG_PATH");
     }

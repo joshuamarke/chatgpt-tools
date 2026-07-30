@@ -430,6 +430,15 @@
         homes: ["miku-home", "miku-home-shell", "miku-home-utility"],
       },
       {
+        disabled: "__CODEX_SHIGUANG_SKIN_DISABLED__",
+        state: "__CODEX_SHIGUANG_SKIN_STATE__",
+        root: "codex-shiguang-skin",
+        art: "--shiguang-art",
+        style: "codex-shiguang-skin-style",
+        chrome: "codex-shiguang-skin-chrome",
+        homes: ["shiguang-home", "shiguang-home-shell", "shiguang-home-utility"],
+      },
+      {
         disabled: "__CODEX_JIUYI_SKIN_DISABLED__",
         state: "__CODEX_JIUYI_SKIN_STATE__",
         root: "codex-jiuyi-skin",
@@ -494,6 +503,7 @@
       "--eva-art",
       "--bengong-art",
       "--miku-art",
+      "--shiguang-art",
       "--jiuyi-art",
     ]) {
       root?.style.removeProperty(prop);

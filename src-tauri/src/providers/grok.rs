@@ -1,9 +1,8 @@
 //! Grok Build live config helpers (`~/.grok/config.toml`).
-//! Simplified from cc-switch grok_config, with MCP section preservation.
+//! Grok Build live config read/write, with MCP section preservation.
 
 use std::fs;
-use std::io::Write;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use serde_json::{json, Value};
 use toml_edit::DocumentMut;
@@ -501,52 +500,30 @@ pub fn strip_to_official_routing(config_toml: &str) -> Result<String, String> {
     Ok(out)
 }
 
+/// Whether stored provider roughly matches live routing.
+///
+/// Compares **base_url** (and loose API-key presence). Do **not** compare
+/// default `model` — users switch models in Grok freely; that must not mark drift.
 pub fn matches_live(provider: &Provider, live: &LiveSnapshot) -> bool {
     if provider.is_official() {
         return live.is_official_shape;
     }
-    let (key, base, model) = summarize(provider);
+    let (key, base, _model) = summarize(provider);
     match (base.as_deref(), live.base_url.as_deref()) {
         (Some(a), Some(b)) if a.trim_end_matches('/') == b.trim_end_matches('/') => {
-            let model_ok = match (model.as_deref(), live.model.as_deref()) {
-                (Some(m1), Some(m2)) => m1 == m2,
-                _ => false,
-            };
-            model_ok && (key.is_some() == live.has_api_key || live.has_api_key)
+            // Key presence is soft: live may keep env/login material.
+            key.is_some() == live.has_api_key || live.has_api_key || key.is_some()
         }
+        (None, None) => true,
         _ => false,
     }
 }
 
-/// Merge provider config into live while preserving mcp_servers from current live file.
+/// Merge provider archive into live while preserving unmanaged live sections.
+/// Routing keys owned by the archive: models / model / endpoints.
 fn merge_preserve_mcp(new_config: &str, live_config: &str) -> Result<String, String> {
-    let mut new_doc = if new_config.trim().is_empty() {
-        DocumentMut::new()
-    } else {
-        new_config
-            .parse::<DocumentMut>()
-            .map_err(|e| format!("Invalid Grok config.toml: {e}"))?
-    };
-
-    if live_config.trim().is_empty() {
-        return Ok(new_doc.to_string());
-    }
-    let live_doc = live_config
-        .parse::<DocumentMut>()
-        .map_err(|e| format!("Invalid live Grok config.toml: {e}"))?;
-
-    // Preserve [mcp_servers] and [mcp] from live if new config doesn't define them
-    if new_doc.get("mcp_servers").is_none() {
-        if let Some(item) = live_doc.get("mcp_servers") {
-            new_doc["mcp_servers"] = item.clone();
-        }
-    }
-    if new_doc.get("mcp").is_none() {
-        if let Some(item) = live_doc.get("mcp") {
-            new_doc["mcp"] = item.clone();
-        }
-    }
-    Ok(new_doc.to_string())
+    // Prefer live as base so UI/tools/features survive; overlay archive routing.
+    merge_preserve_sections(new_config, live_config)
 }
 
 pub fn write_live(provider: &Provider) -> Result<Vec<String>, String> {
@@ -568,35 +545,32 @@ pub fn write_live(provider: &Provider) -> Result<Vec<String>, String> {
         fs::create_dir_all(parent).map_err(|e| format!("创建 ~/.grok 失败: {e}"))?;
     }
 
-    let live_existing = read_config_text().unwrap_or_default();
-    let _ = backup_live(&live_existing);
-
-    let final_text = if provider.is_official() {
-        // Strip third-party [model.*] base_url overrides; keep UI/MCP/features.
-        // Start from live so user preferences survive, then force official routing.
-        let base = if live_existing.trim().is_empty() {
-            if config.trim().is_empty() {
-                official_config_toml()
+    // Locked read-modify-write so proxy/skin (Codex) style races are avoided on Grok too.
+    let is_official = provider.is_official();
+    let archive = config.to_string();
+    crate::live_config::read_modify_write(&path, |live_existing| {
+        let _ = backup_live(live_existing);
+        if is_official {
+            let base = if live_existing.trim().is_empty() {
+                if archive.trim().is_empty() {
+                    official_config_toml()
+                } else {
+                    archive.clone()
+                }
             } else {
-                config.to_string()
-            }
+                let merged = merge_preserve_sections(&archive, live_existing)?;
+                strip_to_official_routing(&merged)?
+            };
+            Ok(base)
         } else {
-            // Merge seed defaults lightly, then strip third-party model tables.
-            let merged = merge_preserve_sections(config, &live_existing)?;
-            strip_to_official_routing(&merged)?
-        };
-        warnings.push(
-            "已恢复 Grok 官方默认（models.default=grok-4.5，清除第三方 base_url）。认证走 grok login / XAI_API_KEY。".into(),
-        );
-        base
-    } else {
-        merge_preserve_mcp(config, &live_existing)?
-    };
+            merge_preserve_mcp(&archive, live_existing)
+        }
+    })?;
 
-    write_text_file(&path, &final_text)?;
-    warnings.push(
-        "已写入 ~/.grok/config.toml。请重启 Grok Build / Grok CLI 后生效。".into(),
-    );
+    if is_official {
+        warnings.push("已切换为 Grok 官方默认渠道。".into());
+    }
+    // Silent path write — GUI already confirms enable; avoid engineering paths in toast.
     Ok(warnings)
 }
 
@@ -660,6 +634,15 @@ pub fn backfill_from_live(provider: &mut Provider) -> Result<(), String> {
         Some(f) => f,
         None => return Ok(()),
     };
+    // Never backfill loopback proxy URLs into archives.
+    {
+        let cfg = super::store::load().map(|f| f.proxy).unwrap_or_default();
+        if crate::proxy::is_proxy_base_url(&live_fields.base_url, &cfg)
+            || live_fields.base_url.contains("127.0.0.1")
+        {
+            return Ok(());
+        }
+    }
     let stored_base = provider
         .settings_config
         .get("config")
@@ -685,20 +668,6 @@ fn strip_mcp(config: &str) -> Result<String, String> {
     doc.as_table_mut().remove("mcp_servers");
     doc.as_table_mut().remove("mcp");
     Ok(doc.to_string())
-}
-
-fn write_text_file(path: &Path, text: &str) -> Result<(), String> {
-    let tmp = path.with_extension("toml.tmp");
-    {
-        let mut f = fs::File::create(&tmp).map_err(|e| format!("写入临时文件失败: {e}"))?;
-        f.write_all(text.as_bytes())
-            .map_err(|e| format!("写入临时文件失败: {e}"))?;
-        f.sync_all().map_err(|e| format!("同步文件失败: {e}"))?;
-    }
-    fs::rename(&tmp, path).map_err(|e| {
-        let _ = fs::remove_file(&tmp);
-        format!("替换文件失败: {e}")
-    })
 }
 
 pub fn settings_from_form(
@@ -860,6 +829,67 @@ mod tests {
     use super::*;
 
     #[test]
+    fn matches_live_ignores_default_model_switch() {
+        // Archive default model A; live user switched to model B — same base_url.
+        let archive_cfg = r#"
+[models]
+default = "model-a"
+
+[model."model-a"]
+model = "model-a"
+base_url = "https://proxy.example.com/v1"
+api_key = "sk-test"
+api_backend = "responses"
+context_window = 200000
+"#;
+        let live_cfg = r#"
+[models]
+default = "model-b"
+
+[model."model-b"]
+model = "model-b"
+base_url = "https://proxy.example.com/v1"
+api_key = "sk-test"
+api_backend = "responses"
+context_window = 200000
+
+[model."model-a"]
+model = "model-a"
+base_url = "https://proxy.example.com/v1"
+api_key = "sk-test"
+api_backend = "responses"
+context_window = 200000
+"#;
+        let provider = Provider::new(
+            "g-custom".into(),
+            "Custom".into(),
+            json!({ "config": archive_cfg }),
+        );
+        // Live snapshot as if user switched models in Grok GUI.
+        let live = LiveSnapshot {
+            base_url: Some("https://proxy.example.com/v1".into()),
+            model: Some("model-b".into()),
+            has_api_key: true,
+            config_exists: true,
+            is_official_shape: is_official_live_config(live_cfg),
+        };
+        assert!(
+            matches_live(&provider, &live),
+            "switching models.default must not mark 本机漂移 when base_url is unchanged"
+        );
+
+        // Different base_url should still be drift.
+        let live_other = LiveSnapshot {
+            base_url: Some("https://other.example.com/v1".into()),
+            model: Some("model-a".into()),
+            has_api_key: true,
+            config_exists: true,
+            is_official_shape: false,
+        };
+        assert!(!matches_live(&provider, &live_other));
+    }
+
+    #[test]
     fn official_live_allows_models_default_without_custom_base() {
         let official = r#"
 [models]
@@ -880,7 +910,7 @@ default = "grok-4.5"
 
 [model."grok-4.5"]
 model = "grok-4.5"
-base_url = "https://oai.livein.eu.org/v1"
+base_url = "https://proxy.example.com/v1"
 api_key = "sk-test"
 api_backend = "responses"
 context_window = 500000
@@ -888,7 +918,7 @@ context_window = 500000
         assert!(!is_official_live_config(third));
         let cleaned = strip_to_official_routing(third).expect("strip");
         assert!(is_official_live_config(&cleaned));
-        assert!(!cleaned.contains("oai.livein.eu.org"));
+        assert!(!cleaned.contains("proxy.example.com"));
         assert!(cleaned.contains("grok-4.5"));
     }
 

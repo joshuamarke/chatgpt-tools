@@ -5,6 +5,8 @@ node_modules/
 dist/
 build/
 out/
+# Staged production skins (only default skin(s); created by stage-bundle-skins.mjs)
+bundle-resources/
 *.exe
 *.dll
 *.pdb
@@ -12,6 +14,9 @@ out/
 # Tauri / Rust
 src-tauri/target/
 src-tauri/gen/schemas/
+# Package-time secrets (cloud URL / updater endpoints) — never commit
+src-tauri/gen/release-config.json
+src-tauri/gen/tauri.release-overlay.json
 
 # Logs
 *.log
@@ -24,6 +29,14 @@ pnpm-debug.log*
 .env
 .env.*
 !.env.example
+
+# Tauri updater signing private key (public key lives in tauri.conf.json)
+keys/*.key
+!keys/*.key.pub
+!keys/README.md
+# Production cloud / updater endpoints (same secrecy class as private keys)
+keys/release.env
+!keys/release.env.example
 
 # OS
 .DS_Store
@@ -46,3 +59,30 @@ coverage/
 # Misc
 *.local
 .cache/
+
+# Local notes / scratch (not part of the product tree)
+说明.md
+*.scratch.*
+tmp/
+temp/
+
+# Local one-off CDP probes, skin patches, dumps (dev-only; do not commit)
+scripts/local/
+scripts/probe-*.mjs
+scripts/probe-*-out*
+scripts/*-out.json.txt
+scripts/*-out.txt
+scripts/finish-*.mjs
+scripts/patch-*.mjs
+scripts/scope-*.mjs
+scripts/debug-*.mjs
+scripts/migrate-*.mjs
+scripts/verify-card-*.mjs
+scripts/verify-chat-*.mjs
+scripts/verify-popup-*.mjs
+scripts/verify-qingkong-*.mjs
+scripts/verify-settings-*.mjs
+scripts/verify-worker-*.mjs
+scripts/verify-header-*.mjs
+scripts/sync-suggest-tokens.mjs
+scripts/check-home-route.mjs

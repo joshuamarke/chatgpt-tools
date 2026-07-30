@@ -19,29 +19,11 @@
       </div>
 
       <div class="titlebar-actions" data-no-drag>
-        <button type="button" id="btnHelp" class="chip-btn" title="使用说明">
-          <span class="chip-ico" aria-hidden="true">
-            <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 16.2v-.3"/><path d="M12 13.2c0-1.1.7-1.6 1.4-2 .8-.5 1.4-1 1.4-2.1A2.7 2.7 0 0 0 12 6.5a2.7 2.7 0 0 0-2.7 2.5"/></svg>
-          </span>
-          <span class="chip-label">使用说明</span>
-        </button>
         <button type="button" id="btnPause" class="chip-btn" data-mode="idle" title="暂停皮肤（即时卸下，会话可恢复）">
           <span class="chip-ico" aria-hidden="true">
             <svg viewBox="0 0 24 24"><rect x="6" y="5" width="4" height="14" rx="1"/><rect x="14" y="5" width="4" height="14" rx="1"/></svg>
           </span>
           <span class="chip-label" id="btnPauseLabel">暂停皮肤</span>
-        </button>
-        <button type="button" id="btnRestore" class="chip-btn" title="恢复默认">
-          <span class="chip-ico" aria-hidden="true">
-            <svg viewBox="0 0 24 24"><path d="M4.5 12a7.5 7.5 0 1 0 2.1-5.2"/><path d="M4.5 4.5v4.2h4.2"/></svg>
-          </span>
-          <span class="chip-label">恢复默认</span>
-        </button>
-        <button type="button" id="btnWallpaper" class="chip-btn chip-primary" title="自定义皮肤">
-          <span class="chip-ico" aria-hidden="true">
-            <svg viewBox="0 0 24 24"><rect x="3.5" y="5" width="17" height="14" rx="2"/><path d="m3.5 15.5 4.2-4.2a1.5 1.5 0 0 1 2.1 0L16 17.5"/><path d="m14 15 1.4-1.4a1.5 1.5 0 0 1 2.1 0l3 3"/><circle cx="9" cy="9.5" r="1.3"/></svg>
-          </span>
-          <span class="chip-label">自定义皮肤</span>
         </button>
         <div class="win-controls">
           <button type="button" id="btnWinMin" class="win-btn" title="最小化" aria-label="最小化">
@@ -104,9 +86,9 @@
             <div class="pill" id="pillCodex">检测中…</div>
             <div class="pill" id="pillActive">当前皮肤：无</div>
           </div>
-          <label class="check">
+          <label class="ui-check check">
             <input type="checkbox" id="chkRestart" />
-            换肤时自动重启客户端
+            <span>换肤时自动重启客户端</span>
           </label>
         </div>
       </aside>
@@ -116,19 +98,102 @@
           <div class="overview-header">
             <div>
               <h1 class="overview-title">环境概览</h1>
-              <p class="overview-lead">首屏检测本机运行环境与客户端：Node/npm、ChatGPT / Codex 桌面端、Codex CLI、Grok Build。未安装的 CLI 可一键拉起系统终端执行 npm 安装；桌面端跳转官网下载。皮肤仅适用于桌面客户端。</p>
+              <p class="overview-lead">本机运行环境与客户端一览：Node/npm、ChatGPT / Codex 桌面端、Codex CLI、Grok Build。未安装的 CLI 可一键拉起系统终端执行 npm 安装；桌面端跳转官网下载。皮肤仅适用于桌面客户端。</p>
             </div>
-            <button type="button" class="ghost sm" id="btnEnvRefresh" title="重新检测">刷新检测</button>
           </div>
 
-          <div class="overview-runtimes" id="overviewRuntimes" aria-label="运行环境" hidden></div>
+          <div class="overview-runtimes" id="overviewRuntimes" aria-label="运行环境">
+            <div class="overview-runtimes-head">
+              <div class="overview-runtimes-head-text">
+                <span class="overview-runtimes-title">运行环境</span>
+                <span class="overview-runtimes-sub muted" id="overviewRuntimesSub">CLI 安装依赖 Node.js 与 npm 本工具可不依赖 node 运行</span>
+              </div>
+              <button type="button" class="ghost sm" id="btnEnvRefresh" title="手动检测本机环境">刷新检测</button>
+            </div>
+            <div class="overview-runtimes-list" id="overviewRuntimesList">
+              <div class="ov-runtime-chip is-idle" data-runtime-id="node">
+                <span class="ov-card-ico ico-runtime" aria-hidden="true">
+                  <svg viewBox="0 0 24 24"><path d="M12 3.5 19.5 8v8L12 20.5 4.5 16V8L12 3.5z"/><path d="M12 8.5v7M9 10.2l6 3.6M15 10.2l-6 3.6"/></svg>
+                </span>
+                <div class="ov-runtime-meta">
+                  <strong>Node.js</strong>
+                  <span>未检测</span>
+                </div>
+              </div>
+              <div class="ov-runtime-chip is-idle" data-runtime-id="npm">
+                <span class="ov-card-ico ico-runtime ico-npm" aria-hidden="true">
+                  <svg viewBox="0 0 24 24"><rect x="4" y="5.5" width="16" height="13" rx="2"/><path d="M8 9.5v5M12 9.5v5M16 9.5v3.2"/></svg>
+                </span>
+                <div class="ov-runtime-meta">
+                  <strong>npm</strong>
+                  <span>未检测</span>
+                </div>
+              </div>
+            </div>
+            <div class="overview-tray-settings" id="overviewTraySettings">
+              <label class="about-toggle-row overview-tray-toggle" for="chkMinimizeToTray">
+                <span class="about-toggle-text">
+                  <span class="about-toggle-title">关闭时最小化到托盘</span>
+                  <span class="about-toggle-desc">关闭主窗口时默认进入系统托盘，本地路由代理保持运行，避免 Codex / Grok 断连。</span>
+                </span>
+                <input type="checkbox" id="chkMinimizeToTray" class="about-toggle-input" checked />
+              </label>
+            </div>
+          </div>
 
           <div class="overview-grid" id="overviewGrid" role="list">
-            <div class="overview-loading muted">正在检测本地环境…</div>
+            <article class="ov-card is-idle" role="listitem" data-tool-id="chatgpt-desktop">
+              <button type="button" class="icon-btn ov-card-refresh" title="仅刷新检测此项" aria-label="仅刷新检测此项" data-tool-id="chatgpt-desktop">
+                <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true" focusable="false"><path fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" d="M20.5 12a8.5 8.5 0 1 1-2.48-6.02"/><path fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" d="M20.5 3.5V9h-5.5"/></svg>
+              </button>
+              <div class="ov-card-head">
+                <span class="ov-card-ico ico-brand-logo ico-logo-chatgpt" aria-hidden="true">
+                  <svg viewBox="0 0 180 180" focusable="false"><path fill="currentColor" d="M101.228 164.247C96.2776 164.247 91.5751 163.307 87.1201 161.426C82.6651 159.545 78.7051 156.921 75.2401 153.555C71.4781 154.842 67.5676 155.486 63.5086 155.486C56.8756 155.486 50.7376 153.852 45.0946 150.585C39.4516 147.318 34.8976 142.863 31.4326 137.22C28.0666 131.577 26.3836 125.291 26.3836 118.361C26.3836 115.49 26.7796 112.371 27.5716 109.005C23.6116 105.342 20.5426 101.135 18.3646 96.3828C16.1866 91.5318 15.0976 86.4828 15.0976 81.2358C15.0976 75.8898 16.2361 70.7418 18.5131 65.7918C20.7901 60.8418 23.9581 56.5848 28.0171 53.0208C32.1751 49.3578 36.9766 46.8333 42.4216 45.4473C43.5106 39.8043 45.7876 34.7553 49.2526 30.3003C52.8166 25.7463 57.1726 22.1823 62.3206 19.6083C67.4686 17.0343 72.9631 15.7473 78.8041 15.7473C83.7541 15.7473 88.4566 16.6878 92.9116 18.5688C97.3666 20.4498 101.327 23.0733 104.792 26.4393C108.554 25.1523 112.464 24.5088 116.523 24.5088C123.156 24.5088 129.294 26.1423 134.937 29.4093C140.58 32.6763 145.085 37.1313 148.451 42.7743C151.916 48.4173 153.648 54.7038 153.648 61.6338C153.648 64.5048 153.252 67.6233 152.46 70.9893C156.42 74.6523 159.489 78.9093 161.667 83.7603C163.845 88.5123 164.934 93.5118 164.934 98.7588C164.934 104.105 163.796 109.253 161.519 114.203C159.242 119.153 156.024 123.459 151.866 127.122C147.807 130.686 143.055 133.161 137.61 134.547C136.521 140.19 134.195 145.239 130.631 149.694C127.166 154.248 122.859 157.812 117.711 160.386C112.563 162.96 107.069 164.247 101.228 164.247ZM64.5481 145.685C69.4981 145.685 73.8046 144.645 77.4676 142.566L105.386 126.528C106.376 125.835 106.871 124.895 106.871 123.707V110.936L70.9336 131.577C68.7556 132.864 66.5776 132.864 64.3996 131.577L36.3331 115.391C36.3331 115.688 36.2836 116.034 36.1846 116.43C36.1846 116.826 36.1846 117.42 36.1846 118.212C36.1846 123.261 37.3726 127.914 39.7486 132.171C42.2236 136.329 45.6391 139.596 49.9951 141.972C54.3511 144.447 59.2021 145.685 64.5481 145.685ZM66.0331 121.479C66.6271 121.776 67.1716 121.925 67.6666 121.925C68.1616 121.925 68.6566 121.776 69.1516 121.479L80.2891 115.094L44.5006 94.3038C42.3226 93.0168 41.2336 91.0863 41.2336 88.5123V56.2878C36.2836 58.4658 32.3236 61.8318 29.3536 66.3858C26.3836 70.8408 24.8986 75.7908 24.8986 81.2358C24.8986 86.0868 26.1361 90.7398 28.6111 95.1948C31.0861 99.6498 34.3036 103.016 38.2636 105.293L66.0331 121.479ZM101.228 154.446C106.475 154.446 111.227 153.258 115.484 150.882C119.741 148.506 123.107 145.239 125.582 141.081C128.057 136.923 129.294 132.27 129.294 127.122V95.0463C129.294 93.8583 128.799 92.9673 127.809 92.3733L116.523 85.8393V127.271C116.523 129.845 115.434 131.775 113.256 133.062L85.1896 149.249C90.0406 152.714 95.3866 154.446 101.228 154.446ZM106.871 100.095V79.8993L90.09 70.3953L73.1611 79.8993V100.095L90.09 109.599L106.871 100.095ZM63.5086 52.7238C63.5086 50.1498 64.5976 48.2193 66.7756 46.9323L94.8421 30.7458C89.9911 27.2808 84.6451 25.5483 78.8041 25.5483C73.5571 25.5483 68.8051 26.7363 64.5481 29.1123C60.2911 31.4883 56.9251 34.7553 54.4501 38.9133C52.0741 43.0713 50.8861 47.7243 50.8861 52.8723V84.7998C50.8861 85.9878 51.3811 86.9283 52.3711 87.6213L63.5086 94.1553V52.7238ZM138.947 123.707C143.897 121.529 147.807 118.163 150.678 113.609C153.648 109.055 155.133 104.105 155.133 98.7588C155.133 93.9078 153.896 89.2548 151.421 84.7998C148.946 80.3448 145.728 76.9788 141.768 74.7018L113.999 58.6638C113.405 58.2678 112.86 58.1193 112.365 58.2183C111.87 58.2183 111.375 58.3668 110.88 58.6638L99.7426 64.9008L135.68 85.8393C136.769 86.4333 137.561 87.2253 138.056 88.2153C138.65 89.1063 138.947 90.1953 138.947 91.4823V123.707ZM109.098 48.2688C111.276 46.8828 113.454 46.8828 115.632 48.2688L143.847 64.7523C143.847 64.0593 143.847 63.1683 143.847 62.0793C143.847 57.3273 142.659 52.8228 140.283 48.5658C138.006 44.2098 134.69 40.7448 130.334 38.1708C126.077 35.5968 121.127 34.3098 115.484 34.3098C110.534 34.3098 106.227 35.3493 102.564 37.4283L74.6461 53.4663C73.6561 54.1593 73.1611 55.0998 73.1611 56.2878V69.0588L109.098 48.2688Z"/></svg>
+                </span>
+                <div class="ov-card-titles">
+                  <h2>ChatGPT / Codex 桌面端</h2>
+                  <div class="ov-card-kind">桌面应用</div>
+                  <div class="ov-badges"><span class="ov-badge is-idle">未检测</span><span class="ov-badge is-skin">支持皮肤</span></div>
+                </div>
+              </div>
+              <p class="ov-card-idle-hint muted">点击右上角刷新，检测本机是否已安装</p>
+            </article>
+            <article class="ov-card is-idle" role="listitem" data-tool-id="codex-cli">
+              <button type="button" class="icon-btn ov-card-refresh" title="仅刷新检测此项" aria-label="仅刷新检测此项" data-tool-id="codex-cli">
+                <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true" focusable="false"><path fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" d="M20.5 12a8.5 8.5 0 1 1-2.48-6.02"/><path fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" d="M20.5 3.5V9h-5.5"/></svg>
+              </button>
+              <div class="ov-card-head">
+                <span class="ov-card-ico ico-brand-logo ico-logo-codex" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" focusable="false"><path fill="currentColor" fill-rule="evenodd" clip-rule="evenodd" d="M8.086.457a6.105 6.105 0 013.046-.415c1.333.153 2.521.72 3.564 1.7a.117.117 0 00.107.029c1.408-.346 2.762-.224 4.061.366l.063.03.154.076c1.357.703 2.33 1.77 2.918 3.198.278.679.418 1.388.421 2.126a5.655 5.655 0 01-.18 1.631.167.167 0 00.04.155 5.982 5.982 0 011.578 2.891c.385 1.901-.01 3.615-1.183 5.14l-.182.22a6.063 6.063 0 01-2.934 1.851.162.162 0 00-.108.102c-.255.736-.511 1.364-.987 1.992-1.199 1.582-2.962 2.462-4.948 2.451-1.583-.008-2.986-.587-4.21-1.736a.145.145 0 00-.14-.032c-.518.167-1.04.191-1.604.185a5.924 5.924 0 01-2.595-.622 6.058 6.058 0 01-2.146-1.781c-.203-.269-.404-.522-.551-.821a7.74 7.74 0 01-.495-1.283 6.11 6.11 0 01-.017-3.064.166.166 0 00.008-.074.115.115 0 00-.037-.064 5.958 5.958 0 01-1.38-2.202 5.196 5.196 0 01-.333-1.589 6.915 6.915 0 01.188-2.132c.45-1.484 1.309-2.648 2.577-3.493.282-.188.55-.334.802-.438.286-.12.573-.22.861-.304a.129.129 0 00.087-.087A6.016 6.016 0 015.635 2.31C6.315 1.464 7.132.846 8.086.457zm-.804 7.85a.848.848 0 00-1.473.842l1.694 2.965-1.688 2.848a.849.849 0 001.46.864l1.94-3.272a.849.849 0 00.007-.854l-1.94-3.393zm5.446 6.24a.849.849 0 000 1.695h4.848a.849.849 0 000-1.696h-4.848z"/></svg>
+                </span>
+                <div class="ov-card-titles">
+                  <h2>Codex CLI</h2>
+                  <div class="ov-card-kind">命令行工具</div>
+                  <div class="ov-badges"><span class="ov-badge is-idle">未检测</span><span class="ov-badge is-noskin">不支持皮肤</span></div>
+                </div>
+              </div>
+              <p class="ov-card-idle-hint muted">点击右上角刷新，检测本机是否已安装</p>
+            </article>
+            <article class="ov-card is-idle" role="listitem" data-tool-id="grok-build">
+              <button type="button" class="icon-btn ov-card-refresh" title="仅刷新检测此项" aria-label="仅刷新检测此项" data-tool-id="grok-build">
+                <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true" focusable="false"><path fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" d="M20.5 12a8.5 8.5 0 1 1-2.48-6.02"/><path fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" d="M20.5 3.5V9h-5.5"/></svg>
+              </button>
+              <div class="ov-card-head">
+                <span class="ov-card-ico ico-brand-logo ico-logo-grok" aria-hidden="true">
+                  <svg viewBox="0 0 34 33" focusable="false"><path fill="currentColor" d="M13.2371 21.0407L24.3186 12.8506C24.8619 12.4491 25.6384 12.6057 25.8973 13.2294C27.2597 16.5185 26.651 20.4712 23.9403 23.1851C21.2297 25.8989 17.4581 26.4941 14.0108 25.1386L10.2449 26.8843C15.6463 30.5806 22.2053 29.6665 26.304 25.5601C29.5551 22.3051 30.562 17.8683 29.6205 13.8673L29.629 13.8758C28.2637 7.99809 29.9647 5.64871 33.449 0.844576C33.5314 0.730667 33.6139 0.616757 33.6964 0.5L29.1113 5.09055V5.07631L13.2343 21.0436"/><path fill="currentColor" d="M10.9503 23.0313C7.07343 19.3235 7.74185 13.5853 11.0498 10.2763C13.4959 7.82722 17.5036 6.82767 21.0021 8.2971L24.7595 6.55998C24.0826 6.07017 23.215 5.54334 22.2195 5.17313C17.7198 3.31926 12.3326 4.24192 8.67479 7.90126C5.15635 11.4239 4.0499 16.8403 5.94992 21.4622C7.36924 24.9165 5.04257 27.3598 2.69884 29.826C1.86829 30.7002 1.0349 31.5745 0.36364 32.5L10.9474 23.0341"/></svg>
+                </span>
+                <div class="ov-card-titles">
+                  <h2>Grok Build</h2>
+                  <div class="ov-card-kind">命令行工具</div>
+                  <div class="ov-badges"><span class="ov-badge is-idle">未检测</span><span class="ov-badge is-noskin">不支持皮肤</span></div>
+                </div>
+              </div>
+              <p class="ov-card-idle-hint muted">点击右上角刷新，检测本机是否已安装</p>
+            </article>
           </div>
 
           <p class="overview-footnote muted">
-            说明：Codex <b>CLI</b> 与 Grok Build 通过 <code>npm i -g</code> 安装，不能使用本工具的皮肤能力；换肤请使用 ChatGPT / Codex <b>桌面端</b>。安装完成后请点「刷新检测」。
+            说明：Codex <b>CLI</b> 与 Grok Build 通过 <code>npm i -g</code> 安装，不能使用本工具的皮肤能力；换肤请使用 ChatGPT / Codex <b>桌面端</b>。安装完成后可点对应卡片右上角刷新（仅检测该项），或点运行环境「刷新检测」全量扫描。
           </p>
         </section>
 
@@ -161,6 +226,26 @@
                   <path fill="currentColor" d="M15.5 14h-.79l-.28-.27A6.47 6.47 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/>
                 </svg>
                 <input id="searchInput" type="search" placeholder="搜索皮肤名称或关键词" autocomplete="off" spellcheck="false" />
+              </div>
+              <div class="skins-toolbar-actions" data-no-drag>
+                <button type="button" id="btnRestore" class="chip-btn chip-sm" title="恢复默认">
+                  <span class="chip-ico" aria-hidden="true">
+                    <svg viewBox="0 0 24 24"><path d="M4.5 12a7.5 7.5 0 1 0 2.1-5.2"/><path d="M4.5 4.5v4.2h4.2"/></svg>
+                  </span>
+                  <span class="chip-label">恢复默认</span>
+                </button>
+                <button type="button" id="btnWallpaper" class="chip-btn chip-sm chip-primary" title="自定义皮肤">
+                  <span class="chip-ico" aria-hidden="true">
+                    <svg viewBox="0 0 24 24"><rect x="3.5" y="5" width="17" height="14" rx="2"/><path d="m3.5 15.5 4.2-4.2a1.5 1.5 0 0 1 2.1 0L16 17.5"/><path d="m14 15 1.4-1.4a1.5 1.5 0 0 1 2.1 0l3 3"/><circle cx="9" cy="9.5" r="1.3"/></svg>
+                  </span>
+                  <span class="chip-label">自定义皮肤</span>
+                </button>
+                <button type="button" id="btnHelp" class="chip-btn chip-sm" title="使用说明">
+                  <span class="chip-ico" aria-hidden="true">
+                    <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 16.2v-.3"/><path d="M12 13.2c0-1.1.7-1.6 1.4-2 .8-.5 1.4-1 1.4-2.1A2.7 2.7 0 0 0 12 6.5a2.7 2.7 0 0 0-2.7 2.5"/></svg>
+                  </span>
+                  <span class="chip-label">使用说明</span>
+                </button>
               </div>
             </div>
             <div class="toolbar-right muted" id="resultCount"></div>
@@ -228,33 +313,14 @@
             </button>
           </div>
 
-          <div class="sessions-metrics" aria-label="本页统计">
-            <div class="sess-metric">
-              <span class="sess-metric-label">当前页会话</span>
-              <strong class="sess-metric-value" id="sessMetricCount">—</strong>
-            </div>
-            <div class="sess-metric">
-              <span class="sess-metric-label">未归档</span>
-              <strong class="sess-metric-value" id="sessMetricActive">—</strong>
-            </div>
-            <div class="sess-metric">
-              <span class="sess-metric-label">已归档</span>
-              <strong class="sess-metric-value" id="sessMetricArchived">—</strong>
-            </div>
-            <div class="sess-metric sess-metric-path">
-              <span class="sess-metric-label" id="sessMetricPathLabel">数据库</span>
-              <strong class="sess-metric-value" id="sessMetricDb">—</strong>
-            </div>
-          </div>
-
           <div class="sessions-tools-panel" id="sessCodexTools" aria-label="Codex 历史修复">
             <div class="sessions-tools-row">
-              <label class="sess-field">
-                <span class="sess-field-label">同步目标 provider</span>
-                <select id="sessProviderTarget" class="sess-select ui-select-source" data-ui-select data-placeholder="当前配置 provider" data-searchable="true" aria-label="同步目标 provider"></select>
+              <label class="prov-field sess-field">
+                <span class="prov-field-label">provider</span>
+                <select id="sessProviderTarget" class="ui-select-source" data-ui-select data-ui-select-variant="toolbar" data-placeholder="当前配置 provider" data-searchable="true" aria-label="同步目标 provider"></select>
               </label>
-              <button type="button" class="chip-btn" id="btnSessRepair" title="立刻修复历史会话">
-                <span class="chip-label">立刻修复历史会话</span>
+              <button type="button" class="chip-btn" id="btnSessRepair" title="修复历史会话">
+                <span class="chip-label">修复历史会话</span>
               </button>
               <button type="button" class="chip-btn" id="btnSessIndexPreview" title="预览索引孤儿">
                 <span class="chip-label">预览索引清理</span>
@@ -265,11 +331,6 @@
             </div>
             <div class="sess-repair-status" id="sessRepairStatus" hidden></div>
             <div class="sess-index-preview" id="sessIndexPreview" hidden></div>
-          </div>
-
-          <div class="sess-undo-bar" id="sessUndoBar" hidden>
-            <span id="sessUndoLabel">可撤销最近一次删除</span>
-            <button type="button" class="chip-btn" id="btnSessUndo">撤销删除</button>
           </div>
 
           <div class="sessions-panel">
@@ -292,7 +353,7 @@
                     <option value="">全部项目</option>
                   </select>
                 </label>
-                <label class="session-filter-field session-filter-check">
+                <label class="session-filter-field ui-check session-filter-check">
                   <input type="checkbox" id="sessGroupByProject" checked />
                   <span>按项目分组</span>
                 </label>
@@ -305,6 +366,15 @@
                 <button type="button" class="chip-btn" id="btnSessSelectAll">全选</button>
                 <button type="button" class="chip-btn" id="btnSessClearSel">清空</button>
                 <button type="button" class="chip-btn chip-danger" id="btnSessMultiDelete">多选删除</button>
+                <button
+                  type="button"
+                  class="chip-btn chip-primary"
+                  id="btnSessUndo"
+                  hidden
+                  title="撤销最近一次 Codex 删除"
+                >
+                  <span class="chip-label" id="sessUndoLabel">撤销删除</span>
+                </button>
               </div>
             </div>
             <div class="session-list" id="sessList" hidden></div>
@@ -330,36 +400,59 @@
             </div>
           </div>
 
-          <div class="sessions-tabs" id="provTabs" role="tablist" aria-label="供应商应用">
-            <button type="button" class="sessions-tab is-active" role="tab" id="provTabCodex" data-prov-app="codex" aria-selected="true" title="Codex / ChatGPT 桌面端">
-              <span class="sess-tab-ico sess-tab-ico-chatgpt" aria-hidden="true">
-                <svg viewBox="0 0 180 180" width="16" height="16" focusable="false">
-                  <path fill="currentColor" d="M101.228 164.247C96.2776 164.247 91.5751 163.307 87.1201 161.426C82.6651 159.545 78.7051 156.921 75.2401 153.555C71.4781 154.842 67.5676 155.486 63.5086 155.486C56.8756 155.486 50.7376 153.852 45.0946 150.585C39.4516 147.318 34.8976 142.863 31.4326 137.22C28.0666 131.577 26.3836 125.291 26.3836 118.361C26.3836 115.49 26.7796 112.371 27.5716 109.005C23.6116 105.342 20.5426 101.135 18.3646 96.3828C16.1866 91.5318 15.0976 86.4828 15.0976 81.2358C15.0976 75.8898 16.2361 70.7418 18.5131 65.7918C20.7901 60.8418 23.9581 56.5848 28.0171 53.0208C32.1751 49.3578 36.9766 46.8333 42.4216 45.4473C43.5106 39.8043 45.7876 34.7553 49.2526 30.3003C52.8166 25.7463 57.1726 22.1823 62.3206 19.6083C67.4686 17.0343 72.9631 15.7473 78.8041 15.7473C83.7541 15.7473 88.4566 16.6878 92.9116 18.5688C97.3666 20.4498 101.327 23.0733 104.792 26.4393C108.554 25.1523 112.464 24.5088 116.523 24.5088C123.156 24.5088 129.294 26.1423 134.937 29.4093C140.58 32.6763 145.085 37.1313 148.451 42.7743C151.916 48.4173 153.648 54.7038 153.648 61.6338C153.648 64.5048 153.252 67.6233 152.46 70.9893C156.42 74.6523 159.489 78.9093 161.667 83.7603C163.845 88.5123 164.934 93.5118 164.934 98.7588C164.934 104.105 163.796 109.253 161.519 114.203C159.242 119.153 156.024 123.459 151.866 127.122C147.807 130.686 143.055 133.161 137.61 134.547C136.521 140.19 134.195 145.239 130.631 149.694C127.166 154.248 122.859 157.812 117.711 160.386C112.563 162.96 107.069 164.247 101.228 164.247ZM64.5481 145.685C69.4981 145.685 73.8046 144.645 77.4676 142.566L105.386 126.528C106.376 125.835 106.871 124.895 106.871 123.707V110.936L70.9336 131.577C68.7556 132.864 66.5776 132.864 64.3996 131.577L36.3331 115.391C36.3331 115.688 36.2836 116.034 36.1846 116.43C36.1846 116.826 36.1846 117.42 36.1846 118.212C36.1846 123.261 37.3726 127.914 39.7486 132.171C42.2236 136.329 45.6391 139.596 49.9951 141.972C54.3511 144.447 59.2021 145.685 64.5481 145.685ZM66.0331 121.479C66.6271 121.776 67.1716 121.925 67.6666 121.925C68.1616 121.925 68.6566 121.776 69.1516 121.479L80.2891 115.094L44.5006 94.3038C42.3226 93.0168 41.2336 91.0863 41.2336 88.5123V56.2878C36.2836 58.4658 32.3236 61.8318 29.3536 66.3858C26.3836 70.8408 24.8986 75.7908 24.8986 81.2358C24.8986 86.0868 26.1361 90.7398 28.6111 95.1948C31.0861 99.6498 34.3036 103.016 38.2636 105.293L66.0331 121.479ZM101.228 154.446C106.475 154.446 111.227 153.258 115.484 150.882C119.741 148.506 123.107 145.239 125.582 141.081C128.057 136.923 129.294 132.27 129.294 127.122V95.0463C129.294 93.8583 128.799 92.9673 127.809 92.3733L116.523 85.8393V127.271C116.523 129.845 115.434 131.775 113.256 133.062L85.1896 149.249C90.0406 152.714 95.3866 154.446 101.228 154.446ZM106.871 100.095V79.8993L90.09 70.3953L73.1611 79.8993V100.095L90.09 109.599L106.871 100.095ZM63.5086 52.7238C63.5086 50.1498 64.5976 48.2193 66.7756 46.9323L94.8421 30.7458C89.9911 27.2808 84.6451 25.5483 78.8041 25.5483C73.5571 25.5483 68.8051 26.7363 64.5481 29.1123C60.2911 31.4883 56.9251 34.7553 54.4501 38.9133C52.0741 43.0713 50.8861 47.7243 50.8861 52.8723V84.7998C50.8861 85.9878 51.3811 86.9283 52.3711 87.6213L63.5086 94.1553V52.7238ZM138.947 123.707C143.897 121.529 147.807 118.163 150.678 113.609C153.648 109.055 155.133 104.105 155.133 98.7588C155.133 93.9078 153.896 89.2548 151.421 84.7998C148.946 80.3448 145.728 76.9788 141.768 74.7018L113.999 58.6638C113.405 58.2678 112.86 58.1193 112.365 58.2183C111.87 58.2183 111.375 58.3668 110.88 58.6638L99.7426 64.9008L135.68 85.8393C136.769 86.4333 137.561 87.2253 138.056 88.2153C138.65 89.1063 138.947 90.1953 138.947 91.4823V123.707ZM109.098 48.2688C111.276 46.8828 113.454 46.8828 115.632 48.2688L143.847 64.7523C143.847 64.0593 143.847 63.1683 143.847 62.0793C143.847 57.3273 142.659 52.8228 140.283 48.5658C138.006 44.2098 134.69 40.7448 130.334 38.1708C126.077 35.5968 121.127 34.3098 115.484 34.3098C110.534 34.3098 106.227 35.3493 102.564 37.4283L74.6461 53.4663C73.6561 54.1593 73.1611 55.0998 73.1611 56.2878V69.0588L109.098 48.2688Z"/>
-                </svg>
-              </span>
-              <span class="sess-tab-label">Codex</span>
-            </button>
-            <button type="button" class="sessions-tab" role="tab" id="provTabGrok" data-prov-app="grok" aria-selected="false" title="Grok Build">
-              <span class="sess-tab-ico sess-tab-ico-grok" aria-hidden="true">
-                <svg viewBox="0 0 34 33" width="16" height="16" focusable="false">
-                  <path fill="currentColor" d="M13.2371 21.0407L24.3186 12.8506C24.8619 12.4491 25.6384 12.6057 25.8973 13.2294C27.2597 16.5185 26.651 20.4712 23.9403 23.1851C21.2297 25.8989 17.4581 26.4941 14.0108 25.1386L10.2449 26.8843C15.6463 30.5806 22.2053 29.6665 26.304 25.5601C29.5551 22.3051 30.562 17.8683 29.6205 13.8673L29.629 13.8758C28.2637 7.99809 29.9647 5.64871 33.449 0.844576C33.5314 0.730667 33.6139 0.616757 33.6964 0.5L29.1113 5.09055V5.07631L13.2343 21.0436"/>
-                  <path fill="currentColor" d="M10.9503 23.0313C7.07343 19.3235 7.74185 13.5853 11.0498 10.2763C13.4959 7.82722 17.5036 6.82767 21.0021 8.2971L24.7595 6.55998C24.0826 6.07017 23.215 5.54334 22.2195 5.17313C17.7198 3.31926 12.3326 4.24192 8.67479 7.90126C5.15635 11.4239 4.0499 16.8403 5.94992 21.4622C7.36924 24.9165 5.04257 27.3598 2.69884 29.826C1.86829 30.7002 1.0349 31.5745 0.36364 32.5L10.9474 23.0341"/>
-                </svg>
-              </span>
-              <span class="sess-tab-label">Grok Build</span>
-            </button>
+          <div class="prov-tabs-row">
+            <div class="sessions-tabs" id="provTabs" role="tablist" aria-label="供应商应用">
+              <button type="button" class="sessions-tab is-active" role="tab" id="provTabCodex" data-prov-app="codex" aria-selected="true" title="Codex / ChatGPT 桌面端">
+                <span class="sess-tab-ico sess-tab-ico-chatgpt" aria-hidden="true">
+                  <svg viewBox="0 0 180 180" width="16" height="16" focusable="false">
+                    <path fill="currentColor" d="M101.228 164.247C96.2776 164.247 91.5751 163.307 87.1201 161.426C82.6651 159.545 78.7051 156.921 75.2401 153.555C71.4781 154.842 67.5676 155.486 63.5086 155.486C56.8756 155.486 50.7376 153.852 45.0946 150.585C39.4516 147.318 34.8976 142.863 31.4326 137.22C28.0666 131.577 26.3836 125.291 26.3836 118.361C26.3836 115.49 26.7796 112.371 27.5716 109.005C23.6116 105.342 20.5426 101.135 18.3646 96.3828C16.1866 91.5318 15.0976 86.4828 15.0976 81.2358C15.0976 75.8898 16.2361 70.7418 18.5131 65.7918C20.7901 60.8418 23.9581 56.5848 28.0171 53.0208C32.1751 49.3578 36.9766 46.8333 42.4216 45.4473C43.5106 39.8043 45.7876 34.7553 49.2526 30.3003C52.8166 25.7463 57.1726 22.1823 62.3206 19.6083C67.4686 17.0343 72.9631 15.7473 78.8041 15.7473C83.7541 15.7473 88.4566 16.6878 92.9116 18.5688C97.3666 20.4498 101.327 23.0733 104.792 26.4393C108.554 25.1523 112.464 24.5088 116.523 24.5088C123.156 24.5088 129.294 26.1423 134.937 29.4093C140.58 32.6763 145.085 37.1313 148.451 42.7743C151.916 48.4173 153.648 54.7038 153.648 61.6338C153.648 64.5048 153.252 67.6233 152.46 70.9893C156.42 74.6523 159.489 78.9093 161.667 83.7603C163.845 88.5123 164.934 93.5118 164.934 98.7588C164.934 104.105 163.796 109.253 161.519 114.203C159.242 119.153 156.024 123.459 151.866 127.122C147.807 130.686 143.055 133.161 137.61 134.547C136.521 140.19 134.195 145.239 130.631 149.694C127.166 154.248 122.859 157.812 117.711 160.386C112.563 162.96 107.069 164.247 101.228 164.247ZM64.5481 145.685C69.4981 145.685 73.8046 144.645 77.4676 142.566L105.386 126.528C106.376 125.835 106.871 124.895 106.871 123.707V110.936L70.9336 131.577C68.7556 132.864 66.5776 132.864 64.3996 131.577L36.3331 115.391C36.3331 115.688 36.2836 116.034 36.1846 116.43C36.1846 116.826 36.1846 117.42 36.1846 118.212C36.1846 123.261 37.3726 127.914 39.7486 132.171C42.2236 136.329 45.6391 139.596 49.9951 141.972C54.3511 144.447 59.2021 145.685 64.5481 145.685ZM66.0331 121.479C66.6271 121.776 67.1716 121.925 67.6666 121.925C68.1616 121.925 68.6566 121.776 69.1516 121.479L80.2891 115.094L44.5006 94.3038C42.3226 93.0168 41.2336 91.0863 41.2336 88.5123V56.2878C36.2836 58.4658 32.3236 61.8318 29.3536 66.3858C26.3836 70.8408 24.8986 75.7908 24.8986 81.2358C24.8986 86.0868 26.1361 90.7398 28.6111 95.1948C31.0861 99.6498 34.3036 103.016 38.2636 105.293L66.0331 121.479ZM101.228 154.446C106.475 154.446 111.227 153.258 115.484 150.882C119.741 148.506 123.107 145.239 125.582 141.081C128.057 136.923 129.294 132.27 129.294 127.122V95.0463C129.294 93.8583 128.799 92.9673 127.809 92.3733L116.523 85.8393V127.271C116.523 129.845 115.434 131.775 113.256 133.062L85.1896 149.249C90.0406 152.714 95.3866 154.446 101.228 154.446ZM106.871 100.095V79.8993L90.09 70.3953L73.1611 79.8993V100.095L90.09 109.599L106.871 100.095ZM63.5086 52.7238C63.5086 50.1498 64.5976 48.2193 66.7756 46.9323L94.8421 30.7458C89.9911 27.2808 84.6451 25.5483 78.8041 25.5483C73.5571 25.5483 68.8051 26.7363 64.5481 29.1123C60.2911 31.4883 56.9251 34.7553 54.4501 38.9133C52.0741 43.0713 50.8861 47.7243 50.8861 52.8723V84.7998C50.8861 85.9878 51.3811 86.9283 52.3711 87.6213L63.5086 94.1553V52.7238ZM138.947 123.707C143.897 121.529 147.807 118.163 150.678 113.609C153.648 109.055 155.133 104.105 155.133 98.7588C155.133 93.9078 153.896 89.2548 151.421 84.7998C148.946 80.3448 145.728 76.9788 141.768 74.7018L113.999 58.6638C113.405 58.2678 112.86 58.1193 112.365 58.2183C111.87 58.2183 111.375 58.3668 110.88 58.6638L99.7426 64.9008L135.68 85.8393C136.769 86.4333 137.561 87.2253 138.056 88.2153C138.65 89.1063 138.947 90.1953 138.947 91.4823V123.707ZM109.098 48.2688C111.276 46.8828 113.454 46.8828 115.632 48.2688L143.847 64.7523C143.847 64.0593 143.847 63.1683 143.847 62.0793C143.847 57.3273 142.659 52.8228 140.283 48.5658C138.006 44.2098 134.69 40.7448 130.334 38.1708C126.077 35.5968 121.127 34.3098 115.484 34.3098C110.534 34.3098 106.227 35.3493 102.564 37.4283L74.6461 53.4663C73.6561 54.1593 73.1611 55.0998 73.1611 56.2878V69.0588L109.098 48.2688Z"/>
+                  </svg>
+                </span>
+                <span class="sess-tab-label">Codex</span>
+              </button>
+              <button type="button" class="sessions-tab" role="tab" id="provTabGrok" data-prov-app="grok" aria-selected="false" title="Grok Build">
+                <span class="sess-tab-ico sess-tab-ico-grok" aria-hidden="true">
+                  <svg viewBox="0 0 34 33" width="16" height="16" focusable="false">
+                    <path fill="currentColor" d="M13.2371 21.0407L24.3186 12.8506C24.8619 12.4491 25.6384 12.6057 25.8973 13.2294C27.2597 16.5185 26.651 20.4712 23.9403 23.1851C21.2297 25.8989 17.4581 26.4941 14.0108 25.1386L10.2449 26.8843C15.6463 30.5806 22.2053 29.6665 26.304 25.5601C29.5551 22.3051 30.562 17.8683 29.6205 13.8673L29.629 13.8758C28.2637 7.99809 29.9647 5.64871 33.449 0.844576C33.5314 0.730667 33.6139 0.616757 33.6964 0.5L29.1113 5.09055V5.07631L13.2343 21.0436"/>
+                    <path fill="currentColor" d="M10.9503 23.0313C7.07343 19.3235 7.74185 13.5853 11.0498 10.2763C13.4959 7.82722 17.5036 6.82767 21.0021 8.2971L24.7595 6.55998C24.0826 6.07017 23.215 5.54334 22.2195 5.17313C17.7198 3.31926 12.3326 4.24192 8.67479 7.90126C5.15635 11.4239 4.0499 16.8403 5.94992 21.4622C7.36924 24.9165 5.04257 27.3598 2.69884 29.826C1.86829 30.7002 1.0349 31.5745 0.36364 32.5L10.9474 23.0341"/>
+                  </svg>
+                </span>
+                <span class="sess-tab-label">Grok Build</span>
+              </button>
+            </div>
+            <div class="prov-route-controls" data-no-drag>
+              <button type="button" class="prov-route-switch" id="provRouteToggle" role="switch" aria-checked="false" title="将当前应用 live 指向本地代理；开启后切换供应商可热生效">
+                <span class="prov-route-ico" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" width="14" height="14"><path d="M4.5 12a7.5 7.5 0 1 0 15 0 7.5 7.5 0 0 0-15 0z" fill="none" stroke="currentColor" stroke-width="1.6"/><circle cx="12" cy="12" r="2.2" fill="currentColor"/><path d="M12 4.5v2.2M12 17.3v2.2M4.5 12h2.2M17.3 12h2.2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+                </span>
+                <span class="prov-route-label">本地路由</span>
+                <span class="prov-route-knob" aria-hidden="true"></span>
+              </button>
+              <button type="button" class="chip-btn" id="btnProvRouteSettings" title="本地路由设置（端口 / 故障转移）">
+                <span class="chip-label">路由设置</span>
+              </button>
+              <button type="button" class="chip-btn" id="btnProvRouteLogs" title="查看本地路由请求日志">
+                <span class="chip-label">日志</span>
+              </button>
+            </div>
           </div>
 
           <div class="sessions-panel providers-panel">
             <div class="session-list-toolbar providers-list-toolbar">
               <div class="session-toolbar-filters">
-                <div class="prov-live-bar" id="provLiveBar" role="status" hidden>
-                  <span class="prov-live-dot" id="provLiveDot" aria-hidden="true"></span>
-                  <div class="prov-live-text">
-                    <strong class="prov-live-title" id="provLiveTitle">当前启用 —</strong>
-                    <span class="prov-live-detail" id="provLiveDetail">—</span>
+                <div class="prov-live-row">
+                  <div class="prov-live-bar" id="provLiveBar" role="status" hidden>
+                    <span class="prov-live-dot" id="provLiveDot" aria-hidden="true"></span>
+                    <div class="prov-live-text">
+                      <strong class="prov-live-title" id="provLiveTitle">当前启用 —</strong>
+                      <span class="prov-live-detail" id="provLiveDetail">—</span>
+                    </div>
+                    <div class="prov-live-meta" id="provLiveMeta"></div>
                   </div>
-                  <div class="prov-live-meta" id="provLiveMeta"></div>
+                  <label class="ui-check prov-codex-auth-inline" id="provCodexAuthRow" hidden title="第三方启用只写 config.toml，不覆盖 auth.json 中的 ChatGPT 登录">
+                    <input type="checkbox" id="provPreserveCodexAuth" checked />
+                    <span>保留官方登录</span>
+                  </label>
                 </div>
               </div>
               <div class="session-selection-actions">
@@ -383,7 +476,7 @@
           </div>
 
           <p class="sessions-hint" id="provHint">
-            提示：档案保存在应用状态目录 <code>providers.json</code>。启用会写回本机配置（Codex：auth.json + config.toml；Grok：config.toml，并尽量保留 MCP）。切换后请重启对应客户端 / CLI。
+            提示：切换供应商需要重启客户端；本地路由开启后重启后再去切换通常无需重启客户端。
           </p>
         </section>
 
@@ -396,7 +489,7 @@
               <div class="about-hero-text">
                 <div class="about-title-row">
                   <h1 class="about-title">ChatGPT 皮肤管理</h1>
-                  <span class="about-ver-badge" id="aboutVersionBadge">v2.2.0</span>
+                  <span class="about-ver-badge" id="aboutVersionBadge">v1.1.12</span>
                 </div>
                 <p class="about-tagline">个性化你的 ChatGPT 体验</p>
                 <p class="about-desc">
@@ -437,7 +530,7 @@
               <dl class="about-meta-list">
                 <div class="about-meta-row">
                   <dt>当前版本</dt>
-                  <dd id="aboutVersionText">v2.2.0</dd>
+                  <dd id="aboutVersionText">v1.1.12</dd>
                 </div>
                 <div class="about-meta-row">
                   <dt>发布日期</dt>
@@ -478,10 +571,8 @@
               </header>
               <ol class="about-steps">
                 <li>在左侧选择或浏览喜欢的皮肤</li>
-                <li>点击皮肤卡片即可预览效果</li>
-                <li>点击「应用中」按钮应用皮肤</li>
-                <li>根据提示重启 ChatGPT 客户端</li>
-                <li>开始享受全新的视觉体验</li>
+                <li>点击「使用皮肤」自动切换皮肤。</li>
+                <li>供应商开启本地路由后支持热切不重启客户端</li>
               </ol>
               <button type="button" class="about-pill-btn" id="btnAboutHelp">
                 <span>查看详细使用说明</span>
@@ -491,30 +582,39 @@
               </button>
             </article>
 
-            <article class="about-card">
+            <article class="about-card" id="aboutContactCard">
               <header class="about-card-head">
                 <span class="about-card-ico ico-mail" aria-hidden="true">
                   <svg viewBox="0 0 24 24"><rect x="3.5" y="5.5" width="17" height="13" rx="2"/><path d="m4.5 7.5 7.5 6 7.5-6"/></svg>
                 </span>
                 <h2>联系我们</h2>
               </header>
-              <p class="about-card-lead">如有问题或建议，欢迎与我们联系</p>
-              <ul class="about-contact-list">
-                <li>
-                  <span class="about-contact-ico" aria-hidden="true">
-                    <svg viewBox="0 0 24 24"><rect x="3.5" y="5.5" width="17" height="13" rx="2"/><path d="m4.5 7.5 7.5 6 7.5-6"/></svg>
-                  </span>
-                  <span class="about-contact-label">邮箱：</span>
-                  <a class="about-contact-link" href="#" data-mailto="support@chatgpt-skins.com">support@chatgpt-skins.com</a>
-                </li>
-                <li>
-                  <span class="about-contact-ico" aria-hidden="true">
-                    <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5" fill="none"/><path d="M3.5 12h17M12 3.5c2.4 2.6 3.6 5.4 3.6 8.5s-1.2 5.9-3.6 8.5M12 3.5C9.6 6.1 8.4 8.9 8.4 12s1.2 5.9 3.6 8.5"/></svg>
-                  </span>
-                  <span class="about-contact-label">网站：</span>
-                  <a class="about-contact-link" href="#" data-external="https://www.chatgpt-skins.com">www.chatgpt-skins.com</a>
-                </li>
-              </ul>
+              <!-- fields 模式：动态列表；html 模式：remote 宿主（互斥，有 html 时不显示预设） -->
+              <div class="about-contact-host" id="aboutContactHost">
+                <div class="about-contact-image-wrap" id="aboutContactImageWrap" hidden></div>
+                <div class="about-contact-fallback" id="aboutContactFallback">
+                  <p class="about-card-lead" id="aboutContactNote">如有问题或建议，欢迎与我们联系</p>
+                  <ul class="about-contact-list" id="aboutContactList">
+                    <li>
+                      <span class="about-contact-ico" aria-hidden="true">
+                        <svg viewBox="0 0 24 24"><rect x="3.5" y="5.5" width="17" height="13" rx="2"/><path d="m4.5 7.5 7.5 6 7.5-6"/></svg>
+                      </span>
+                      <span class="about-contact-label">邮箱：</span>
+                      <a class="about-contact-link" href="#" data-mailto="support@chatgpt-skins.com">support@chatgpt-skins.com</a>
+                    </li>
+                    <li>
+                      <span class="about-contact-ico" aria-hidden="true">
+                        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5" fill="none"/><path d="M3.5 12h17M12 3.5c2.4 2.6 3.6 5.4 3.6 8.5s-1.2 5.9-3.6 8.5M12 3.5C9.6 6.1 8.4 8.9 8.4 12s1.2 5.9 3.6 8.5"/></svg>
+                      </span>
+                      <span class="about-contact-label">网站：</span>
+                      <a class="about-contact-link" href="#" data-external="https://www.chatgpt-skins.com">www.chatgpt-skins.com</a>
+                    </li>
+                  </ul>
+                </div>
+                <div class="about-contact-remote" id="aboutContactRemote" hidden>
+                  <div class="about-contact-remote-body" id="aboutContactRemoteBody"></div>
+                </div>
+              </div>
             </article>
 
             <article class="about-card">
@@ -540,14 +640,22 @@
                 <h2>开源协议</h2>
               </header>
               <p class="about-card-lead">本项目遵循 MIT 开源协议发布</p>
-              <button type="button" class="about-pill-btn" id="btnAboutLicense" data-external="https://opensource.org/licenses/MIT">
-                <span>查看开源协议</span>
-                <svg class="about-pill-ico about-pill-ext" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
-                  <path d="M6.5 3.5H3.8A1.3 1.3 0 0 0 2.5 4.8v7.4c0 .7.6 1.3 1.3 1.3h7.4c.7 0 1.3-.6 1.3-1.3V9.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-                  <path d="M9.5 2.5h4v4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-                  <path d="m13.5 2.5-6 6" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
-                </svg>
-              </button>
+              <div class="about-pill-row">
+                <button type="button" class="about-pill-btn" id="btnAboutLicense" data-external="https://opensource.org/licenses/MIT">
+                  <span>查看开源协议</span>
+                  <svg class="about-pill-ico about-pill-ext" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
+                    <path d="M6.5 3.5H3.8A1.3 1.3 0 0 0 2.5 4.8v7.4c0 .7.6 1.3 1.3 1.3h7.4c.7 0 1.3-.6 1.3-1.3V9.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                    <path d="M9.5 2.5h4v4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                    <path d="m13.5 2.5-6 6" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+                  </svg>
+                </button>
+                <button type="button" class="about-pill-btn about-github-btn" id="btnAboutGithub" hidden title="在 GitHub 上查看源码" aria-label="GitHub 仓库">
+                  <svg class="about-pill-ico about-github-ico" viewBox="0 0 16 16" width="15" height="15" aria-hidden="true">
+                    <path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z"/>
+                  </svg>
+                  <span>GitHub</span>
+                </button>
+              </div>
             </article>
           </div>
 
@@ -573,9 +681,9 @@
           <h3>基本操作</h3>
           <ul>
             <li><b>换肤</b>：将鼠标移到卡片预览上，点「使用皮肤」或「重新应用」</li>
-            <li><b>导入</b>：主区域点「导入皮肤」，选择 <code>.cgskin</code> / <code>.zip</code> 皮肤包</li>
+            <li><b>导入</b>：主区域点「导入皮肤」，选择 <code>.skin</code> / <code>.zip</code> 皮肤包</li>
             <li><b>导出</b>：将鼠标移到卡片预览上，点「导出」分享给别人</li>
-            <li><b>恢复默认</b>：顶部点「恢复默认」，还原官方界面并自动重开 ChatGPT</li>
+            <li><b>恢复默认</b>：皮肤页工具栏搜索框旁点「恢复默认」，还原官方界面并自动重开 ChatGPT</li>
           </ul>
 
           <h3>导入安全</h3>
@@ -585,9 +693,9 @@
           <ul>
             <li>需已安装 ChatGPT / Codex 桌面版</li>
             <li>若提示未安装，可在左侧点「选择客户端」手动选择 exe</li>
-            <li>Microsoft Store 版也会自动识别</li>
+            <li>ChatGPT/Codex在设置-外观-主题配色方案中选择不同配色可以更好适配皮肤</li>
             <li>不修改官方安装包，可随时还原</li>
-            <li>同时只建议启用一套皮肤</li>
+            <li>桌面端本身比较卡在使用第三方模型的时候，模型列表解锁时机是在皮肤加载之后，所以刚启动没看到第三方模型属于正常稍等几分钟。</li>
             <li><b>DevTools</b>：「自定义皮肤」弹窗内的调试工具，简化版类 Chrome 开发者工具</li>
           </ul>
         </div>
@@ -607,26 +715,32 @@
           </div>
         </div>
         <form id="wallpaperForm" class="wallpaper-form">
-          <label>基于目标皮肤模板<select id="wallpaperBase" required></select></label>
+          <label class="prov-field">
+            <span class="prov-field-label">基于目标皮肤模板</span>
+            <select id="wallpaperBase" required></select>
+          </label>
           <div class="image-drop" id="imageDrop">
             <button type="button" class="ghost sm" id="btnChooseWallpaper">选择壁纸</button>
             <span id="wallpaperFileName">支持 PNG、JPG、WebP，最大 16 MB</span>
           </div>
           <input type="hidden" id="wallpaperPath" />
-          <label>皮肤名称<input id="wallpaperName" maxlength="80" placeholder="例如：白月魁 · 归尘" required /></label>
+          <label class="prov-field">
+            <span class="prov-field-label">皮肤名称</span>
+            <input id="wallpaperName" maxlength="80" placeholder="例如：白月魁 · 归尘" required />
+          </label>
           <div class="editor-grid">
-            <label>主色<input id="themeAccent" type="color" value="#8b7cff" /></label>
-            <label>页面底色<input id="themeBackground" type="color" value="#f7f8fc" /></label>
-            <label>文字颜色<input id="themeText" type="color" value="#202536" /></label>
-            <label>面板颜色<input id="themePanel" type="color" value="#ffffff" /></label>
-            <label>字体<select id="themeFont"><option value="system">系统默认</option><option value="sans">现代无衬线</option><option value="serif">宋体 / 衬线</option><option value="mono">等宽字体</option></select></label>
-            <label>圆角<select id="themeRadius"><option value="0">直角</option><option value="8">小</option><option value="16" selected>标准</option><option value="26">圆润</option></select></label>
-            <label>图片适配<select id="wallpaperFit"><option value="cover">铺满（可能裁切）</option><option value="contain">完整显示</option></select></label>
-            <label>主体位置<select id="wallpaperPosition"><option value="right center">右侧</option><option value="center center">居中</option><option value="left center">左侧</option></select></label>
+            <label class="prov-field"><span class="prov-field-label">主色</span><input id="themeAccent" type="color" value="#8b7cff" /></label>
+            <label class="prov-field"><span class="prov-field-label">页面底色</span><input id="themeBackground" type="color" value="#f7f8fc" /></label>
+            <label class="prov-field"><span class="prov-field-label">文字颜色</span><input id="themeText" type="color" value="#202536" /></label>
+            <label class="prov-field"><span class="prov-field-label">面板颜色</span><input id="themePanel" type="color" value="#ffffff" /></label>
+            <label class="prov-field"><span class="prov-field-label">字体</span><select id="themeFont"><option value="system">系统默认</option><option value="sans">现代无衬线</option><option value="serif">宋体 / 衬线</option><option value="mono">等宽字体</option></select></label>
+            <label class="prov-field"><span class="prov-field-label">圆角</span><select id="themeRadius"><option value="0">直角</option><option value="8">小</option><option value="16" selected>标准</option><option value="26">圆润</option></select></label>
+            <label class="prov-field"><span class="prov-field-label">图片适配</span><select id="wallpaperFit"><option value="cover">铺满（可能裁切）</option><option value="contain">完整显示</option></select></label>
+            <label class="prov-field"><span class="prov-field-label">主体位置</span><select id="wallpaperPosition"><option value="right center">右侧</option><option value="center center">居中</option><option value="left center">左侧</option></select></label>
           </div>
-          <label class="range-label">壁纸暗度 <input id="themeOverlay" type="range" min="0" max="70" value="12" /><output id="themeOverlayValue">12%</output></label>
-          <label class="range-label">面板透明度 <input id="themeOpacity" type="range" min="55" max="100" value="92" /><output id="themeOpacityValue">92%</output></label>
-          <div class="form-actions">
+          <label class="prov-field range-label"><span class="prov-field-label">壁纸暗度</span> <input id="themeOverlay" type="range" min="0" max="70" value="12" /><output id="themeOverlayValue">12%</output></label>
+          <label class="prov-field range-label"><span class="prov-field-label">面板透明度</span> <input id="themeOpacity" type="range" min="55" max="100" value="92" /><output id="themeOpacityValue">92%</output></label>
+          <div class="form-actions confirm-actions is-end">
             <button type="button" class="ghost" id="btnWallpaperCancel">取消</button>
             <button type="submit" class="primary">生成自定义皮肤</button>
           </div>
@@ -675,14 +789,197 @@
           <div class="update-notes-label">更新说明</div>
           <div class="update-notes" id="updateNotes" tabindex="0"></div>
         </div>
-        <div class="update-actions">
+        <div class="update-actions confirm-actions is-end">
           <button type="button" class="ghost" id="btnUpdateLater">稍后</button>
           <button type="button" class="primary" id="btnUpdateOpen" hidden>打开下载页</button>
         </div>
       </div>
     </div>
 
+    <!-- 本地路由设置弹窗（分区 + 字段原语；故障转移默认开启） -->
+    <div class="modal" id="provRouteModal" hidden role="dialog" aria-modal="true" aria-labelledby="provRouteModalTitle">
+      <div class="modal-card provider-form-card prov-route-card">
+        <div class="modal-head">
+          <div>
+            <h2 id="provRouteModalTitle">路由设置</h2>
+            <p class="modal-kicker">监听、出口代理、日志与故障转移队列</p>
+          </div>
+          <div class="modal-head-actions">
+            <button type="button" class="icon-btn" id="btnProvRouteModalClose" title="关闭" aria-label="关闭">
+              <svg viewBox="0 0 24 24" width="18" height="18"><path d="M6 6l12 12M18 6 6 18" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
+            </button>
+          </div>
+        </div>
+        <div class="modal-body provider-form-body">
+          <div class="prov-form-section">
+            <div class="prov-form-section-title">监听与转发</div>
+            <div class="prov-field-row">
+              <label class="prov-field">
+                <span class="prov-field-label">监听地址</span>
+                <input type="text" id="provRouteListenHost" value="127.0.0.1" autocomplete="off" spellcheck="false" />
+              </label>
+              <label class="prov-field">
+                <span class="prov-field-label">端口</span>
+                <div class="prov-input-with-action">
+                  <input type="number" id="provRouteListenPort" value="18964" min="1024" max="65535" />
+                  <button type="button" class="ghost sm prov-action-btn" id="btnProvRouteCheckPort" title="检测端口是否可绑定">检测端口</button>
+                </div>
+                <div class="prov-probe-status" id="provRoutePortStatus" hidden role="status"></div>
+              </label>
+            </div>
+            <label class="prov-field">
+              <span class="prov-field-label">出口代理（全局）</span>
+              <input type="text" id="provRouteEgressProxy" value="" placeholder="留空 = 直连；如 http://127.0.0.1:7890 或 socks5://127.0.0.1:1080" autocomplete="off" spellcheck="false" />
+              <span class="prov-field-hint">开启本地路由后，上游经此 HTTP/SOCKS5 出口；留空 = 直连（不继承系统代理）。运行中可热更新。</span>
+            </label>
+            <div class="prov-field-row">
+              <label class="prov-field">
+                <span class="prov-field-label">最大重试</span>
+                <input type="number" id="provRouteMaxRetries" value="3" min="0" max="10" />
+                <span class="prov-field-hint">单次请求失败后的重试次数上限。</span>
+              </label>
+              <div class="prov-field">
+                <span class="prov-field-label">选项</span>
+                <div class="prov-catalog-actions">
+                  <label class="ui-check session-filter-check">
+                    <input type="checkbox" id="provRouteLogging" checked />
+                    <span>请求日志</span>
+                  </label>
+                  <label class="ui-check session-filter-check">
+                    <input type="checkbox" id="provRouteAutoFailover" checked />
+                    <span>自动故障转移</span>
+                  </label>
+                </div>
+              </div>
+            </div>
+            <p class="prov-field-hint" id="provRoutePanelHint">默认端口 18964。改监听地址/端口需先关闭本地路由；出口代理与日志可在运行中修改。</p>
+          </div>
+
+          <div class="prov-form-section">
+            <div class="prov-form-section-title">故障转移队列</div>
+            <span class="prov-field-hint">顺序即优先级（P1 优先）。可点「切换」手动启用队列中的供应商；本地路由开启时热生效。</span>
+            <div class="prov-fo-queue-list" id="provFoQueueList"></div>
+            <label class="prov-field">
+              <span class="prov-field-label">添加备用供应商</span>
+              <div class="prov-input-with-action">
+                <select id="provFoQueueAddSelect" aria-label="添加备用供应商">
+                  <option value="">添加供应商到队列…</option>
+                </select>
+                <button type="button" class="ghost sm prov-action-btn" id="btnProvFoQueueAdd">添加</button>
+              </div>
+            </label>
+          </div>
+        </div>
+        <div class="confirm-actions provider-form-actions">
+          <button type="button" class="ghost" id="btnProvRouteModalCancel">取消</button>
+          <button type="button" class="primary" id="btnProvRouteSaveCfg">保存设置</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 本地路由请求日志（复用 provider-form / session-filter / chip / prov-badge） -->
+    <div class="modal" id="provLogsModal" hidden role="dialog" aria-modal="true" aria-labelledby="provLogsModalTitle">
+      <div class="modal-card provider-form-card prov-logs-card">
+        <div class="modal-head">
+          <div>
+            <h2 id="provLogsModalTitle">请求日志</h2>
+            <p class="modal-kicker" id="provLogsKicker">本地路由转发记录 · 不含 API Key 与请求体</p>
+          </div>
+          <div class="modal-head-actions">
+            <button type="button" class="chip-btn" id="btnProvLogsRefresh" title="刷新">
+              <span class="chip-label">刷新</span>
+            </button>
+            <button type="button" class="chip-btn chip-danger" id="btnProvLogsClear" title="清空全部日志">
+              <span class="chip-label">清空</span>
+            </button>
+            <button type="button" class="icon-btn" id="btnProvLogsModalClose" title="关闭" aria-label="关闭">
+              <svg viewBox="0 0 24 24" width="18" height="18"><path d="M6 6l12 12M18 6 6 18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+            </button>
+          </div>
+        </div>
+        <div class="modal-body provider-form-body prov-logs-body">
+          <!-- 顶栏单行：保留天数 + 筛选 + 计数，尽量少占高度 -->
+          <div class="prov-form-section prov-logs-toolbar-section">
+            <div class="session-list-toolbar providers-list-toolbar prov-logs-toolbar">
+              <div class="session-toolbar-filters">
+                <label class="session-filter-field prov-logs-retention-inline" title="超过保留天数的日志会在写入时自动清理（默认 7 天）">
+                  <span class="session-filter-label">保留</span>
+                  <input type="number" id="provLogsRetentionDays" class="session-filter-input prov-logs-retention-input" min="1" max="365" value="7" step="1" aria-label="日志保留天数" />
+                  <span class="session-filter-label">天</span>
+                  <button type="button" class="ghost sm prov-action-btn" id="btnProvLogsRetentionSave" title="保存保留天数">保存</button>
+                </label>
+                <select id="provLogsFilterApp" class="session-filter-select" aria-label="按应用筛选">
+                  <option value="all">全部应用</option>
+                  <option value="codex">Codex</option>
+                  <option value="grok">Grok</option>
+                </select>
+                <select id="provLogsFilterStatus" class="session-filter-select" aria-label="按状态筛选">
+                  <option value="all">全部状态</option>
+                  <option value="2xx">2xx 成功</option>
+                  <option value="4xx">4xx</option>
+                  <option value="5xx">5xx</option>
+                  <option value="error">失败</option>
+                </select>
+                <div class="session-filter-search">
+                  <input type="search" id="provLogsFilterQ" class="session-filter-input" placeholder="搜索供应商 / 模型 / 路径…" autocomplete="off" spellcheck="false" />
+                </div>
+              </div>
+              <div class="session-selection-actions">
+                <span class="session-selection-summary" id="provLogsTotal" aria-live="polite">共 0 条</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="prov-form-section prov-logs-table-section">
+            <div class="prov-logs-table-wrap" id="provLogsTableWrap">
+              <table class="prov-logs-table" aria-label="请求日志列表">
+                <thead>
+                  <tr>
+                    <th>时间</th>
+                    <th>应用</th>
+                    <th>供应商</th>
+                    <th>模型</th>
+                    <th>耗时</th>
+                    <th>Token</th>
+                    <th>状态</th>
+                  </tr>
+                </thead>
+                <tbody id="provLogsTbody">
+                  <tr class="prov-logs-empty-row">
+                    <td colspan="7">
+                      <div class="session-empty">
+                        <div class="session-empty-title">暂无请求日志</div>
+                        <div class="session-empty-detail">开启本地路由并勾选「请求日志」后，经代理的请求会显示在这里。</div>
+                      </div>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <div class="session-list-toolbar prov-logs-pager" id="provLogsPager" hidden>
+              <div class="session-selection-actions">
+                <button type="button" class="chip-btn" id="btnProvLogsPrev"><span class="chip-label">上一页</span></button>
+                <span class="session-selection-summary" id="provLogsPageLabel">第 1 / 1 页</span>
+                <button type="button" class="chip-btn" id="btnProvLogsNext"><span class="chip-label">下一页</span></button>
+              </div>
+            </div>
+          </div>
+
+          <div class="prov-form-section" id="provLogsDetail" hidden>
+            <div class="prov-logs-detail-head">
+              <div class="prov-form-section-title">请求详情</div>
+              <button type="button" class="icon-btn" id="btnProvLogsDetailClose" title="收起详情" aria-label="收起详情">
+                <svg viewBox="0 0 24 24" width="16" height="16"><path d="M6 6l12 12M18 6 6 18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+              </button>
+            </div>
+            <dl class="ov-meta-list" id="provLogsDetailGrid"></dl>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <!-- 供应商添加 / 编辑 -->
+
     <div class="modal" id="providerFormModal" hidden role="dialog" aria-modal="true" aria-labelledby="providerFormTitle">
       <div class="modal-card provider-form-card">
         <div class="modal-head">
@@ -735,14 +1032,14 @@
                 <input id="provFormBaseUrl" type="text" maxlength="300" placeholder="https://api.example.com/v1" autocomplete="off" inputmode="url" spellcheck="false" />
                 <button type="button" class="ghost sm prov-action-btn" id="btnProvTestConn" title="探测 Base URL 是否可达（不校验鉴权与模型）">测试连通</button>
               </div>
-              <span class="prov-field-hint" id="provFormBaseUrlHint">填写后可先测连通，再拉模型列表。</span>
+              <span class="prov-field-hint" id="provFormBaseUrlHint">填写后可先测连通，再拉模型列表。(连通测试不代表模型调用成功)</span>
               <div class="prov-probe-status" id="provConnStatus" hidden role="status"></div>
             </label>
             <label class="prov-field">
               <span class="prov-field-label">API Key</span>
               <div class="prov-password-wrap">
                 <input id="provFormApiKey" type="password" maxlength="500" placeholder="sk-…" autocomplete="off" spellcheck="false" />
-                <button type="button" class="prov-password-toggle" id="btnProvToggleApiKey" title="显示 API Key" aria-label="显示 API Key" aria-pressed="false">
+                <button type="button" class="icon-btn prov-password-toggle" id="btnProvToggleApiKey" title="显示 API Key" aria-label="显示 API Key" aria-pressed="false">
                   <!-- Heroicons-style outline eye (modern 1.5 stroke) -->
                   <svg class="prov-eye-icon" id="provApiKeyEye" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
                     <path d="M2.036 12.322a1.012 1.012 0 0 1 0-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.964-7.178Z"/>
@@ -802,8 +1099,11 @@
                 </div>
               </div>
               <span class="prov-field-hint">
-                启用时生成 <code>model_catalog_json</code>：Codex <code>/model</code> 以本表为完整列表。
-                点「拉取模型」会<strong>自动填入</strong>全部可用模型；也可手动「添加模型」。保存并启用后需<strong>完全重启 Codex</strong>。
+                CLI 与桌面的<strong>完整可选列表</strong>都来自本表
+                （须包含 DeepSeek / Claude / Gemini / Grok 等实际上游 id）。
+                <strong>ChatGPT/Codex桌面有白名单</strong>：非白名单模型会隐藏或显示为「自定义」——本工具支持<strong>启动 Codex</strong> 后注入解锁。
+                点「拉取模型」可填入全部上游 id；预设也会预填常见 id。
+                上下文列支持主流模型自动识别（如 <code>grok-4.5</code>=5M、<code>gpt-5.6-sol</code>=372K）及常用窗口快速选择。
               </span>
               <div class="prov-probe-status" id="provCatalogStatus" hidden role="status"></div>
               <div class="prov-catalog-table-wrap">
@@ -842,8 +1142,19 @@
             </div>
             <label class="prov-field">
               <span class="prov-field-label">上下文窗口 (context_window)</span>
-              <input id="provFormContextWindow" type="number" min="1" step="1" placeholder="500000" inputmode="numeric" />
-              <span class="prov-field-hint">正整数；默认 500000。</span>
+              <input id="provFormContextWindow" type="number" min="1" step="1" placeholder="500000" inputmode="numeric" list="provFormContextPresetList" />
+              <datalist id="provFormContextPresetList">
+                <option value="128000" label="128K"></option>
+                <option value="200000" label="200K"></option>
+                <option value="256000" label="256K"></option>
+                <option value="372000" label="372K"></option>
+                <option value="400000" label="400K"></option>
+                <option value="500000" label="500K"></option>
+                <option value="1048576" label="1M"></option>
+                <option value="2000000" label="2M"></option>
+                <option value="5000000" label="5M"></option>
+              </datalist>
+              <span class="prov-field-hint">正整数；识别到 grok-4.5 等主流模型会自动建议（如 5M）。也可从下拉预设选择。</span>
             </label>
           </div>
 

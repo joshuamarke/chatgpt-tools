@@ -600,24 +600,31 @@ const PAGE_STABLE_EXPR: &str = r##"(() => {
   }
 })()"##;
 
-/// One-shot: is the first app:// page document stable enough for shell inject?
+/// One-shot: is the primary app:// shell stable enough for shell inject?
+/// Tries up to two highest-ranked targets (main window first after list ranking).
 pub fn probe_page_stable(port: u16) -> bool {
     let Ok(targets) = list_app_targets(port) else {
         return false;
     };
-    let Some(target) = targets.first() else {
+    if targets.is_empty() {
         return false;
-    };
-    let Ok(session) = CdpSession::open(target, port, 2500) else {
-        return false;
-    };
-    let ok = session
-        .evaluate(PAGE_STABLE_EXPR, 3500)
-        .ok()
-        .and_then(|v| v.get("ok").and_then(|x| x.as_bool()))
-        .unwrap_or(false);
-    session.close();
-    ok
+    }
+    // Prefer main shell; if it is mid-hydrate, also accept a second non-aux candidate.
+    for target in targets.iter().take(2) {
+        let Ok(session) = CdpSession::open(target, port, 2500) else {
+            continue;
+        };
+        let ok = session
+            .evaluate(PAGE_STABLE_EXPR, 3500)
+            .ok()
+            .and_then(|v| v.get("ok").and_then(|x| x.as_bool()))
+            .unwrap_or(false);
+        session.close();
+        if ok {
+            return true;
+        }
+    }
+    false
 }
 
 /// Wait until app:// exists **and** document is stable for consecutive polls.
@@ -784,6 +791,44 @@ pub fn inject_once_with_staged(
             .get("pass")
             .and_then(|v| v.as_bool())
             .unwrap_or(false);
+
+        // Phase 1b: model whitelist unlock (desktop third-party models only).
+        // Skip OpenAI Official — never mis-hit official picker. Best-effort.
+        if pass {
+            if crate::providers::model_unlock::should_skip_unlock_for_official() {
+                crate::providers::model_unlock::disarm_keep_loop();
+                if let Some(obj) = verified.as_object_mut() {
+                    obj.insert("modelUnlockOk".into(), json!(false));
+                    obj.insert("modelUnlockSkipped".into(), json!("official"));
+                }
+            } else {
+                let models = crate::providers::model_unlock::resolve_unlock_models(None);
+                if !models.is_empty() {
+                    // Always desire keep so remounts get re-injected.
+                    crate::providers::model_unlock::arm_keep_loop();
+                    match crate::providers::model_unlock::try_inject_into_session(&session, &models)
+                    {
+                        Ok(v) => {
+                            let skipped = v
+                                .get("skipped")
+                                .and_then(|x| x.as_bool())
+                                .unwrap_or(false);
+                            if let Some(obj) = verified.as_object_mut() {
+                                obj.insert("modelUnlockOk".into(), json!(!skipped));
+                                obj.insert("modelUnlockCount".into(), json!(models.len()));
+                                obj.insert("modelUnlockResult".into(), v);
+                            }
+                        }
+                        Err(e) => {
+                            if let Some(obj) = verified.as_object_mut() {
+                                obj.insert("modelUnlockOk".into(), json!(false));
+                                obj.insert("modelUnlockError".into(), json!(e));
+                            }
+                        }
+                    }
+                }
+            }
+        }
 
         // Phase 2 (optional): art on same session (caller owns page OpUI).
         if pass && opts.attach_art && has_art {

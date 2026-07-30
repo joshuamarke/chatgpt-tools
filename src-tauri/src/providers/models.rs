@@ -79,6 +79,13 @@ pub struct Provider {
     pub updated_at: Option<i64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sort_index: Option<usize>,
+    /// When auto-failover is on, this provider is tried in queue order.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub in_failover_queue: bool,
+}
+
+fn is_false(v: &bool) -> bool {
+    !*v
 }
 
 impl Provider {
@@ -95,6 +102,7 @@ impl Provider {
             created_at: Some(now),
             updated_at: Some(now),
             sort_index: None,
+            in_failover_queue: false,
         }
     }
 
@@ -103,26 +111,254 @@ impl Provider {
     }
 }
 
+/// Per-app circuit breaker defaults (local routing).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CircuitConfig {
+    #[serde(default = "default_failure_threshold")]
+    pub failure_threshold: u32,
+    #[serde(default = "default_success_threshold")]
+    pub success_threshold: u32,
+    #[serde(default = "default_circuit_timeout")]
+    pub timeout_seconds: u64,
+    #[serde(default = "default_error_rate")]
+    pub error_rate_threshold: f64,
+    #[serde(default = "default_min_requests")]
+    pub min_requests: u32,
+}
+
+fn default_failure_threshold() -> u32 {
+    4
+}
+fn default_success_threshold() -> u32 {
+    2
+}
+fn default_circuit_timeout() -> u64 {
+    60
+}
+fn default_error_rate() -> f64 {
+    0.6
+}
+fn default_min_requests() -> u32 {
+    10
+}
+
+impl Default for CircuitConfig {
+    fn default() -> Self {
+        Self {
+            failure_threshold: default_failure_threshold(),
+            success_threshold: default_success_threshold(),
+            timeout_seconds: default_circuit_timeout(),
+            error_rate_threshold: default_error_rate(),
+            min_requests: default_min_requests(),
+        }
+    }
+}
+
 /// On-disk store for one app kind.
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AppProviderStore {
     #[serde(default)]
     pub current: String,
     #[serde(default)]
     pub providers: Vec<Provider>,
+    /// Live config base_url points at local proxy for this app.
+    #[serde(default)]
+    pub takeover_enabled: bool,
+    /// Failover queue walk instead of single current provider.
+    /// Default **on** for new installs; existing JSON without the field also enables.
+    #[serde(default = "default_true")]
+    pub auto_failover_enabled: bool,
+    /// Explicit failover order (provider ids). Decoupled from list `sort_index`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub failover_order: Vec<String>,
+    /// Max extra retries after the first attempt (FO attempts = max_retries + 1).
+    #[serde(default = "default_max_retries")]
+    pub max_retries: u32,
+    #[serde(default)]
+    pub circuit: CircuitConfig,
+    #[serde(default = "default_streaming_first_byte")]
+    pub streaming_first_byte_timeout: u64,
+    #[serde(default = "default_streaming_idle")]
+    pub streaming_idle_timeout: u64,
+    #[serde(default = "default_non_streaming")]
+    pub non_streaming_timeout: u64,
+}
+
+impl Default for AppProviderStore {
+    fn default() -> Self {
+        Self {
+            current: String::new(),
+            providers: Vec::new(),
+            takeover_enabled: false,
+            auto_failover_enabled: true,
+            failover_order: Vec::new(),
+            max_retries: default_max_retries(),
+            circuit: CircuitConfig::default(),
+            streaming_first_byte_timeout: default_streaming_first_byte(),
+            streaming_idle_timeout: default_streaming_idle(),
+            non_streaming_timeout: default_non_streaming(),
+        }
+    }
+}
+
+impl AppProviderStore {
+    /// Keep `failover_order` and `in_failover_queue` consistent.
+    ///
+    /// **SSOT is `failover_order` once it is non-empty.** Flags alone only seed
+    /// the order on first migration (empty order). This prevents remove→normalize
+    /// from re-adding providers that still had a stale `in_failover_queue=true`.
+    pub fn normalize_failover_order(&mut self) {
+        self.failover_order
+            .retain(|id| self.providers.iter().any(|p| p.id == *id));
+        // Dedup while preserving order
+        let mut seen = std::collections::HashSet::new();
+        self.failover_order.retain(|id| seen.insert(id.clone()));
+
+        if self.failover_order.is_empty() {
+            // One-time migration from legacy flags
+            for p in &self.providers {
+                if p.in_failover_queue {
+                    self.failover_order.push(p.id.clone());
+                }
+            }
+        }
+        let order = self.failover_order.clone();
+        for p in &mut self.providers {
+            p.in_failover_queue = order.iter().any(|id| id == &p.id);
+        }
+    }
+}
+
+#[cfg(test)]
+mod failover_order_tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn normalize_order_is_ssot_and_clears_stale_flags() {
+        let mut s = AppProviderStore::default();
+        let mut a = Provider::new("a".into(), "A".into(), json!({}));
+        a.in_failover_queue = true; // stale flag — must NOT re-enter order
+        let mut b = Provider::new("b".into(), "B".into(), json!({}));
+        b.in_failover_queue = false;
+        let mut c = Provider::new("c".into(), "C".into(), json!({}));
+        c.in_failover_queue = true;
+        s.providers = vec![a, b, c];
+        s.failover_order = vec!["c".into(), "missing".into()];
+        s.normalize_failover_order();
+        assert_eq!(s.failover_order, vec!["c".to_string()]);
+        assert!(!s.providers.iter().find(|p| p.id == "a").unwrap().in_failover_queue);
+        assert!(!s.providers.iter().find(|p| p.id == "b").unwrap().in_failover_queue);
+        assert!(s.providers.iter().find(|p| p.id == "c").unwrap().in_failover_queue);
+    }
+
+    #[test]
+    fn normalize_migrates_from_flags_when_order_empty() {
+        let mut s = AppProviderStore::default();
+        let mut a = Provider::new("a".into(), "A".into(), json!({}));
+        a.in_failover_queue = true;
+        let b = Provider::new("b".into(), "B".into(), json!({}));
+        s.providers = vec![a, b];
+        s.failover_order.clear();
+        s.normalize_failover_order();
+        assert_eq!(s.failover_order, vec!["a".to_string()]);
+    }
+}
+
+fn default_max_retries() -> u32 {
+    3
+}
+fn default_streaming_first_byte() -> u64 {
+    60
+}
+fn default_streaming_idle() -> u64 {
+    120
+}
+fn default_non_streaming() -> u64 {
+    600
+}
+
+/// Global local-proxy listen settings (shared by Codex + Grok).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GlobalProxyConfig {
+    /// Bind address — default loopback only.
+    #[serde(default = "default_listen_address")]
+    pub listen_address: String,
+    /// Uncommon high port (avoids clash with common local tools).
+    #[serde(default = "default_listen_port")]
+    pub listen_port: u16,
+    #[serde(default = "default_true")]
+    pub enable_logging: bool,
+    /// How many days of proxy request logs to keep (UI-configurable, default 7).
+    #[serde(default = "default_log_retention_days")]
+    pub log_retention_days: u32,
+    /// Optional upstream egress proxy for local-routing outbound requests
+    /// (http / https / socks5). Empty = direct connect (no system proxy).
+    /// Only applies when local routing is on: App → local proxy → [egress] → upstream.
+    #[serde(default)]
+    pub egress_proxy: String,
+}
+
+fn default_log_retention_days() -> u32 {
+    7
+}
+
+fn default_listen_address() -> String {
+    "127.0.0.1".into()
+}
+/// 18964 — deliberately uncommon; avoids clash with common local / dev ports.
+fn default_listen_port() -> u16 {
+    18964
+}
+
+impl Default for GlobalProxyConfig {
+    fn default() -> Self {
+        Self {
+            listen_address: default_listen_address(),
+            listen_port: default_listen_port(),
+            enable_logging: true,
+            log_retention_days: default_log_retention_days(),
+            egress_proxy: String::new(),
+        }
+    }
+}
+
+fn default_true() -> bool {
+    true
 }
 
 /// Root file: `%LOCALAPPDATA%\ChatGPTTools\providers.json`
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ProvidersFile {
     #[serde(default)]
     pub version: u32,
+    /// When true (default), enabling a third-party Codex provider only rewrites
+    /// `config.toml` (provider-scoped bearer + `requires_openai_auth`) and leaves
+    /// `~/.codex/auth.json` ChatGPT / Codex OAuth cache intact.
+    #[serde(default = "default_true")]
+    pub preserve_codex_official_auth: bool,
+    #[serde(default)]
+    pub proxy: GlobalProxyConfig,
     #[serde(default)]
     pub codex: AppProviderStore,
     #[serde(default)]
     pub grok: AppProviderStore,
+}
+
+impl Default for ProvidersFile {
+    fn default() -> Self {
+        Self {
+            version: 2,
+            preserve_codex_official_auth: true,
+            proxy: GlobalProxyConfig::default(),
+            codex: AppProviderStore::default(),
+            grok: AppProviderStore::default(),
+        }
+    }
 }
 
 impl ProvidersFile {
@@ -158,6 +394,12 @@ pub struct LiveStatus {
     pub current_matches_live: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub summary: Option<String>,
+    /// `direct` | `takeover` | `broken`
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mode: Option<String>,
+    /// Machine-readable: ok | drift | unlinked | route_half | route_desync | missing
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detail_code: Option<String>,
 }
 
 /// List payload for the GUI.
@@ -170,6 +412,47 @@ pub struct ProviderListResponse {
     pub live_paths: LivePaths,
     #[serde(default)]
     pub live_status: LiveStatus,
+    /// Codex: keep ChatGPT OAuth in auth.json when enabling third-party providers.
+    #[serde(default = "default_true")]
+    pub preserve_codex_official_auth: bool,
+    #[serde(default)]
+    pub takeover_enabled: bool,
+    #[serde(default)]
+    pub auto_failover_enabled: bool,
+    #[serde(default)]
+    pub proxy: GlobalProxyConfig,
+    #[serde(default)]
+    pub proxy_running: bool,
+    #[serde(default)]
+    pub proxy_status: Option<ProxyRuntimeStatus>,
+}
+
+/// Runtime snapshot for the local routing process (GUI).
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct ProxyRuntimeStatus {
+    pub running: bool,
+    pub address: String,
+    pub port: u16,
+    pub active_connections: usize,
+    pub total_requests: u64,
+    pub success_requests: u64,
+    pub failed_requests: u64,
+    pub success_rate: f32,
+    pub uptime_seconds: u64,
+    pub failover_count: u64,
+    #[serde(default)]
+    pub active_targets: Vec<ProxyActiveTarget>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct ProxyActiveTarget {
+    pub app_type: String,
+    pub provider_id: String,
+    pub provider_name: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -198,6 +481,14 @@ pub struct ProviderSummary {
     /// Ready to switch (has key + base_url for third-party).
     #[serde(default)]
     pub ready: bool,
+    #[serde(default)]
+    pub in_failover_queue: bool,
+    /// 1-based position in failover queue when present.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub failover_priority: Option<usize>,
+    /// healthy | degraded | open | unknown
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub health: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub created_at: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -224,6 +515,9 @@ pub struct SwitchResult {
     pub message: String,
     #[serde(default)]
     pub live_paths: Option<LivePaths>,
+    /// Codex: slugs projected into model_catalog_json (desktop + CLI list).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub projected_models: Vec<String>,
 }
 
 /// Input for add / update from GUI.

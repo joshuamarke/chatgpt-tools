@@ -16,7 +16,7 @@ cargo --version
 5. 进入项目：
 
 ```powershell
-cd E:\临时项目\codex-skin
+cd chatgpt-tools   # 或你的克隆路径
 npm install
 npm run dev
 ```
@@ -63,7 +63,7 @@ node engine/cli.mjs restore
 
 ## 云端开发预览（CDN）
 
-本机对接 `chatgpt-tools-cdn`（默认 `http://127.0.0.1:8788/v1`）：
+本机对接 `chatgpt-tools-cdn`（覆盖生产默认，改用本地 `http://127.0.0.1:8788/v1`）：
 
 ```powershell
 # 终端 1：CDN
@@ -77,7 +77,8 @@ npm run dev
 ```
 
 关闭云端：`$env:CODEX_SKIN_CLOUD_DISABLED = "1"`。  
-完整契约与安全说明见 [../cloud-integration.md](../cloud-integration.md)。
+生产云端 baseUrl **仅在打包时**由 Secrets / `keys/release.env` 注入（勿写入源码或文档）；开发默认本机 `http://127.0.0.1:8788/v1`。安装包默认只内置 `qingkong`，其它皮肤走 catalog。  
+完整契约见 [../cloud-integration.md](../cloud-integration.md)；发版机密见 [../../keys/README.md](../../keys/README.md)。
 
 ## 日志位置
 
@@ -99,3 +100,14 @@ npm run tauri -- icon logo.png
 ```
 
 会生成各尺寸 icns/ico。
+
+## GitHub 自动发版
+
+**先在 GitHub 创建并 Publish Release（含 changelog 正文）**，再由 Actions 构建安装包并挂到该 Release。
+
+- 工作流：`.github/workflows/release-assets.yml`、`.github/workflows/pr-build.yml`
+- 更新日志：`CHANGELOG.md`
+- 签名私钥 Secret：`TAURI_SIGNING_PRIVATE_KEY`（见 [`keys/README.md`](../../keys/README.md)）
+- 应用内更新默认：`https://github.com/<owner>/<repo>/releases/latest/download/latest.json`（CI 自动注入，无需手写 endpoint）
+- 关于页 GitHub 按钮：`src/repo-meta.json`（`npm run stamp:repo` 或 CI 写入）
+- 完整步骤见仓库根目录 [README.md](../../README.md) 的「GitHub Releases」一节

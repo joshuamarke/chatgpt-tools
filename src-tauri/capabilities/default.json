@@ -16,7 +16,9 @@
     "core:window:allow-start-dragging",
     "core:window:allow-set-focus",
     "core:window:allow-show",
+    "core:window:allow-hide",
     "core:window:allow-unminimize",
+    "core:window:allow-set-skip-taskbar",
     "core:path:default",
     "dialog:default",
     "dialog:allow-open",
@@ -26,6 +28,8 @@
     "opener:default",
     "opener:allow-open-path",
     "opener:allow-open-url",
-    "shell:allow-open"
+    "shell:allow-open",
+    "updater:default",
+    "process:default"
   ]
 }

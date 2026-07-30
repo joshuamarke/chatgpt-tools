@@ -2,7 +2,7 @@
 //!
 //! Detects ChatGPT / Codex **desktop** installs (skin-capable), Codex **CLI**
 //! (skins are not supported), and Grok Build CLI / home layout.
-//! Inspired by cc-switch tool version scanning; kept smaller and focused.
+//! Lightweight install / version detection for the Overview page.
 
 use serde::Serialize;
 use serde_json::{json, Value};
@@ -969,6 +969,142 @@ pub async fn env_check(force: Option<bool>) -> Result<Value, String> {
     tauri::async_runtime::spawn_blocking(move || collect_environment(force))
         .await
         .map_err(|e| e.to_string())
+}
+
+/// Allowed ids for single-tool refresh (Overview per-card buttons).
+fn probe_tool_by_id(id: &str) -> Result<ToolInstallInfo, String> {
+    match id {
+        "chatgpt-desktop" => Ok(probe_desktop_host()),
+        "codex-cli" => Ok(probe_codex_cli()),
+        "grok-build" => Ok(probe_grok_build()),
+        "node" => Ok(probe_node_runtime()),
+        "npm" => Ok(probe_npm_runtime()),
+        _ => Err(format!(
+            "未知环境 id：{id}。支持：chatgpt-desktop / codex-cli / grok-build / node / npm"
+        )),
+    }
+}
+
+fn is_runtime_id(id: &str) -> bool {
+    matches!(id, "node" | "npm")
+}
+
+/// Recompute overview summary fields from tools + runtimes arrays in a snapshot.
+fn recompute_env_summary(body: &mut Value) {
+    let Some(obj) = body.as_object_mut() else {
+        return;
+    };
+    let tools = obj
+        .get("tools")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
+    let runtimes = obj
+        .get("runtimes")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
+    let installed_count = tools
+        .iter()
+        .filter(|t| t.get("installed").and_then(|v| v.as_bool()) == Some(true))
+        .count();
+    let node_installed = runtimes.iter().any(|t| {
+        t.get("id").and_then(|v| v.as_str()) == Some("node")
+            && t.get("installed").and_then(|v| v.as_bool()) == Some(true)
+    });
+    let npm_installed = runtimes.iter().any(|t| {
+        t.get("id").and_then(|v| v.as_str()) == Some("npm")
+            && t.get("installed").and_then(|v| v.as_bool()) == Some(true)
+    });
+    let skin_capable = tools.iter().any(|t| {
+        t.get("installed").and_then(|v| v.as_bool()) == Some(true)
+            && t.get("skinSupported").and_then(|v| v.as_bool()) == Some(true)
+    });
+    obj.insert(
+        "summary".into(),
+        json!({
+            "installedCount": installed_count,
+            "toolCount": tools.len(),
+            "skinCapable": skin_capable,
+            "runtimeReady": node_installed && npm_installed,
+            "npmInstalled": npm_installed,
+            "nodeInstalled": node_installed,
+        }),
+    );
+    obj.insert("checkedAt".into(), json!(chrono_now_iso()));
+}
+
+/// Merge a single tool/runtime probe into the soft ENV_CACHE (if any).
+fn merge_tool_into_cache(tool: &ToolInstallInfo) {
+    let mut guard = ENV_CACHE.lock();
+    let Some((at, cached)) = guard.as_mut() else {
+        return;
+    };
+    *at = Instant::now();
+    let list_key = if is_runtime_id(&tool.id) {
+        "runtimes"
+    } else {
+        "tools"
+    };
+    let entry = if is_runtime_id(&tool.id) {
+        // Runtimes do not carry install CTAs.
+        let mut v = serde_json::to_value(tool).unwrap_or_else(|_| json!({}));
+        if let Some(o) = v.as_object_mut() {
+            o.insert("install".into(), json!(null));
+        }
+        v
+    } else {
+        tool_to_json(tool)
+    };
+    if let Some(arr) = cached
+        .as_object_mut()
+        .and_then(|obj| obj.get_mut(list_key))
+        .and_then(|v| v.as_array_mut())
+    {
+        if let Some(pos) = arr
+            .iter()
+            .position(|t| t.get("id").and_then(|x| x.as_str()) == Some(tool.id.as_str()))
+        {
+            arr[pos] = entry;
+        } else {
+            arr.push(entry);
+        }
+    }
+    recompute_env_summary(cached);
+}
+
+/// Probe one environment entry (card-level refresh). Does not re-scan everything.
+pub fn collect_single_tool(id: &str) -> Result<Value, String> {
+    let id = id.trim();
+    if id.is_empty() {
+        return Err("缺少环境 id".into());
+    }
+    let tool = probe_tool_by_id(id)?;
+    merge_tool_into_cache(&tool);
+    let tool_json = if is_runtime_id(id) {
+        let mut v = serde_json::to_value(&tool).unwrap_or_else(|_| json!({}));
+        if let Some(o) = v.as_object_mut() {
+            o.insert("install".into(), json!(null));
+        }
+        v
+    } else {
+        tool_to_json(&tool)
+    };
+    Ok(json!({
+        "ok": true,
+        "checkedAt": chrono_now_iso(),
+        "id": id,
+        "kind": if is_runtime_id(id) { "runtime" } else { "tool" },
+        "tool": tool_json,
+    }))
+}
+
+/// Single-tool env probe for Overview card refresh buttons.
+#[tauri::command]
+pub async fn env_check_tool(id: String) -> Result<Value, String> {
+    tauri::async_runtime::spawn_blocking(move || collect_single_tool(&id))
+        .await
+        .map_err(|e| e.to_string())?
 }
 
 /// Open system terminal and run an allow-listed npm install command.

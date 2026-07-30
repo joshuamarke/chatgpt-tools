@@ -2,7 +2,7 @@
   "id": "ningyao",
   "name": "剑来 · 宁姚",
   "nameEn": "Jian Lai · Ning Yao",
-  "description": "青衣执卷，秋叶村舍；引擎不画 body，首页大盒子自挂立绘（hero 文案 + 推荐卡同框）",
+  "description": "青衣执卷，秋叶村舍；",
   "categories": ["game", "anime", "art"],
   "tags": [
     "仙侠",
@@ -45,5 +45,5 @@
     "safeArea": "left",
     "taskMode": "off"
   },
-  "version": "2.1.0"
+  "version": "2.1.2"
 }

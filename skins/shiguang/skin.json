@@ -1,0 +1,46 @@
+{
+  "id": "shiguang",
+  "name": "快乐无忧时光",
+  "nameEn": "Carefree Moments",
+  "description": "夏日草地、阳光与笑声；放下烦恼，躺进一段快乐无忧的时光",
+  "categories": ["anime", "nature", "art"],
+  "tags": [
+    "快乐",
+    "无忧",
+    "夏日",
+    "草地",
+    "浅色"
+  ],
+  "previewGradient": "linear-gradient(135deg, #f4fce8 0%, #9fd66a 50%, #f5d03a 100%)",
+  "accent": "#7EC850",
+  "port": 9340,
+  "assets": {
+    "css": "assets/shiguang-skin.css",
+    "art": "assets/shiguang.jpg",
+    "artMime": "image/jpeg",
+    "plugin": "assets/plugin.json",
+    "screenshot": "assets/screenshot.jpg"
+  },
+  "markers": {
+    "rootClass": "codex-shiguang-skin",
+    "homeClass": "shiguang-home",
+    "styleId": "codex-shiguang-skin-style",
+    "chromeId": "codex-shiguang-skin-chrome",
+    "stateKey": "__CODEX_SHIGUANG_SKIN_STATE__",
+    "disabledKey": "__CODEX_SHIGUANG_SKIN_DISABLED__",
+    "artVar": "--skins-art"
+  },
+  "desktopTheme": {
+    "appearanceTheme": "light",
+    "appearanceLightCodeThemeId": "codex",
+    "appearanceLightChromeTheme": "{ accent = \"#7EC850\", contrast = 58, fonts = { code = \"SF Mono\", ui = \"PingFang SC\" }, ink = \"#2D3A28\", opaqueWindows = true, semanticColors = { diffAdded = \"#C8E8B0\", diffRemoved = \"#F5C8C0\", skill = \"#F5D03A\" }, surface = \"#F4FCE8\" }"
+  },
+  "appearance": "auto",
+  "art": {
+    "focusX": 0.82,
+    "focusY": 0.62,
+    "safeArea": "left",
+    "taskMode": "ambient"
+  },
+  "version": "3.0.0"
+}

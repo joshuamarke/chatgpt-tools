@@ -2,8 +2,8 @@
 
 管理本机 **ChatGPT / Codex 桌面端** 与 **Grok Build** 的历史会话，不修改官方安装包。
 
-- Codex：移植自 CodexPlusPlus Manager（SQLite 列表 / 删除 / 备份 / 导出 / provider 修复 / index 清理）
-- Grok：移植自 cc-switch `session_manager::providers::grokbuild`（`~/.grok/sessions` 扫描 / 删除 / Markdown 导出）
+- Codex：本机 SQLite 列表 / 删除 / 备份 / 导出 / provider 修复 / index 清理
+- Grok：`~/.grok/sessions` 扫描 / 删除 / Markdown 导出
 
 **当前阶段：Phase 2 + Grok Tab**（Codex 全能力；Grok 列表 / 删除 / 导出）。
 
@@ -86,9 +86,17 @@ GUI 左侧侧边栏 → **会话管理**。页内 **Tab** 切换来源：
 | 步骤 | 行为 |
 |------|------|
 | 加载目标 | `load_provider_sync_targets`：当前 config + 历史出现过的 provider id |
-| 执行 | `sync_providers_now`：改写 session_meta / SQLite `model_provider` 等历史标记 |
+| 执行 | `sync_providers_now`：改写 session_meta / SQLite `threads` + `local_thread_catalog.model_provider` 等历史标记 |
 | 目标为空 | 使用 config 中的当前 provider |
 | 跳过 | Codex home 不存在、无变更、或文件被锁等 → `status: skipped` + 说明 |
+
+**Provider 身份（易错）**
+
+- 会话里的 `model_provider` 必须是 `model_providers.<id>` 的 **`<id>`**（如 `chatgpt-tools-proxy`、`custom`、`openai`）。
+- **不是** `model_providers.<id>.name`（ChatGPT Tools 固定写 `OpenAI`，只是 UI 标签）。
+- 修复目标若写成 name 或错误 key，桌面端会出现「无法识别 / 无法续聊」历史会话。
+- 除 `threads` 外，还会同步 `local_thread_catalog`（最近对话目录），避免只改 rollout/threads 而侧栏仍用旧 provider。
+- **与模型白名单无关**：会话修复只改 provider **key** 元数据，不会注入模型列表；也不会在启用 OpenAI Official 时改写会话。官方启用会停用第三方模型 CDP 注入（见供应商文档）。
 
 建议在**客户端完全退出**后执行，降低文件锁与状态不一致风险。
 

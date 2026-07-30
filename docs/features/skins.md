@@ -16,6 +16,18 @@
 
 IPC：`window.skinAPI`（见 `src/skin-api.js`）。
 
+## 皮肤包
+
+| 项 | 说明 |
+|----|------|
+| 扩展名 | **`.skin`**（zip）；导入也接受 `.zip` 与遗留 `.cgskin` |
+| 结构 | zip 根为 `skin/`（或直接含 `skin.json`） |
+| 云 catalog | `package.format` 固定为 `skin` |
+| 导出 | GUI「导出」或 CLI `export-skin` → 默认 `*.skin` |
+| 导入 | GUI「导入皮肤」或 CLI `import-skin` / `inspect-skin` |
+
+与 CDN 仓打包脚本对齐：`chatgpt-tools-cdn` 的 `npm run pack:skin` 输出 `{id}-{version}.skin`。
+
 ## 文档索引
 
 | 文档 | 内容 |

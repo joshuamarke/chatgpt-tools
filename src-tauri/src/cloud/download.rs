@@ -74,8 +74,9 @@ pub fn download_skin(cfg: &CloudConfig, skin_id: &str) -> Result<Value, EngineEr
     let format = package
         .get("format")
         .and_then(|v| v.as_str())
-        .unwrap_or("cgskin");
-    if format != "cgskin" && format != "zip" {
+        .unwrap_or("skin");
+    // `skin` is current; `cgskin` kept for older catalogs.
+    if format != "skin" && format != "cgskin" && format != "zip" {
         return Err(EngineError::msg(format!("不支持的包格式: {format}")));
     }
 
@@ -185,7 +186,7 @@ pub fn download_skin(cfg: &CloudConfig, skin_id: &str) -> Result<Value, EngineEr
 
     // Write temp package
     let tmp_pkg = cache_tmp_dir().join(format!(
-        "{}-{}-{}.cgskin",
+        "{}-{}-{}.skin",
         safe_id,
         version.replace(['/', '\\'], "-"),
         now_unix_ms()

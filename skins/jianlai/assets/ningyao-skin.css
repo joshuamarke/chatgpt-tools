@@ -1,22 +1,12 @@
 /**
- * 剑来 · 宁姚 · v2.1.0
+ * 剑来 · 宁姚 · v2.1.2
  *
  * 壁纸：art.mode=token-only · paint=custom
- *   → 引擎只注入 --ningyao-art / --skins-art，不画 body。
+ *   → 引擎只注入 --ningyao-art，不画 body。
+ *   → 皮肤把立绘铺满右侧 main.main-surface 整面。
  *
- * 首页构图（宿主 DOM，不改 flex 落点）：
- *   [role=main].ningyao-home
- *     > div (banners，可空)
- *     > div (flex-1 中区)
- *       > div (items-end pb-24)
- *         > div.relative                 ← ★ 大盒子：足够高，自挂立绘
- *           ::before                     ← 背景素材 jl-ningyao.jpg
- *           ::after                      ← 左侧柔雾，保文案可读
- *           > div:first-child            ← 子元素 1：hero 文案
- *           > div:nth-child(2).absolute  ← 子元素 2：推荐卡轨（落在盒内底部）
- *
- * 推荐卡丢失根因：父级 overflow:hidden 会裁掉 absolute 轨；
- * 本皮肤盒内布局仍保持 overflow:visible。
+ * 首页：hero 文案 + 推荐卡走宿主几何（透明壳），浮在 main 立绘上。
+ * 输入框 / utility / 项目选择：不皮肤化，交还宿主原生样式。
  */
 
 /* ── 1) Token（柔和青瓷暖雾） ── */
@@ -45,22 +35,34 @@
   --skins-line: rgba(106, 158, 171, 0.2);
   --ningyao-art: var(--skins-art, none);
 
-  /*
-   * 大盒子高度：hero + 推荐卡同框，尽量大以展示立绘。
-   * 建议卡轨贴盒内底部，不再挂到 top:100% 盒外。
-   */
-  --ningyao-stage-h: clamp(460px, 58vh, 640px);
-  --ningyao-stage-pad-x: 22px;
-  --ningyao-stage-pad-top: 28px;
-  --ningyao-stage-pad-bottom: 168px;
-  --ningyao-card-rail-h: 148px;
+  /* 首页极淡 scrim；对话更实以保证可读 */
+  --ningyao-scrim-home: linear-gradient(
+    90deg,
+    rgba(248, 247, 244, 0.42) 0%,
+    rgba(238, 243, 242, 0.18) 28%,
+    rgba(255, 255, 255, 0.06) 52%,
+    transparent 72%,
+    transparent 100%
+  );
+  --ningyao-scrim-thread: linear-gradient(
+    160deg,
+    rgba(252, 251, 248, 0.88) 0%,
+    rgba(245, 246, 244, 0.84) 40%,
+    rgba(238, 243, 242, 0.82) 100%
+  );
+  --ningyao-scrim-task: linear-gradient(
+    90deg,
+    rgba(248, 247, 244, 0.78) 0%,
+    rgba(238, 243, 242, 0.68) 50%,
+    rgba(245, 246, 244, 0.62) 100%
+  );
 
   --skins-suggest-card-color: #3f4a50;
-  --skins-suggest-card-bg: rgba(252, 251, 248, 0.72);
+  --skins-suggest-card-bg: rgba(252, 251, 248, 0.62);
   --skins-suggest-card-radius: 14px;
   --skins-suggest-card-border: rgba(255, 255, 255, 0.62);
   --skins-suggest-card-shadow:
-    0 10px 26px rgba(63, 74, 80, 0.08),
+    0 8px 22px rgba(63, 74, 80, 0.06),
     inset 0 1px 0 rgba(255, 255, 255, 0.75);
 
   --skins-suggest-list-color: rgba(63, 74, 80, 0.55);
@@ -89,7 +91,8 @@
   --main-surface-secondary: #e6ecea !important;
   --sidebar-surface-primary: #e8eeec !important;
   --sidebar-surface-secondary: #dfe6e4 !important;
-  --composer-background: rgba(252, 251, 248, 0.92) !important;
+  /* 输入框底色贴近宿主浅色面板，不做半透明玻璃 */
+  --composer-background: #ffffff !important;
   --surface-primary: #f8f7f4 !important;
   --surface-secondary: #eef3f2 !important;
   --text-primary: #3f4a50 !important;
@@ -175,21 +178,20 @@
   color-scheme: light !important;
 }
 
-/* paint=custom：不走 immersive 全窗 edge/mid 蒙板逻辑 */
 html.codex-ningyao-skin.skins-art-wide,
 html.codex-ningyao-skin.skins-art-standard {
-  --cg-immersive-edge: rgba(238, 243, 242, 0.01);
-  --cg-immersive-mid: rgba(238, 243, 242, 0.01);
-  --cg-immersive-far: rgba(238, 243, 242, 0.01);
-  --cg-immersive-sidebar: rgba(232, 238, 236, 0.92);
-  --cg-task-immersive-sidebar: rgba(232, 238, 236, 0.94);
-  --cg-task-immersive-edge: rgba(238, 243, 242, 0.96);
-  --cg-task-immersive-mid: rgba(238, 243, 242, 0.96);
-  --cg-task-immersive-far: rgba(238, 243, 242, 0.96);
-  --cg-immersive-composer: rgba(252, 251, 248, 0.94);
-  --cg-immersive-line: rgba(106, 158, 171, 0.16);
+  --cg-immersive-edge: rgba(248, 247, 244, 0.2);
+  --cg-immersive-mid: rgba(238, 243, 242, 0.08);
+  --cg-immersive-far: rgba(232, 238, 236, 0.02);
+  --cg-immersive-sidebar: rgba(232, 238, 236, 0.9);
+  --cg-task-immersive-sidebar: rgba(232, 238, 236, 0.92);
+  --cg-task-immersive-edge: rgba(252, 251, 248, 0.86);
+  --cg-task-immersive-mid: rgba(245, 246, 244, 0.82);
+  --cg-task-immersive-far: rgba(238, 243, 242, 0.78);
+  --cg-immersive-composer: #ffffff;
+  --cg-immersive-line: rgba(255, 255, 255, 0.55);
   --cg-text: #3f4a50;
-  --cg-surface-raised: rgba(252, 251, 248, 0.92);
+  --cg-surface-raised: rgba(252, 251, 248, 0.88);
   --cg-primary-button-ink: #f8f7f4;
 }
 
@@ -203,27 +205,24 @@ html.codex-ningyao-skin div.rounded-2xl.border-token-border.overflow-hidden.flex
   color: #3f4a50 !important;
 }
 
-/* ── 2) 全局浅色底（不挂立绘） ── */
+/* ── 2) 全局浅色底（body 不挂立绘） ── */
 html.codex-ningyao-skin body {
   background:
-    radial-gradient(circle at 78% 18%, rgba(255, 255, 255, 0.5), transparent 32%),
-    radial-gradient(circle at 12% 70%, rgba(155, 196, 206, 0.16), transparent 28%),
-    radial-gradient(circle at 88% 62%, rgba(196, 136, 74, 0.07), transparent 30%),
+    radial-gradient(circle at 78% 18%, rgba(255, 255, 255, 0.45), transparent 32%),
+    radial-gradient(circle at 12% 70%, rgba(155, 196, 206, 0.14), transparent 28%),
     linear-gradient(160deg, #eef6f8 0%, #e8f0f0 48%, #e2ecec 100%) !important;
   color: var(--ningyao-ink) !important;
   color-scheme: light !important;
   font-family: "PingFang SC", "SF Pro Display", "Hiragino Sans GB", "Helvetica Neue", sans-serif !important;
 }
 
-/* paint=custom：明确禁止 body 铺立绘（引擎也不画，皮肤自守） */
 html.codex-ningyao-skin[data-skins-art-paint="custom"] body,
 html.codex-ningyao-skin[data-skins-art-mode="token-only"] body,
 html.codex-ningyao-skin.skins-art-wide body,
 html.codex-ningyao-skin.skins-art-standard body {
   background-image:
-    radial-gradient(circle at 78% 18%, rgba(255, 255, 255, 0.5), transparent 32%),
-    radial-gradient(circle at 12% 70%, rgba(155, 196, 206, 0.16), transparent 28%),
-    radial-gradient(circle at 88% 62%, rgba(196, 136, 74, 0.07), transparent 30%),
+    radial-gradient(circle at 78% 18%, rgba(255, 255, 255, 0.45), transparent 32%),
+    radial-gradient(circle at 12% 70%, rgba(155, 196, 206, 0.14), transparent 28%),
     linear-gradient(160deg, #eef6f8 0%, #e8f0f0 48%, #e2ecec 100%) !important;
   background-attachment: scroll !important;
 }
@@ -234,11 +233,11 @@ html.codex-ningyao-skin body::before {
   inset: 0;
   z-index: 0;
   pointer-events: none;
-  opacity: 0.18;
+  opacity: 0.16;
   background-image:
     radial-gradient(circle at 18% 22%, rgba(255, 255, 255, 0.5) 0 1px, transparent 2px),
-    radial-gradient(circle at 72% 58%, rgba(196, 136, 74, 0.16) 0 1px, transparent 2px),
-    radial-gradient(circle at 45% 80%, rgba(155, 196, 206, 0.18) 0 1px, transparent 2px);
+    radial-gradient(circle at 72% 58%, rgba(196, 136, 74, 0.14) 0 1px, transparent 2px),
+    radial-gradient(circle at 45% 80%, rgba(155, 196, 206, 0.16) 0 1px, transparent 2px);
   background-size: 48px 64px, 62px 78px, 40px 52px;
 }
 
@@ -325,30 +324,75 @@ html.codex-ningyao-skin aside label {
   color: inherit !important;
 }
 
-/* ── 4) 主面板（不挂立绘；首页/对话各自实底） ── */
+/*
+ * ── 4) 右侧主面板：立绘铺满整面（paint=custom）
+ * 不画 body；立绘只在 main 一次。
+ */
 html.codex-ningyao-skin main.main-surface {
   position: relative;
   isolation: isolate;
-  background: transparent !important;
+  background-color: var(--ningyao-cream, #eef3f2) !important;
+  background-image:
+    var(--ningyao-scrim-home),
+    var(--ningyao-art, var(--skins-art, none)) !important;
+  background-repeat: no-repeat !important;
+  background-size: 100% 100%, cover !important;
+  background-position: center, var(--skins-art-position, 72% 42%) !important;
+  background-attachment: local, local !important;
   border: 0 !important;
   border-radius: 0 !important;
   box-shadow: none !important;
   overflow: hidden !important;
 }
 
+/* 首页：极淡 scrim，立绘更清晰 */
 html.codex-ningyao-skin main.main-surface.ningyao-home-shell,
-html.codex-ningyao-skin[data-skins-art-paint="custom"] main.main-surface.ningyao-home-shell {
-  background: transparent !important;
+html.codex-ningyao-skin[data-skins-art-paint="custom"] main.main-surface.ningyao-home-shell,
+html.codex-ningyao-skin.skins-art-wide main.main-surface.ningyao-home-shell,
+html.codex-ningyao-skin.skins-art-standard main.main-surface.ningyao-home-shell {
+  background-color: transparent !important;
+  background-image:
+    var(--ningyao-scrim-home),
+    radial-gradient(
+      ellipse 55% 70% at 18% 42%,
+      rgba(248, 247, 244, 0.28),
+      transparent 70%
+    ),
+    var(--ningyao-art, var(--skins-art, none)) !important;
+  background-size: 100% 100%, 100% 100%, cover !important;
+  background-position: center, center, var(--skins-art-position, 72% 42%) !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
 }
 
-html.codex-ningyao-skin main.main-surface:has(.thread-scroll-container) {
-  background: #eef3f2 !important;
+/* 对话：立绘仍铺满右侧，但加厚雾面保可读 */
+html.codex-ningyao-skin main.main-surface:has(.thread-scroll-container),
+html.codex-ningyao-skin[data-skins-art-paint="custom"]
+  main.main-surface:has(.thread-scroll-container) {
+  background-color: transparent !important;
+  background-image:
+    var(--ningyao-scrim-thread),
+    radial-gradient(
+      ellipse 80% 70% at 50% 42%,
+      rgba(255, 255, 255, 0.22),
+      transparent 72%
+    ),
+    var(--ningyao-art, var(--skins-art, none)) !important;
+  background-size: 100% 100%, 100% 100%, cover !important;
+  background-position: center, center, var(--skins-art-position, 72% 42%) !important;
 }
 
+/* 设置等非 home/thread：实底，不挂立绘 */
 html.codex-ningyao-skin main.main-surface:not(.ningyao-home-shell):not(:has(.thread-scroll-container)) {
-  background: #eef3f2 !important;
+  background-color: #eef3f2 !important;
+  background-image: none !important;
 }
 
+/*
+ * 勿用 main > * { position:relative } 波及 header（会打坏宿主顶栏几何）。
+ * 仅抬升非顶栏内容绘制层。
+ */
 html.codex-ningyao-skin main.main-surface > *:not(header.app-header-tint) {
   position: relative;
   z-index: 1;
@@ -388,8 +432,9 @@ html.codex-ningyao-skin main.main-surface > header.app-header-tint button[class~
   opacity: 1 !important;
 }
 
-/* 首页顶栏透明 */
-html.codex-ningyao-skin main.main-surface.ningyao-home-shell > header.app-header-tint {
+/* 首页 / 对话顶栏透明，露出 main 立绘 */
+html.codex-ningyao-skin main.main-surface.ningyao-home-shell > header.app-header-tint,
+html.codex-ningyao-skin main.main-surface:has(.thread-scroll-container) > header.app-header-tint {
   background: transparent !important;
   background-image: none !important;
   border-bottom: 0 !important;
@@ -397,10 +442,14 @@ html.codex-ningyao-skin main.main-surface.ningyao-home-shell > header.app-header
   backdrop-filter: none !important;
   -webkit-backdrop-filter: none !important;
   color: var(--ningyao-ink) !important;
+  text-shadow:
+    0 1px 2px rgba(255, 255, 255, 0.55),
+    0 0 8px rgba(255, 255, 255, 0.3) !important;
 }
 
-/* 非 home 顶栏实底 */
-html.codex-ningyao-skin main.main-surface:not(.ningyao-home-shell) > header.app-header-tint {
+/* 设置等：实底顶栏 */
+html.codex-ningyao-skin main.main-surface:not(.ningyao-home-shell):not(:has(.thread-scroll-container))
+  > header.app-header-tint {
   background: #eef3f2 !important;
   background-image: none !important;
   border-bottom: 1px solid rgba(106, 158, 171, 0.12) !important;
@@ -437,7 +486,6 @@ html.codex-ningyao-skin.skins-theme-light [class~="group/application-menu-top-ba
   border-radius: 0;
 }
 
-/* paint=custom：立绘不挂 chrome */
 html.codex-ningyao-skin[data-skins-art-paint="custom"] #codex-ningyao-skin-chrome::before,
 html.codex-ningyao-skin[data-skins-art-paint="custom"] #codex-ningyao-skin-chrome::after {
   content: none !important;
@@ -504,7 +552,6 @@ html.codex-ningyao-skin[data-skins-art-paint="custom"] #codex-ningyao-skin-chrom
   display: block;
 }
 
-/* 秋叶飘落（仅首页） */
 .ningyao-leaves {
   position: absolute;
   inset: 48px 0 0;
@@ -588,7 +635,7 @@ html.codex-ningyao-skin[data-skins-art-paint="custom"] #codex-ningyao-skin-chrom
 .ningyao-ornament {
   position: absolute;
   left: 50%;
-  bottom: 72px;
+  bottom: 92px;
   display: none;
   align-items: center;
   gap: 12px;
@@ -604,11 +651,11 @@ html.codex-ningyao-skin[data-skins-art-paint="custom"] #codex-ningyao-skin-chrom
 }
 .ningyao-ornament span {
   color: var(--ningyao-autumn);
-  font-size: 11px;
+  font-size: 12px;
   letter-spacing: 0.1em;
 }
 
-/* ── 6) 主内容透明 ── */
+/* ── 6) 主内容透明，露出 main 立绘 ── */
 html.codex-ningyao-skin [role="main"] {
   background: transparent !important;
   scrollbar-color: rgba(106, 158, 171, 0.32) transparent;
@@ -623,9 +670,9 @@ html.codex-ningyao-skin main.main-surface .bg-token-main-surface-secondary {
 }
 
 /*
- * ── 7) 首页大盒子（hero + 推荐卡） ──
- * 路径 A：.ningyao-home > div:nth-child(2) > div:first-child > div:first-child
- * 路径 B：.ningyao-home > div:first-child > div:first-child > div:first-child
+ * ── 7) 首页布局：宿主几何；不二次铺立绘、不强制大盒子高度
+ * 路径 A：.ningyao-home > div:nth-child(2) > …
+ * 路径 B：.ningyao-home > div:first-child > …
  */
 html.codex-ningyao-skin .ningyao-home {
   --thread-content-max-width: min(48rem, calc(100cqw - 44px)) !important;
@@ -633,7 +680,6 @@ html.codex-ningyao-skin .ningyao-home {
   background: transparent !important;
 }
 
-/* 中区透明；勿锁 flex / items-end */
 .ningyao-home > div:first-child,
 .ningyao-home > div:nth-child(2),
 .ningyao-home > div:nth-child(2) > div:first-child,
@@ -641,213 +687,69 @@ html.codex-ningyao-skin .ningyao-home {
   background: transparent !important;
 }
 
-/*
- * ★ 大盒子本体：足够高，装下 hero + 推荐卡两个子元素。
- * 立绘画在 ::before，盒本身透明以便 overflow:visible。
- */
-html.codex-ningyao-skin .ningyao-home > div:nth-child(2) > div:first-child > div:first-child,
-html.codex-ningyao-skin .ningyao-home > div:first-child > div:first-child > div:first-child,
-html.codex-ningyao-skin.skins-art-wide main.main-surface.ningyao-home-shell
-  .ningyao-home
-  > div:nth-child(2)
-  > div:first-child
-  > div:first-child,
-html.codex-ningyao-skin.skins-art-wide main.main-surface.ningyao-home-shell
-  .ningyao-home
-  > div:first-child
-  > div:first-child
-  > div:first-child,
-html.codex-ningyao-skin.skins-art-standard main.main-surface.ningyao-home-shell
-  .ningyao-home
-  > div:nth-child(2)
-  > div:first-child
-  > div:first-child,
-html.codex-ningyao-skin[data-skins-art-paint="custom"]
-  main.main-surface.ningyao-home-shell
-  .ningyao-home
-  > div:nth-child(2)
-  > div:first-child
-  > div:first-child,
-html.codex-ningyao-skin[data-skins-art-paint="custom"]
-  main.main-surface.ningyao-home-shell
-  .ningyao-home
-  > div:first-child
-  > div:first-child
-  > div:first-child {
+/* 标题壳透明：立绘已在 main，禁止二次铺图 / 圆角卡 */
+.ningyao-home > div:first-child > div:first-child > div:first-child,
+.ningyao-home > div:nth-child(2) > div:first-child > div:first-child {
   position: relative !important;
   isolation: isolate;
-  width: min(100%, var(--thread-content-max-width, 48rem)) !important;
-  max-width: min(100%, var(--thread-content-max-width, 48rem)) !important;
-  height: var(--ningyao-stage-h) !important;
-  min-height: var(--ningyao-stage-h) !important;
-  flex: 0 0 auto !important;
-  padding: 0 !important;
+  overflow: visible !important;
   border: 0 !important;
   border-radius: 0 !important;
   background: transparent !important;
   background-image: none !important;
   box-shadow: none !important;
-  /* ★ 禁止 hidden：即使卡轨在盒内，列表展开也需要可见 */
-  overflow: visible !important;
   backdrop-filter: none !important;
   -webkit-backdrop-filter: none !important;
-}
-
-/*
- * ::before = 背景素材（jl-ningyao.jpg via --ningyao-art）
- * 铺满大盒子；焦点落在右侧宁姚（focusX≈0.72）
- */
-html.codex-ningyao-skin .ningyao-home > div:nth-child(2) > div:first-child > div:first-child::before,
-html.codex-ningyao-skin .ningyao-home > div:first-child > div:first-child > div:first-child::before,
-html.codex-ningyao-skin.skins-art-wide main.main-surface.ningyao-home-shell
-  .ningyao-home
-  > div:nth-child(2)
-  > div:first-child
-  > div:first-child::before,
-html.codex-ningyao-skin.skins-art-wide main.main-surface.ningyao-home-shell
-  .ningyao-home
-  > div:first-child
-  > div:first-child
-  > div:first-child::before,
-html.codex-ningyao-skin[data-skins-art-paint="custom"]
-  main.main-surface.ningyao-home-shell
-  .ningyao-home
-  > div:nth-child(2)
-  > div:first-child
-  > div:first-child::before,
-html.codex-ningyao-skin[data-skins-art-paint="custom"]
-  main.main-surface.ningyao-home-shell
-  .ningyao-home
-  > div:first-child
-  > div:first-child
-  > div:first-child::before {
-  content: "" !important;
-  display: block !important;
-  position: absolute !important;
-  z-index: 0 !important;
-  inset: 0 !important;
-  width: auto !important;
   height: auto !important;
-  pointer-events: none !important;
-  border: 1px solid rgba(255, 255, 255, 0.55) !important;
-  border-radius: 22px !important;
-  box-shadow:
-    0 18px 42px rgba(63, 74, 80, 0.1),
-    0 2px 0 rgba(255, 255, 255, 0.55) inset !important;
-  background-color: var(--ningyao-cream-deep) !important;
-  background-image: var(--ningyao-art, var(--skins-art, none)) !important;
-  background-repeat: no-repeat !important;
-  background-size: cover !important;
-  background-position: var(--skins-art-position, 72% 42%) !important;
+  min-height: 0 !important;
+  padding: 0 !important;
 }
 
-/*
- * ::after = 左侧安全区柔雾 + 底部轻雾
- * 保 hero 文案与推荐卡可读，不挡右侧立绘主体
- */
-html.codex-ningyao-skin .ningyao-home > div:nth-child(2) > div:first-child > div:first-child::after,
-html.codex-ningyao-skin .ningyao-home > div:first-child > div:first-child > div:first-child::after,
-html.codex-ningyao-skin.skins-art-wide main.main-surface.ningyao-home-shell
-  .ningyao-home
-  > div:nth-child(2)
-  > div:first-child
-  > div:first-child::after,
-html.codex-ningyao-skin[data-skins-art-paint="custom"]
-  main.main-surface.ningyao-home-shell
-  .ningyao-home
-  > div:nth-child(2)
-  > div:first-child
-  > div:first-child::after,
-html.codex-ningyao-skin[data-skins-art-paint="custom"]
-  main.main-surface.ningyao-home-shell
-  .ningyao-home
-  > div:first-child
-  > div:first-child
-  > div:first-child::after {
-  content: "" !important;
-  display: block !important;
-  position: absolute !important;
-  z-index: 1 !important;
-  inset: 0 !important;
-  width: auto !important;
-  height: auto !important;
-  pointer-events: none !important;
-  border: 0 !important;
-  border-radius: 22px !important;
-  box-shadow: none !important;
-  background-image:
-    /* 左→右：文案安全区 */
-    linear-gradient(
-      90deg,
-      rgba(248, 247, 244, 0.78) 0%,
-      rgba(248, 247, 244, 0.48) 22%,
-      rgba(248, 247, 244, 0.16) 42%,
-      transparent 58%
-    ),
-    /* 底→上：推荐卡落点 */
-    linear-gradient(
-      0deg,
-      rgba(238, 243, 242, 0.72) 0%,
-      rgba(238, 243, 242, 0.38) 28%,
-      transparent 52%
-    ),
-    /* 顶部微雾 */
-    linear-gradient(
-      180deg,
-      rgba(255, 255, 255, 0.22) 0%,
-      transparent 18%
-    ) !important;
-  background-repeat: no-repeat !important;
-  background-size: 100% 100% !important;
+.ningyao-home > div:first-child > div:first-child > div:first-child::before,
+.ningyao-home > div:first-child > div:first-child > div:first-child::after,
+.ningyao-home > div:nth-child(2) > div:first-child > div:first-child::before,
+.ningyao-home > div:nth-child(2) > div:first-child > div:first-child::after {
+  content: none !important;
+  display: none !important;
 }
 
-/* ── 子元素 1：hero 文案列 ── */
-.ningyao-home > div:nth-child(2) > div:first-child > div:first-child > div:first-child,
-.ningyao-home > div:first-child > div:first-child > div:first-child > div:first-child {
+/* hero 文案列：左侧安全区（右侧留给宁姚） */
+.ningyao-home > div:first-child > div:first-child > div:first-child > div:first-child,
+.ningyao-home > div:nth-child(2) > div:first-child > div:first-child > div:first-child {
   position: relative;
-  z-index: 2;
-  height: 100%;
+  z-index: 1;
+  justify-content: flex-start !important;
+  align-items: flex-start !important;
   width: 100% !important;
   box-sizing: border-box;
-  align-items: flex-start !important;
-  justify-content: flex-start !important;
-  padding:
-    var(--ningyao-stage-pad-top)
-    var(--ningyao-stage-pad-x)
-    var(--ningyao-stage-pad-bottom) !important;
+  padding: 12px 8px 8px !important;
 }
 
 .ningyao-home
-  > div:nth-child(2)
+  > div:first-child
   > div:first-child
   > div:first-child
   > div:first-child
   > div:first-child,
 .ningyao-home
-  > div:first-child
+  > div:nth-child(2)
   > div:first-child
   > div:first-child
   > div:first-child
   > div:first-child {
-  width: min(48%, 380px) !important;
-  max-width: 48% !important;
+  align-items: flex-start !important;
+  width: min(52%, 400px) !important;
+  max-width: 52% !important;
   margin-left: 0 !important;
   margin-right: auto !important;
-  align-items: flex-start !important;
-  gap: 0 !important;
 }
 
 .ningyao-home [data-testid="home-icon"] {
   display: none !important;
 }
 
-/* Hero 文案：左侧安全区（右侧留给宁姚） */
 html.codex-ningyao-skin .ningyao-home [data-feature="game-source"],
 html.codex-ningyao-skin.skins-art-wide
-  main.main-surface.ningyao-home-shell
-  .ningyao-home
-  [data-feature="game-source"],
-html.codex-ningyao-skin.skins-art-standard
   main.main-surface.ningyao-home-shell
   .ningyao-home
   [data-feature="game-source"],
@@ -858,7 +760,7 @@ html.codex-ningyao-skin[data-skins-art-paint="custom"]
   display: flex !important;
   flex-direction: column !important;
   align-items: flex-start !important;
-  justify-content: flex-start !important;
+  justify-content: flex-end !important;
   align-self: flex-start !important;
   width: 100% !important;
   max-width: 100% !important;
@@ -870,8 +772,8 @@ html.codex-ningyao-skin[data-skins-art-paint="custom"]
   text-align: left !important;
   letter-spacing: 0.06em;
   text-shadow:
-    0 1px 0 rgba(255, 255, 255, 0.92),
-    0 2px 14px rgba(248, 247, 244, 0.7);
+    0 1px 0 rgba(255, 255, 255, 0.9),
+    0 2px 14px rgba(248, 247, 244, 0.65);
   opacity: 1 !important;
   pointer-events: auto !important;
 }
@@ -879,17 +781,17 @@ html.codex-ningyao-skin[data-skins-art-paint="custom"]
 .ningyao-home [data-feature="game-source"]::before {
   content: "⚔  剑来 · 宁姚";
   display: block;
-  margin-bottom: 12px;
+  margin-bottom: 10px;
   padding: 3px 14px;
-  border: 1px solid rgba(106, 158, 171, 0.24);
+  border: 1px solid rgba(106, 158, 171, 0.22);
   border-radius: 999px;
-  background: rgba(252, 251, 248, 0.68);
+  background: rgba(252, 251, 248, 0.58);
   color: rgba(90, 142, 155, 0.95);
   font-size: 12px;
   font-weight: 600;
   letter-spacing: 0.2em;
   line-height: 1.4;
-  box-shadow: inset 0 0 12px rgba(255, 255, 255, 0.4);
+  box-shadow: inset 0 0 12px rgba(255, 255, 255, 0.35);
   backdrop-filter: blur(8px);
 }
 
@@ -897,25 +799,25 @@ html.codex-ningyao-skin[data-skins-art-paint="custom"]
   content: "青衣一袭，执卷问道。剑气未出，秋叶已落。";
   display: block;
   margin-top: 12px;
-  color: rgba(90, 102, 108, 0.94);
+  color: rgba(90, 102, 108, 0.92);
   font-size: 15px;
   line-height: 1.55;
   font-weight: 500;
   letter-spacing: 0.08em;
   text-align: left;
-  text-shadow: 0 1px 8px rgba(255, 255, 255, 0.65);
+  text-shadow: 0 1px 8px rgba(255, 255, 255, 0.6);
 }
 
 .ningyao-home [data-feature="game-source"] button {
-  margin: 10px 0 0 0;
+  margin: 8px 0 0 0;
   padding: 2px 10px 3px;
   border: 1px solid rgba(106, 158, 171, 0.26);
   border-radius: 999px;
-  background: rgba(252, 251, 248, 0.72);
+  background: rgba(252, 251, 248, 0.62);
   color: var(--ningyao-cyan-deep) !important;
   text-decoration-color: rgba(106, 158, 171, 0.35) !important;
   text-underline-offset: 5px;
-  box-shadow: inset 0 0 12px rgba(255, 255, 255, 0.3);
+  box-shadow: inset 0 0 12px rgba(255, 255, 255, 0.28);
 }
 
 .ningyao-home [data-feature="game-source"] button::before {
@@ -926,22 +828,13 @@ html.codex-ningyao-skin[data-skins-art-paint="custom"]
   opacity: 0.86;
 }
 
-/*
- * ── 子元素 2：推荐卡轨 ──
- * 宿主默认 absolute + top:100%（在盒外）。
- * 改为贴盒内底部，与 hero 共享同一张立绘背景。
- */
-.ningyao-home > div:nth-child(2) > div:first-child > div:first-child > div:nth-child(2),
-.ningyao-home > div:first-child > div:first-child > div:first-child > div:nth-child(2) {
-  position: absolute !important;
-  left: 14px !important;
-  right: 14px !important;
-  top: auto !important;
-  bottom: 16px !important;
-  margin-top: 0 !important;
-  height: auto !important;
-  min-height: 0 !important;
-  z-index: 3;
+/* 推荐卡轨：宿主 absolute top:100%；父级 overflow:visible */
+.ningyao-home > div:first-child > div:first-child > div:first-child > div:nth-child(2),
+.ningyao-home > div:nth-child(2) > div:first-child > div:first-child > div:nth-child(2) {
+  left: 0 !important;
+  right: 0 !important;
+  top: 100% !important;
+  margin-top: 12px !important;
   overflow: visible !important;
 }
 
@@ -973,7 +866,7 @@ html.codex-ningyao-skin[data-skins-art-paint="custom"]
   justify-content: center !important;
   gap: 10px !important;
   text-align: center !important;
-  min-height: 112px !important;
+  min-height: 108px !important;
   padding: 14px 13px 12px !important;
   border: 1px solid var(--skins-suggest-card-border) !important;
   border-radius: var(--skins-suggest-card-radius) !important;
@@ -983,19 +876,19 @@ html.codex-ningyao-skin[data-skins-art-paint="custom"]
   background: var(--skins-suggest-card-bg) !important;
   background-image: none !important;
   box-shadow: var(--skins-suggest-card-shadow) !important;
-  backdrop-filter: blur(10px) saturate(1.05) !important;
-  -webkit-backdrop-filter: blur(10px) saturate(1.05) !important;
+  backdrop-filter: blur(8px) saturate(1.04) !important;
+  -webkit-backdrop-filter: blur(8px) saturate(1.04) !important;
   transform: translateY(0);
   transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease !important;
 }
 
 .ningyao-home .group\/home-suggestions button:not([class*="home-suggestion-list-item"]):hover {
   transform: translateY(-3px) !important;
-  border-color: rgba(155, 196, 206, 0.6) !important;
+  border-color: rgba(155, 196, 206, 0.55) !important;
   box-shadow:
-    0 14px 30px rgba(63, 74, 80, 0.1),
-    0 0 0 1px rgba(106, 158, 171, 0.14),
-    inset 0 1px 0 rgba(255, 255, 255, 0.85) !important;
+    0 12px 28px rgba(63, 74, 80, 0.08),
+    0 0 0 1px rgba(106, 158, 171, 0.12),
+    inset 0 1px 0 rgba(255, 255, 255, 0.8) !important;
 }
 
 .ningyao-home .group\/home-suggestions button:not([class*="home-suggestion-list-item"]) > span {
@@ -1088,153 +981,38 @@ html.codex-ningyao-skin[data-skins-art-paint="custom"]
   font-size: 13px !important;
 }
 
-/* ── 9) 输入区 ── */
+/*
+ * ── 9) 输入区：不皮肤化
+ * 不改 composer / utility / 项目选择 / 发送按钮；
+ * 撤销框架 immersive 对输入相关区域的装饰，尽量贴近宿主原生。
+ */
 html.codex-ningyao-skin .composer-surface-chrome,
-html.codex-ningyao-skin.skins-art-wide .composer-surface-chrome {
-  border: 1px solid rgba(255, 255, 255, 0.62) !important;
-  border-radius: 16px !important;
-  background: rgba(255, 255, 255, 0.78) !important;
-  box-shadow:
-    0 10px 28px rgba(63, 74, 80, 0.07),
-    inset 0 1px 0 rgba(255, 255, 255, 0.8) !important;
-  backdrop-filter: blur(14px) saturate(1.06) !important;
-  -webkit-backdrop-filter: blur(14px) saturate(1.06) !important;
-  color: var(--ningyao-ink) !important;
-  overflow: visible !important;
+html.codex-ningyao-skin.skins-art-wide .composer-surface-chrome,
+html.codex-ningyao-skin.skins-art-standard .composer-surface-chrome {
+  background: var(--composer-background, var(--color-background-panel, #ffffff)) !important;
+  border: 0 !important;
+  border-radius: var(--composer-border-radius, 1.25rem) !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
 }
 
 html.codex-ningyao-skin .composer-surface-chrome::before {
   content: none !important;
+  display: none !important;
 }
 
-html.codex-ningyao-skin .ProseMirror {
-  color: #3f4a50 !important;
-  caret-color: var(--ningyao-cyan-deep) !important;
-}
-
-html.codex-ningyao-skin button[class~="bg-token-foreground"],
-html.codex-ningyao-skin .composer-surface-chrome button[class~="bg-token-foreground"],
-html.codex-ningyao-skin .composer-surface-chrome button[class*="size-token-button-composer"],
-html.codex-ningyao-skin button[class~="bg-token-foreground"][class*="size-token-button-composer"] {
-  background: linear-gradient(145deg, #7aafbb 0%, #5a8e9b 100%) !important;
-  color: #f8f7f4 !important;
-  border: 1px solid rgba(255, 255, 255, 0.35) !important;
-  box-shadow:
-    0 4px 14px rgba(106, 158, 171, 0.32),
-    inset 0 1px 0 rgba(255, 255, 255, 0.35) !important;
-  opacity: 1 !important;
-}
-
-html.codex-ningyao-skin button[class~="bg-token-foreground"]:hover,
-html.codex-ningyao-skin .composer-surface-chrome button[class~="bg-token-foreground"]:hover,
-html.codex-ningyao-skin .composer-surface-chrome button[class*="size-token-button-composer"]:hover {
-  background: linear-gradient(145deg, #8eb8c2, #5a8e9b) !important;
-  box-shadow:
-    0 6px 18px rgba(106, 158, 171, 0.4),
-    inset 0 1px 0 rgba(255, 255, 255, 0.4) !important;
-}
-
-html.codex-ningyao-skin button[class~="bg-token-foreground"] svg,
-html.codex-ningyao-skin .composer-surface-chrome button[class~="bg-token-foreground"] svg,
-html.codex-ningyao-skin .composer-surface-chrome button[class*="size-token-button-composer"] svg {
-  color: #f8f7f4 !important;
-  fill: currentColor;
-  opacity: 1 !important;
-}
-
-/* 项目选择 */
-.ningyao-home div:has(> .horizontal-scroll-fade-mask .group\/project-selector),
-.ningyao-home div:has(> .horizontal-scroll-fade-mask)[class*="bg-token-side-bar"],
-.ningyao-home div:has(> .horizontal-scroll-fade-mask)[class*="bg-token-bg-fog"],
-.ningyao-home div.select-none:has(> .horizontal-scroll-fade-mask) {
-  position: relative !important;
-  border: 1px solid rgba(255, 255, 255, 0.55) !important;
-  border-bottom: 0 !important;
-  border-radius: 14px 14px 0 0 !important;
-  background-color: transparent !important;
-  background-image: linear-gradient(
-    180deg,
-    rgba(255, 255, 255, 0.72),
-    rgba(238, 243, 242, 0.58)
-  ) !important;
-  backdrop-filter: blur(12px) !important;
-  -webkit-backdrop-filter: blur(12px) !important;
-  color: #3f4a50 !important;
-  --text-primary: #3f4a50 !important;
-  --text-secondary: #6a767c !important;
-  --icon-primary: #4a565c !important;
-  --color-token-side-bar-background: transparent !important;
-  --color-token-bg-fog: transparent !important;
-}
-
-.ningyao-home div:has(> .horizontal-scroll-fade-mask .group\/project-selector) {
-  padding-top: 28px !important;
-}
-
-.ningyao-home div:has(> .horizontal-scroll-fade-mask .group\/project-selector)::before {
-  content: "◇  落笔成剑 · 择一处山水";
-  position: absolute;
-  left: 14px;
-  top: 7px;
-  z-index: 2;
-  color: rgba(90, 142, 155, 0.92);
-  font-size: 12px;
-  font-weight: 700;
-  letter-spacing: 0.1em;
-  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.6);
-  white-space: nowrap;
-}
-
-.ningyao-home .group\/project-selector,
-.ningyao-home .group\/project-selector *,
-.ningyao-home div:has(> .horizontal-scroll-fade-mask)[class*="bg-token-side-bar"],
-.ningyao-home div:has(> .horizontal-scroll-fade-mask)[class*="bg-token-side-bar"] *,
-.ningyao-home div.select-none:has(> .horizontal-scroll-fade-mask),
-.ningyao-home div.select-none:has(> .horizontal-scroll-fade-mask) * {
-  --text-primary: #3f4a50 !important;
-  --text-secondary: #6a767c !important;
-  color: #4a565c !important;
-}
-
-.ningyao-home .group\/project-selector > button,
-.ningyao-home .group\/project-selector button,
-.ningyao-home div:has(> .horizontal-scroll-fade-mask) > .horizontal-scroll-fade-mask button,
-.ningyao-home div.select-none:has(> .horizontal-scroll-fade-mask) button {
-  border-color: rgba(255, 255, 255, 0.5) !important;
-  background: linear-gradient(
-    135deg,
-    rgba(255, 255, 255, 0.78),
-    rgba(232, 238, 236, 0.62)
-  ) !important;
-  color: #4a565c !important;
-  box-shadow: 0 3px 10px rgba(63, 74, 80, 0.05) !important;
-}
-
-/* utility 行 */
-.ningyao-home [class*="homeUtilityBar"],
-.ningyao-home [class*="_homeUtilityBar_"],
+/* 撤销 immersive 对 utility 的强制边框/圆角/底色，交还宿主 */
+html.codex-ningyao-skin [class*="home-utility"],
+html.codex-ningyao-skin [class*="homeUtilityBar"],
+html.codex-ningyao-skin [class*="_homeUtilityBar_"],
 html.codex-ningyao-skin .ningyao-home-utility {
-  color: #3f4a50 !important;
-  --text-primary: #3f4a50 !important;
-  --text-secondary: #6a767c !important;
-}
-
-html.codex-ningyao-skin .ningyao-home-utility,
-html.codex-ningyao-skin .ningyao-home:has(.ningyao-home-utility) .composer-surface-chrome {
-  border-color: rgba(255, 255, 255, 0.55) !important;
-}
-
-html.codex-ningyao-skin .ningyao-home-utility {
-  border: 1px solid rgba(255, 255, 255, 0.55) !important;
-  border-bottom: 0 !important;
-  border-radius: 16px 16px 0 0 !important;
-  background: rgba(255, 255, 255, 0.7) !important;
-  backdrop-filter: blur(14px) !important;
-  -webkit-backdrop-filter: blur(14px) !important;
-}
-
-html.codex-ningyao-skin .ningyao-home:has(.ningyao-home-utility) .composer-surface-chrome {
-  border-radius: 0 0 16px 16px !important;
+  border: 0 !important;
+  border-radius: var(--composer-border-radius, 1.25rem) !important;
+  background: var(--composer-background, var(--color-background-panel, #ffffff)) !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
 }
 
 /* 弹层 light */
@@ -1261,7 +1039,7 @@ html.codex-ningyao-skin [data-cmdk-root] {
   border-color: var(--color-token-menu-border, rgba(106, 158, 171, 0.18));
 }
 
-/* 对话页：实底可读，不叠立绘 */
+/* 对话页：打穿宿主实底，露出 main 雾面立绘 */
 html.codex-ningyao-skin main.main-surface:has(.thread-scroll-container) [class*="bg-token-main-surface"],
 html.codex-ningyao-skin main.main-surface:has(.thread-scroll-container) form,
 html.codex-ningyao-skin main.main-surface:has(.thread-scroll-container) section {
@@ -1276,8 +1054,8 @@ html.codex-ningyao-skin
   background-image: linear-gradient(
     180deg,
     transparent 0%,
-    rgba(245, 246, 244, 0.55) 45%,
-    rgba(238, 243, 242, 0.9) 100%
+    rgba(245, 246, 244, 0.45) 45%,
+    rgba(238, 243, 242, 0.78) 100%
   ) !important;
   background-color: transparent !important;
 }
@@ -1287,32 +1065,13 @@ html.codex-ningyao-skin main.main-surface .app-shell-main-content-top-fade {
   background: transparent !important;
 }
 
-html.codex-ningyao-skin main.main-surface:has(.thread-scroll-container) > header.app-header-tint {
-  background: linear-gradient(
-    180deg,
-    rgba(238, 243, 242, 0.98),
-    rgba(238, 243, 242, 0.88)
-  ) !important;
-  border-bottom: 1px solid rgba(106, 158, 171, 0.1) !important;
-}
-
-html.codex-ningyao-skin main.main-surface:has(.thread-scroll-container) .composer-surface-chrome {
-  background: rgba(255, 255, 255, 0.92) !important;
-  border: 1px solid rgba(106, 158, 171, 0.12) !important;
-  box-shadow:
-    0 10px 28px rgba(63, 74, 80, 0.06),
-    inset 0 1px 0 rgba(255, 255, 255, 0.85) !important;
-}
-
 /* ── 10) 响应式 ── */
 @media (max-width: 1120px) {
   html.codex-ningyao-skin .ningyao-home {
     --thread-content-max-width: min(48rem, calc(100cqw - 30px)) !important;
-    --ningyao-stage-h: clamp(420px, 54vh, 560px);
-    --ningyao-stage-pad-bottom: 156px;
   }
   .ningyao-ornament {
-    bottom: 68px;
+    bottom: 98px;
     font-size: 12px;
   }
 }
@@ -1327,12 +1086,6 @@ html.codex-ningyao-skin main.main-surface:has(.thread-scroll-container) .compose
   }
   .ningyao-brand b {
     font-size: 13px;
-  }
-  html.codex-ningyao-skin .ningyao-home {
-    --ningyao-stage-h: clamp(380px, 52vh, 500px);
-    --ningyao-stage-pad-top: 20px;
-    --ningyao-stage-pad-x: 16px;
-    --ningyao-stage-pad-bottom: 148px;
   }
   .ningyao-home [data-feature="game-source"] {
     font-size: 20px !important;
@@ -1352,37 +1105,11 @@ html.codex-ningyao-skin main.main-surface:has(.thread-scroll-container) .compose
     > div:first-child
     > div:first-child
     > div:first-child {
-    width: min(62%, 320px) !important;
-    max-width: 62% !important;
+    width: min(72%, 360px) !important;
+    max-width: 72% !important;
   }
   .ningyao-home .group\/home-suggestions button:not([class*="home-suggestion-list-item"]) {
     min-height: 100px !important;
     font-size: 12px !important;
-  }
-  html.codex-ningyao-skin .ningyao-home > div:nth-child(2) > div:first-child > div:first-child::before,
-  html.codex-ningyao-skin .ningyao-home > div:first-child > div:first-child > div:first-child::before {
-    background-position: 78% 40% !important;
-  }
-}
-
-@media (max-width: 640px) {
-  html.codex-ningyao-skin .ningyao-home {
-    --ningyao-stage-h: clamp(340px, 50vh, 440px);
-    --ningyao-stage-pad-bottom: 136px;
-  }
-  .ningyao-home
-    > div:nth-child(2)
-    > div:first-child
-    > div:first-child
-    > div:first-child
-    > div:first-child,
-  .ningyao-home
-    > div:first-child
-    > div:first-child
-    > div:first-child
-    > div:first-child
-    > div:first-child {
-    width: min(72%, 100%) !important;
-    max-width: 72% !important;
   }
 }

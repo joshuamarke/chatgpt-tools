@@ -7,15 +7,15 @@
   "tags": [
     "粉紫",
     "梦幻",
-    "Fiona"
+    "浅色"
   ],
   "previewGradient": "linear-gradient(135deg, #fff3f9 0%, #f3eafd 50%, #ff73bd 100%)",
   "accent": "#B65CFF",
   "port": 9335,
   "assets": {
     "css": "assets/dream-skin.css",
-    "art": "assets/dream-reference.png",
-    "artMime": "image/png",
+    "art": "assets/dream.jpg",
+    "artMime": "image/jpg",
     "plugin": "assets/plugin.json"
   },
   "markers": {

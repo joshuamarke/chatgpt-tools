@@ -22,7 +22,7 @@
 | 一键应用 / 还原 | 自动处理调试端口与可选重启；慢启动 lifecycle 探测 |
 | 大图立绘 | 允许高质量原图；shell 先成功，立绘异步贴入 |
 | 暂停 / 继续 | 不杀客户端的卸皮 / 恢复（CLI：`pause` / `resume`） |
-| 导入 / 导出 | `.cgskin` / `.zip` + inspect 风险扫描 |
+| 导入 / 导出 | `.skin` / `.zip` + inspect 风险扫描 |
 | 自定义皮肤 | 基于目标皮肤模板；自适应构图 + 自定义颜色 / 壁纸（≤16 MB） |
 | 共享渲染内核 | 新增皮肤只需 CSS + `plugin.json`（无 inject 脚本），不必改 core |
 | 宿主选择器契约 | `engine/runtime/selectors.json` + `npm run doctor:selectors`；模板 `skins/_template` |
@@ -31,7 +31,16 @@
 | 非侵入 | 不改官方安装目录 |
 
 会话管理说明：[docs/features/sessions.md](docs/features/sessions.md)。  
-皮肤说明：[docs/features/skins.md](docs/features/skins.md)。
+皮肤说明：[docs/features/skins.md](docs/features/skins.md)。  
+供应商 / 本地路由 / 请求日志：[docs/features/providers.md](docs/features/providers.md)。
+
+### 版本号规范（`MAJOR.MINOR.PATCH`，当前 **1.1.12**）
+
+| 位 | 含义 | 何时递增 |
+|----|------|----------|
+| **MAJOR**（第 1 位） | 大方向 / 产品主线 | 整体方向级变更，例如 `2.1.12` |
+| **MINOR**（第 2 位） | 同方向下的大规模版本线 | 大方向不变的大规模能力升级，例如 `1.2.12` |
+| **PATCH**（第 3 位） | 日常迭代 | 功能补强、修复、小改进；默认只改这一位，例如 `1.1.12` → `1.1.13` |
 
 ---
 
@@ -49,7 +58,7 @@
 ## 快速开始
 
 ```bash
-cd E:\临时项目\chatgpt-tools   # 或你的克隆路径
+cd chatgpt-tools   # 或你的克隆路径
 npm install
 npm run dev
 ```
@@ -83,8 +92,130 @@ npm run build
 
 打包前请确认：
 
-- `engine/`、`skins/` 已列入 `src-tauri/tauri.conf.json` → `bundle.resources`
-- 目标机器仍安装 **Node.js**（当前阶段注入未内嵌 Node）
+- `engine/` 与**内置皮肤**已列入 `bundle.resources`（见下）
+- `bundle.active` 为 `true`（安装包 / DMG 才会生成）
+
+### 内置皮肤策略
+
+| 环境 | 皮肤来源 |
+|------|----------|
+| **开发** `npm run dev` | 仓库完整 `skins/`（含全部主题，便于调试） |
+| **安装包** `npm run build` | 仅 **`qingkong`**（`beforeBuildCommand` → `scripts/stage-bundle-skins.mjs`） |
+| **其余皮肤** | 运行时从 **打包时注入** 的云端 catalog 拉取（`cloudDownloadSkin` 缓存到本机） |
+
+生产云端 baseUrl / updater endpoints **不写进仓库**，与私钥一样只在打包阶段注入（`keys/release.env` 或 CI Secrets）。见 [`keys/README.md`](keys/README.md)。
+
+覆盖内置列表（构建时）：
+
+```powershell
+$env:CODEX_SKIN_BUNDLE_SKINS = "qingkong"
+npm run build
+```
+
+本地联调 CDN 时：
+
+```powershell
+$env:CODEX_SKIN_CLOUD_URL = "http://127.0.0.1:8788/v1"
+npm run dev
+```
+
+---
+
+## GitHub Releases（自动构建）
+
+采用 **「先发 Release → CI 挂资产」** 模式，而不是 push tag 再自动建 Release。
+
+应用内更新默认读：
+
+```text
+https://github.com/<owner>/<repo>/releases/latest/download/latest.json
+```
+
+（CI 用 `GITHUB_REPOSITORY` 自动注入；本机用 `npm run stamp:repo` 或编辑 `src/repo-meta.json`。）
+
+### 仓库与首次接入
+
+- 源码仓库：https://github.com/joshuamarke/chatgpt-tools  
+- 应用内更新默认：https://github.com/joshuamarke/chatgpt-tools/releases/latest/download/latest.json  
+- 关于页 GitHub 按钮指向同一仓库（`src/repo-meta.json`）
+
+推送前请在 **Settings → Secrets and variables → Actions** 配置：
+
+- **`TAURI_SIGNING_PRIVATE_KEY`**（`npx tauri signer generate -w keys/chatgpt-tools.key --ci` 生成的私钥全文）  
+- 可选：`TAURI_SIGNING_PRIVATE_KEY_PASSWORD`、独立 CDN 的 `CODEX_SKIN_CLOUD_URL` / `TAURI_UPDATER_ENDPOINTS`
+
+推 `main` 后 **PR build** 应冒烟通过；再按下方步骤发首个 Release。详情见 [`keys/README.md`](keys/README.md)。
+
+### 工作流
+
+| Workflow | 触发 | 作用 |
+|----------|------|------|
+| [`.github/workflows/release-assets.yml`](.github/workflows/release-assets.yml) | `release: published` | 构建并上传 Windows / macOS 安装包，再生成 `latest.json` |
+| [`.github/workflows/pr-build.yml`](.github/workflows/pr-build.yml) | PR / `main` push | 冒烟构建，产物仅作为 Actions Artifact |
+
+### 发版步骤
+
+1. **升版本**（三处保持一致）  
+   - `package.json`  
+   - `src-tauri/tauri.conf.json`  
+   - `src-tauri/Cargo.toml`
+2. **写更新日志**：在 [`CHANGELOG.md`](CHANGELOG.md) 顶部增加本版条目。
+3. **提交并打 tag**：
+
+```bash
+git add -A
+git commit -m "chore: release v1.1.13"
+git tag v1.1.13
+git push origin main --tags
+```
+
+4. 在 GitHub **Releases → Draft a new release**：
+   - Tag 选 `v1.1.13`
+   - 标题如 `ChatGPT Tools v1.1.13`
+   - 描述粘贴 `CHANGELOG.md` 中对应段落（这就是 Releases 页显示的更新日志）
+   - 选择 **Publish release**（不要只存 Draft；workflow 只监听 `published`）
+5. 确认 Actions Secret **`TAURI_SIGNING_PRIVATE_KEY`** 已配置（见上）。  
+   云端 CDN **不是**必需；不配时 updater 自动指向本仓库 Releases 的 `latest.json`。
+6. 等待 **Release assets** 跑完。资产会自动挂到该 Release：
+
+| 资产 | 说明 |
+|------|------|
+| `ChatGPTTools-{ver}-windows-x64-setup.exe` | Windows NSIS **安装包**（应用内更新用） |
+| `ChatGPTTools-{ver}-windows-x64-setup.exe.sig` | 安装包 minisign 签名 |
+| `ChatGPTTools-{ver}-windows-x64-portable.zip` | Windows **免安装**便携版（解压即跑，无需 setup） |
+| `ChatGPTTools-{ver}-windows-x64.msi` | Windows MSI（若生成） |
+| `ChatGPTTools-{ver}-macos-arm64.dmg` (+ `.sig`) | Apple Silicon |
+| `ChatGPTTools-{ver}-macos-x64.dmg` (+ `.sig`) | Intel Mac |
+| `latest.json` | **Tauri updater** 静态清单（多 endpoint 读取） |
+
+### 应用内更新（`tauri-plugin-updater`）
+
+- 关于页「检查更新」→ 官方 updater 拉取 `latest.json`
+- **默认 endpoint**：本仓库 `releases/latest/download/latest.json`（打包时由 `inject-release-config` 写入）
+- 可选：`TAURI_UPDATER_ENDPOINTS` 覆盖或前置 CDN 镜像（多地址 fallback）
+- 仓库内 `tauri.conf.json` 的 `endpoints` 保持为空，只在打包 overlay 合并
+- 验签：`createUpdaterArtifacts` + CI 私钥签发 `.sig`
+- 关于页「查看开源协议」旁 **GitHub** 按钮 → 仓库主页（`src/repo-meta.json`）
+
+`latest.json`（Tauri 格式）形如：
+
+```json
+{
+  "version": "1.1.13",
+  "notes": "…Release 描述…",
+  "pub_date": "2026-07-30T00:00:00Z",
+  "platforms": {
+    "windows-x86_64": {
+      "signature": "…",
+      "url": "https://github.com/<owner>/<repo>/releases/download/v1.1.13/ChatGPTTools-1.1.13-windows-x64-setup.exe"
+    },
+    "darwin-aarch64": { "signature": "…", "url": "…-macos-arm64.dmg" },
+    "darwin-x86_64": { "signature": "…", "url": "…-macos-x64.dmg" }
+  }
+}
+```
+
+> 代码签名（Authenticode / Apple notarization）与 updater minisign 是两回事；未做系统级签名时，用户首次打开仍可能被 SmartScreen / Gatekeeper 拦截。
 
 ---
 
@@ -111,14 +242,14 @@ chatgpt-tools/
 ├── skins/<id>/                  # 内置皮肤：CSS + art + plugin.json
 ├── src-tauri/                   # Tauri 2 / Rust
 ├── docs/
-├── scripts/                     # verify-engine / migrate-plugins
+├── scripts/                     # 构建 / 发版 / 契约与冒烟（无探针杂项）
 ├── package.json
 └── README.md
 ```
 
-## 引擎 v2.2（载荷与多皮肤）
+## 引擎 v1.1.10（载荷与多皮肤）
 
-对齐参考项目的 **engine 内核**，产品形态仍是 Tauri 多皮肤管理：
+引擎内核与 Tauri 多皮肤管理：
 
 | 能力 | 说明 |
 |------|------|
@@ -134,8 +265,10 @@ chatgpt-tools/
 常用命令：
 
 ```bash
-npm run test:engine
-npm run verify:engine
+npm run test:engine          # injector 自检（无需宿主）
+npm run verify:engine        # CLI 冒烟
+npm run doctor:selectors     # 宿主选择器契约
+npm run check:gui            # GUI 静态回归
 npm run engine -- check-payload --skin-id dream
 npm run engine -- pause
 npm run engine -- resume
@@ -172,7 +305,6 @@ npm run engine -- verify --skin-id dream
 | [docs/architecture/engine-cli.md](./docs/architecture/engine-cli.md) | 引擎 CLI 协议 |
 | [docs/development/setup.md](./docs/development/setup.md) | 开发环境与排错 |
 | [docs/development/create-skin.md](./docs/development/create-skin.md) | 新建皮肤 |
-| [docs/development/migration.md](./docs/development/migration.md) | 自 Electron 迁移说明 |
 | [docs/UNINSTALL.md](./docs/UNINSTALL.md) | 干净卸载 |
 
 ---

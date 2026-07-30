@@ -145,6 +145,7 @@ const PURGE = `(() => {
     { disabled: '__CODEX_EVA_SKIN_DISABLED__', state: '__CODEX_EVA_SKIN_STATE__', root: 'codex-eva-skin', art: '--eva-art', style: 'codex-eva-skin-style', chrome: 'codex-eva-skin-chrome', homes: ['eva-home','eva-home-shell'] },
     { disabled: '__CODEX_BENGONG_SKIN_DISABLED__', state: '__CODEX_BENGONG_SKIN_STATE__', root: 'codex-bengong-skin', art: '--bengong-art', style: 'codex-bengong-skin-style', chrome: 'codex-bengong-skin-chrome', homes: ['bengong-home','bengong-home-shell'] },
     { disabled: '__CODEX_MIKU_SKIN_DISABLED__', state: '__CODEX_MIKU_SKIN_STATE__', root: 'codex-miku-skin', art: '--miku-art', style: 'codex-miku-skin-style', chrome: 'codex-miku-skin-chrome', homes: ['miku-home','miku-home-shell'] },
+    { disabled: '__CODEX_SHIGUANG_SKIN_DISABLED__', state: '__CODEX_SHIGUANG_SKIN_STATE__', root: 'codex-shiguang-skin', art: '--shiguang-art', style: 'codex-shiguang-skin-style', chrome: 'codex-shiguang-skin-chrome', homes: ['shiguang-home','shiguang-home-shell'] },
     { disabled: '__CODEX_JIUYI_SKIN_DISABLED__', state: '__CODEX_JIUYI_SKIN_STATE__', root: 'codex-jiuyi-skin', art: '--jiuyi-art', style: 'codex-jiuyi-skin-style', chrome: 'codex-jiuyi-skin-chrome', homes: ['jiuyi-home','jiuyi-home-shell'] },
   ];
 

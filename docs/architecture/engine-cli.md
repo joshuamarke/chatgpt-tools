@@ -113,7 +113,7 @@ node engine/cli.mjs <command> [options]
 
 ### `export-skin` / `import-skin` / `inspect-skin` / `delete-skin`
 
-多皮肤包能力；`inspect` 扫描 inject+plugin 风险与立绘体积。
+多皮肤包能力；默认扩展名 **`.skin`**（zip；导入兼容 `.zip` / 遗留 `.cgskin`）。`inspect` 扫描 inject+plugin 风险与立绘体积。
 
 ### `design-wallpaper --payload <json-file|json-string>`
 
@@ -165,7 +165,7 @@ Payload 字段（camelCase）：
 1. `cli.mjs` `dispatch`  
 2. 若 GUI 需要：`commands.rs` + `lib.rs` + `skin-api.js`  
 3. 更新本文档与 README  
-4. `npm run test:engine` / `verify:engine`  
+4. `npm run test:engine`（injector self-test）/ `verify:engine`（CLI 冒烟）
 
 ## 底层 injector
 

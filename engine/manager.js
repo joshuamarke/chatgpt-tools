@@ -696,9 +696,12 @@ function exportSkin(skinId, outputPath) {
   };
   zip.addFile("package.json", Buffer.from(JSON.stringify(meta, null, 2), "utf8"));
 
-  const out = outputPath.endsWith(".cgskin") || outputPath.endsWith(".zip")
-    ? outputPath
-    : `${outputPath}.cgskin`;
+  const out =
+    outputPath.endsWith(".skin") ||
+    outputPath.endsWith(".zip") ||
+    outputPath.endsWith(".cgskin")
+      ? outputPath
+      : `${outputPath}.skin`;
   fs.mkdirSync(path.dirname(out), { recursive: true });
   zip.writeZip(out);
   return { ok: true, path: out, skinId: skin.id, name: skin.name };

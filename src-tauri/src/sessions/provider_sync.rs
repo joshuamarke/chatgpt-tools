@@ -1,5 +1,14 @@
 //! Provider metadata repair + session_index cleanup.
-//! Adapted from CodexPlusPlus `codex-plus-data::provider_sync`.
+//! Provider repair + session_index cleanup for local Codex session data.
+//!
+//! # Provider identity (critical)
+//!
+//! Codex session / thread `model_provider` is the **TOML table key**
+//! (`model_providers.<id>` → `<id>`), e.g. `chatgpt-tools-proxy`, `custom`,
+//! `openai`. It is **not** `model_providers.<id>.name` (UI label, always
+//! `"OpenAI"` in ChatGPT Tools). Writing the name field (or a wrong key)
+//! into historical session meta makes the desktop fail to bind / resume
+//! threads against the live `model_provider`.
 
 use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
@@ -436,10 +445,27 @@ fn resolve_target_provider(
 }
 
 fn is_valid_explicit_provider_id(value: &str) -> bool {
-    !value.is_empty()
-        && value
-            .chars()
-            .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-' | '.'))
+    // Must be a model_providers.<id> key — never the inner `name` UI label
+    // (ChatGPT Tools always writes name = "OpenAI").
+    is_valid_provider_id_key(value)
+}
+
+/// Provider keys look like `openai`, `custom`, `chatgpt-tools-proxy`.
+/// Rejects the canonical UI label `"OpenAI"` and other non-key values.
+fn is_valid_provider_id_key(value: &str) -> bool {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return false;
+    }
+    // `model_providers.*.name` is the OpenAI-compatible UI label, not a provider id.
+    if trimmed.eq_ignore_ascii_case("OpenAI") && trimmed != "openai" {
+        return false;
+    }
+    trimmed
+        .chars()
+        .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-' | '.'))
+        // Keys are conventionally lowercase / kebab; reject Title Case display names.
+        && !trimmed.chars().any(|ch| ch.is_ascii_uppercase())
 }
 
 fn list_configured_provider_ids(path: &Path) -> Vec<String> {
@@ -474,7 +500,8 @@ fn sorted_provider_ids(ids: HashSet<String>) -> Vec<String> {
 }
 
 fn is_valid_provider_id_for_discovery(value: &str) -> bool {
-    !value.trim().is_empty() && !value.chars().any(char::is_control)
+    // Same rules as explicit targets: only real provider keys, never UI names.
+    is_valid_provider_id_key(value)
 }
 
 fn root_toml_string_value(text: &str, key: &str) -> Option<String> {
@@ -1106,7 +1133,7 @@ fn create_backup(
             "createdAt": chrono::Utc::now().to_rfc3339(),
             "dbFiles": db_files,
             "changedSessionFiles": changes.len(),
-            "managedBy": "Codex++ provider sync"
+            "managedBy": "ChatGPT Tools provider sync"
         }))?,
     )?;
     Ok(backup_dir)
@@ -1134,7 +1161,7 @@ fn create_session_index_cleanup_backup(
         "createdAt": chrono::Utc::now().to_rfc3339(),
         "snapshotSha256": plan.snapshot_sha256,
         "prunedSessionIndexEntries": removed_entries,
-        "managedBy": "Codex++ provider sync"
+        "managedBy": "ChatGPT Tools provider sync"
     }))
     .map_err(|error| cleanup_apply_error(error, Some(backup_dir.clone())))?;
     fs::write(backup_dir.join("metadata.json"), metadata)
@@ -1189,23 +1216,33 @@ fn table_columns(db: &Connection, table: &str) -> anyhow::Result<HashSet<String>
     Ok(columns)
 }
 
+/// Tables that store per-thread `model_provider` (provider **key**, not UI name).
+const PROVIDER_TABLES: &[(&str, &str)] = &[
+    ("threads", "id"),
+    // Desktop recent-conversation catalog — must stay in sync with threads/rollouts
+    // or Codex fails to bind history after provider repair.
+    ("local_thread_catalog", "thread_id"),
+];
+
 fn sqlite_provider_ids(path: &Path) -> anyhow::Result<Vec<String>> {
     if !path.exists() {
         return Ok(Vec::new());
     }
     let db = Connection::open(path)?;
-    let columns = table_columns(&db, "threads")?;
-    if !columns.contains("model_provider") {
-        return Ok(Vec::new());
-    }
-    let mut stmt = db.prepare(
-        "SELECT DISTINCT COALESCE(model_provider, '') FROM threads WHERE COALESCE(model_provider, '') <> ''",
-    )?;
     let mut ids = HashSet::new();
-    for item in stmt.query_map([], |row| row.get::<_, String>(0))? {
-        let id = item?;
-        if is_valid_provider_id_for_discovery(&id) {
-            ids.insert(id);
+    for (table, _) in PROVIDER_TABLES {
+        let columns = table_columns(&db, table)?;
+        if !columns.contains("model_provider") {
+            continue;
+        }
+        let mut stmt = db.prepare(&format!(
+            "SELECT DISTINCT COALESCE(model_provider, '') FROM {table} WHERE COALESCE(model_provider, '') <> ''"
+        ))?;
+        for item in stmt.query_map([], |row| row.get::<_, String>(0))? {
+            let id = item?;
+            if is_valid_provider_id_for_discovery(&id) {
+                ids.insert(id);
+            }
         }
     }
     Ok(sorted_provider_ids(ids))
@@ -1221,15 +1258,23 @@ fn count_sqlite_updates(
         return Ok(0);
     }
     let db = Connection::open(path)?;
-    let columns = table_columns(&db, "threads")?;
-    if !columns.contains("model_provider") {
-        return Ok(0);
+    let mut total: usize = 0;
+
+    for (table, _) in PROVIDER_TABLES {
+        let columns = table_columns(&db, table)?;
+        if !columns.contains("model_provider") {
+            continue;
+        }
+        total += db.query_row(
+            &format!(
+                "SELECT COUNT(*) FROM {table} WHERE COALESCE(model_provider, '') <> ?1"
+            ),
+            [target_provider],
+            |row| row.get::<_, i64>(0),
+        )? as usize;
     }
-    let mut total: usize = db.query_row(
-        "SELECT COUNT(*) FROM threads WHERE COALESCE(model_provider, '') <> ?1",
-        [target_provider],
-        |row| row.get::<_, i64>(0),
-    )? as usize;
+
+    let columns = table_columns(&db, "threads")?;
     if columns.contains("has_user_event") {
         for thread_id in user_event_thread_ids {
             total += db.query_row(
@@ -1279,16 +1324,25 @@ fn apply_sqlite_update(
         return Ok(SqliteUpdateCounts::default());
     }
     let mut db = Connection::open(path)?;
-    let columns = table_columns(&db, "threads")?;
-    if !columns.contains("model_provider") {
-        return Ok(SqliteUpdateCounts::default());
-    }
     let tx = db.transaction()?;
     let mut counts = SqliteUpdateCounts::default();
-    counts.provider_rows = tx.execute(
-        "UPDATE threads SET model_provider = ?1 WHERE COALESCE(model_provider, '') <> ?1",
-        [target_provider],
-    )?;
+
+    // Rewrite provider **keys** on every table Codex uses for recent threads.
+    // Using `model_providers.*.name` (e.g. "OpenAI") here would break resume.
+    for (table, _) in PROVIDER_TABLES {
+        let columns = table_columns(&tx, table)?;
+        if !columns.contains("model_provider") {
+            continue;
+        }
+        counts.provider_rows += tx.execute(
+            &format!(
+                "UPDATE {table} SET model_provider = ?1 WHERE COALESCE(model_provider, '') <> ?1"
+            ),
+            [target_provider],
+        )?;
+    }
+
+    let columns = table_columns(&tx, "threads")?;
     if columns.contains("has_user_event") {
         for thread_id in user_event_thread_ids {
             counts.user_event_rows += tx.execute(
@@ -1503,7 +1557,13 @@ fn prune_backups(home: &Path) -> anyhow::Result<()> {
         let Ok(value) = serde_json::from_str::<Value>(&text) else {
             continue;
         };
-        if value.get("managedBy").and_then(Value::as_str) == Some("Codex++ provider sync") {
+        // Prune our backups (namespace is stable; also accept legacy managedBy markers).
+        let ns = value.get("namespace").and_then(Value::as_str).unwrap_or("");
+        let by = value.get("managedBy").and_then(Value::as_str).unwrap_or("");
+        if ns.starts_with("provider-sync")
+            || by == "ChatGPT Tools provider sync"
+            || by.ends_with("provider sync")
+        {
             managed.push(path);
         }
     }
@@ -1523,4 +1583,67 @@ fn now_secs() -> u64 {
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn provider_id_is_toml_key_not_ui_name() {
+        assert!(is_valid_provider_id_key("openai"));
+        assert!(is_valid_provider_id_key("custom"));
+        assert!(is_valid_provider_id_key("chatgpt-tools-proxy"));
+        assert!(is_valid_provider_id_key("cliproxyapi"));
+        // UI label from model_providers.*.name — must never be a session provider
+        assert!(!is_valid_provider_id_key("OpenAI"));
+        assert!(!is_valid_provider_id_key("DeepSeek"));
+        assert!(!is_valid_provider_id_key(""));
+        assert!(!is_valid_explicit_provider_id("OpenAI"));
+        assert!(is_valid_explicit_provider_id("chatgpt-tools-proxy"));
+    }
+
+    #[test]
+    fn rewrite_session_meta_uses_provider_key() {
+        let line = r#"{"type":"session_meta","payload":{"id":"t1","model_provider":"cliproxyapi","cwd":"E:/projects/sample"}}"#;
+        let text = format!("{line}\n");
+        let rewrite = rewrite_rollout_session_meta_providers(&text, "chatgpt-tools-proxy").unwrap();
+        assert!(rewrite.rewrite_needed);
+        assert!(rewrite.next_text.contains("\"model_provider\":\"chatgpt-tools-proxy\""));
+        assert!(!rewrite.next_text.contains("\"model_provider\":\"OpenAI\""));
+        assert!(!rewrite.next_text.contains("\"model_provider\":\"cliproxyapi\""));
+    }
+
+    #[test]
+    fn configured_provider_ids_come_from_section_keys() {
+        let dir = std::env::temp_dir().join(format!(
+            "cgt-provider-sync-test-{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("config.toml");
+        fs::write(
+            &path,
+            r#"
+model_provider = "chatgpt-tools-proxy"
+
+[model_providers.chatgpt-tools-proxy]
+name = "OpenAI"
+base_url = "http://127.0.0.1:1/v1"
+
+[model_providers.cliproxyapi]
+name = "OpenAI"
+base_url = "https://example.com/v1"
+"#,
+        )
+        .unwrap();
+        let ids = list_configured_provider_ids(&path);
+        assert!(ids.contains(&"chatgpt-tools-proxy".to_string()));
+        assert!(ids.contains(&"cliproxyapi".to_string()));
+        assert!(ids.contains(&"openai".to_string())); // built-in default always present
+        assert!(!ids.iter().any(|id| id == "OpenAI"));
+        assert_eq!(read_current_provider(&path), "chatgpt-tools-proxy");
+        let _ = fs::remove_dir_all(&dir);
+    }
 }

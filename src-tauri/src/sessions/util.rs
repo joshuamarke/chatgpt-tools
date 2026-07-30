@@ -8,7 +8,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 /// Strip Windows extended-length / device prefixes so UI paths look like normal drive paths.
 ///
 /// Codex desktop (Electron) often stores cwd as `\\?\E:\foo` or `//?/E:/foo`.
-/// cc-switch and other tools display the human form without the `\\?\` prefix.
+/// UI displays the human form without the Windows `\\?\` extended prefix.
 pub fn normalize_display_path(path: &str) -> String {
     let trimmed = path.trim();
     if trimmed.is_empty() {
@@ -55,8 +55,8 @@ mod path_tests {
     #[test]
     fn strips_win32_device_prefix() {
         assert_eq!(
-            normalize_display_path(r"\\?\E:\临时项目\image-2"),
-            r"E:\临时项目\image-2"
+            normalize_display_path(r"\\?\E:\projects\image-2"),
+            r"E:\projects\image-2"
         );
         assert_eq!(
             normalize_display_path(r"\\?\C:\Users\demo"),

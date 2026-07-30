@@ -1,10 +1,14 @@
 //! Codex live config helpers (`~/.codex/auth.json` + `config.toml`).
 //!
-//! Production path (aligned with common third-party channel usage):
+//! Production path:
 //! - Stored profile: `{ auth: { OPENAI_API_KEY }, config: "<toml>" }`
-//! - On switch (third-party): write **both** auth.json (API key) and config.toml
-//!   (model_provider + base_url + wire_api). Official: preserve live ChatGPT
-//!   OAuth unless the stored profile already carries login material.
+//! - On switch (third-party, default): **config-only** — provider-scoped
+//!   `experimental_bearer_token` + `requires_openai_auth = true` in config.toml;
+//!   leave `auth.json` ChatGPT / Codex OAuth cache intact.
+//! - On switch (third-party, preserve off): dual-write auth.json API key + config
+//!   (legacy / edge environments).
+//! - Official: strip third-party routing; write auth only when archive carries
+//!   real OAuth material, otherwise keep live auth.json.
 
 use std::fs;
 use std::io::Write;
@@ -27,6 +31,9 @@ pub const OFFICIAL_WIRE_API: &str = "responses";
 /// Display / seed default model label (Codex ships multiple gpt-5.x variants;
 /// leaving model unset lets the client pick its built-in default).
 pub const OFFICIAL_MODEL_HINT: &str = "gpt-5.5";
+/// Canonical `model_providers.*.name` for Codex (UI label; not the supplier archive title).
+/// Always write this — never the ChatGPT Tools provider display name.
+pub const PROVIDER_UI_NAME: &str = "OpenAI";
 
 pub fn codex_home_dir() -> PathBuf {
     crate::sessions::default_codex_home_dir()
@@ -251,14 +258,15 @@ pub fn validate_for_switch(provider: &Provider) -> Result<(), String> {
 }
 
 /// Build third-party Codex config.toml from form fields.
+/// `model_providers.*.name` is always [`PROVIDER_UI_NAME`] (`"OpenAI"`).
 pub fn build_third_party_config(
-    provider_name: &str,
+    _provider_name: &str,
     base_url: &str,
     model: &str,
     wire_api: &str,
     reasoning_effort: &str,
 ) -> String {
-    let name = toml_string(provider_name);
+    let name = toml_string(PROVIDER_UI_NAME);
     let url = toml_string(&normalize_base_url(base_url));
     let model = toml_string(if model.trim().is_empty() {
         "gpt-5.5"
@@ -384,7 +392,7 @@ pub fn extract_reasoning_effort(config_text: &str) -> Option<String> {
 /// Overlay every top-level key from `overlay` onto `base`, preserving keys that
 /// only exist in `base` (MCP / desktop / features / notify / …).
 ///
-/// This is the Codex++-style "preserve unmanaged" merge used when:
+/// This is the "preserve unmanaged" merge used when:
 /// - the archive only stores a routing fragment, or
 /// - the advanced editor shows a partial template but live still has full config.
 pub fn merge_toml_overlay(base: &str, overlay: &str) -> Result<String, String> {
@@ -405,6 +413,48 @@ pub fn merge_toml_overlay(base: &str, overlay: &str) -> Result<String, String> {
         base_doc[key] = item.clone();
     }
     Ok(base_doc.to_string())
+}
+
+const DESKTOP_APPEARANCE_KEYS: &[&str] = &[
+    "appearanceTheme",
+    "appearanceLightCodeThemeId",
+    "appearanceLightChromeTheme",
+    "appearanceDarkCodeThemeId",
+    "appearanceDarkChromeTheme",
+];
+
+/// After a provider overlay, restore live `[desktop]` appearance* scalars so
+/// enabling a supplier does not clobber skin-managed chrome / code themes.
+pub fn preserve_live_desktop_appearance(live: &str, merged: &str) -> Result<String, String> {
+    if live.trim().is_empty() || merged.trim().is_empty() {
+        return Ok(merged.to_string());
+    }
+    let live_doc = match live.parse::<DocumentMut>() {
+        Ok(d) => d,
+        Err(_) => return Ok(merged.to_string()),
+    };
+    let Some(live_desktop) = live_doc.get("desktop").and_then(|i| i.as_table()) else {
+        return Ok(merged.to_string());
+    };
+    let mut out = merged
+        .parse::<DocumentMut>()
+        .map_err(|e| format!("Invalid Codex config.toml: {e}"))?;
+    {
+        let root = out.as_table_mut();
+        if !root.contains_key("desktop") {
+            root.insert("desktop", toml_edit::Item::Table(toml_edit::Table::new()));
+        }
+        let desktop = root
+            .get_mut("desktop")
+            .and_then(|i| i.as_table_like_mut())
+            .ok_or_else(|| "Codex config.toml 中 [desktop] 非法".to_string())?;
+        for key in DESKTOP_APPEARANCE_KEYS {
+            if let Some(item) = live_desktop.get(key) {
+                desktop.insert(key, item.clone());
+            }
+        }
+    }
+    Ok(out.to_string())
 }
 
 /// Pick the richer of archive vs live config as the merge base (more top-level keys wins;
@@ -454,9 +504,12 @@ pub fn config_for_editor(archive_config: &str) -> String {
 
 /// Patch structured form fields into an existing Codex config while preserving
 /// unrelated keys (MCP, extra model_providers, etc.).
+///
+/// `model_providers.*.name` is always [`PROVIDER_UI_NAME`] (`"OpenAI"`); the
+/// `provider_name` argument is ignored (kept for call-site compatibility).
 pub fn patch_config_from_form(
     existing: &str,
-    provider_name: &str,
+    _provider_name: &str,
     base_url: Option<&str>,
     model: Option<&str>,
     wire_api: Option<&str>,
@@ -468,7 +521,7 @@ pub fn patch_config_from_form(
             return Err("请填写 Base URL".into());
         }
         return Ok(build_third_party_config(
-            provider_name,
+            PROVIDER_UI_NAME,
             url,
             model.unwrap_or("gpt-5.5"),
             wire_api.unwrap_or("responses"),
@@ -515,7 +568,8 @@ pub fn patch_config_from_form(
             .get_mut(&provider_id)
             .and_then(|i| i.as_table_like_mut())
             .ok_or_else(|| format!("Codex config.toml 中 model_providers.{provider_id} 非法"))?;
-        table.insert("name", toml_edit::value(provider_name));
+        // Always OpenAI — never the ChatGPT Tools supplier display name.
+        table.insert("name", toml_edit::value(PROVIDER_UI_NAME));
         if let Some(url) = base_url.map(str::trim).filter(|s| !s.is_empty()) {
             table.insert("base_url", toml_edit::value(normalize_base_url(url)));
         }
@@ -569,6 +623,7 @@ fn extract_bearer_token(config_text: &str) -> Option<String> {
 }
 
 /// Inject API key into config as provider-scoped experimental_bearer_token (belt & suspenders).
+/// Also normalizes active `model_providers.*.name` to [`PROVIDER_UI_NAME`].
 fn set_bearer_token(config_text: &str, token: &str) -> Result<String, String> {
     if config_text.trim().is_empty() {
         return Err("Codex 第三方供应商缺少 config.toml，无法写入 API Key".into());
@@ -590,6 +645,8 @@ fn set_bearer_token(config_text: &str, token: &str) -> Result<String, String> {
         {
             if let Some(table) = providers.get_mut(&id).and_then(|i| i.as_table_like_mut()) {
                 table.insert("experimental_bearer_token", toml_edit::value(token));
+                table.insert("requires_openai_auth", toml_edit::value(true));
+                table.insert("name", toml_edit::value(PROVIDER_UI_NAME));
                 return Ok(doc.to_string());
             }
         }
@@ -647,27 +704,56 @@ pub fn read_live_snapshot() -> LiveSnapshot {
     }
 }
 
-/// Whether stored provider roughly matches live files (base_url + model).
+/// Whether stored provider roughly matches live routing.
+///
+/// Compares **base_url only** (or official shape). Do **not** compare `model`:
+/// users freely switch models in the Codex GUI; treating archive default model
+/// as a match key causes false「本机漂移」.
 pub fn matches_live(provider: &Provider, live: &LiveSnapshot) -> bool {
-    let (_, base, model) = summarize(provider);
+    let (_, base, _model) = summarize(provider);
     if provider.is_official() {
         let live_config = read_config_text().unwrap_or_default();
         return is_official_live_config(&live_config);
     }
+    // Local-routing shell: live points at proxy; archive still holds real upstream.
+    // live_status takeover path handles that; here only direct-mode base_url identity.
     match (base.as_deref(), live.base_url.as_deref()) {
-        (Some(a), Some(b)) if normalize_base_url(a) == normalize_base_url(b) => {
-            match (model.as_deref(), live.model.as_deref()) {
-                (Some(m1), Some(m2)) => m1 == m2,
-                (None, None) => true,
-                _ => false,
-            }
-        }
+        (Some(a), Some(b)) => normalize_base_url(a) == normalize_base_url(b),
+        (None, None) => true,
         _ => false,
+    }
+}
+
+/// Options for projecting a provider into live Codex files.
+#[derive(Debug, Clone, Copy)]
+pub struct WriteLiveOptions {
+    /// When true, third-party switches only rewrite config.toml.
+    pub preserve_official_auth: bool,
+}
+
+impl Default for WriteLiveOptions {
+    fn default() -> Self {
+        Self {
+            preserve_official_auth: true,
+        }
     }
 }
 
 /// Write live Codex files for the selected provider.
 pub fn write_live(provider: &Provider) -> Result<Vec<String>, String> {
+    write_live_with_options(
+        provider,
+        WriteLiveOptions {
+            preserve_official_auth: super::store::preserve_codex_official_auth(),
+        },
+    )
+}
+
+/// Write live Codex files with explicit options (tests / takeover hooks).
+pub fn write_live_with_options(
+    provider: &Provider,
+    options: WriteLiveOptions,
+) -> Result<Vec<String>, String> {
     let mut warnings = Vec::new();
     let obj = provider
         .settings_config
@@ -705,32 +791,27 @@ pub fn write_live(provider: &Provider) -> Result<Vec<String>, String> {
 
         if auth_has_login_material(&auth) && !is_api_key_only_auth(&auth) {
             write_atomic_auth_and_config(&auth, &final_config)?;
-            warnings.push(
-                "已恢复 OpenAI 官方路由（清除第三方 base_url / model_providers），并写入档案中的 ChatGPT 登录态。"
-                    .into(),
-            );
+            warnings.push("已切换为 OpenAI 官方，并写入 ChatGPT 登录态。".into());
         } else {
             // Keep existing auth.json. If it is only a third-party API key, warn.
             let live_auth = read_auth();
             write_text_file(&config_path(), &final_config)?;
             if is_api_key_only_auth(&live_auth) {
                 warnings.push(
-                    "已清除第三方路由。当前 auth.json 仅有 OPENAI_API_KEY（非 ChatGPT OAuth）。若要用订阅登录请在 Codex 执行登录；Platform API Key 可继续走 api.openai.com。"
+                    "已切换为 OpenAI 官方。当前登录态仅为 API Key，订阅功能请在 Codex 内重新登录。"
                         .into(),
                 );
             } else {
-                warnings.push(
-                    "已恢复 OpenAI 官方路由（ChatGPT backend / api.openai.com），保留现有 auth.json。请重启 Codex 后生效。"
-                        .into(),
-                );
+                warnings.push("已切换为 OpenAI 官方（保留现有登录态）。".into());
             }
         }
+        // Official never needs third-party model whitelist; silent clear.
+        let _ = super::model_unlock::on_official_activated();
         return Ok(warnings);
     }
 
-    // Third-party: dual-write so both desktop and CLI paths work.
-    // 1) auth.json OPENAI_API_KEY — primary for requires_openai_auth
-    // 2) config.toml + experimental_bearer_token — backup for some Codex builds
+    // Third-party: API key lives in archive auth; live prefers config-scoped bearer
+    // so ChatGPT OAuth in auth.json can survive provider switches.
     let api_key = extract_api_key(&auth, &config_text)
         .ok_or_else(|| "请先填写 API Key 再启用该供应商".to_string())?;
 
@@ -740,44 +821,103 @@ pub fn write_live(provider: &Provider) -> Result<Vec<String>, String> {
     let merged_config = if live_existing.trim().is_empty() {
         config_text.clone()
     } else {
-        merge_toml_overlay(&live_existing, &config_text)?
+        // Provider archives often snapshot a full [desktop] (including stale
+        // appearance* from a previous skin). Prefer live appearance pins so
+        // enabling a supplier does not undo skin.json desktopTheme.
+        let merged = merge_toml_overlay(&live_existing, &config_text)?;
+        preserve_live_desktop_appearance(&live_existing, &merged)?
     };
 
-    let live_auth = json!({ "OPENAI_API_KEY": api_key });
     let mut live_config = set_bearer_token(&merged_config, &api_key)?;
+    live_config = ensure_requires_openai_auth(&live_config)?;
+
+    // Normalize modelCatalog SSOT: always include default model + mapping rows
+    // so third-party slugs (DeepSeek / Claude / Gemini / Grok / …) are not dropped.
+    let mut settings_for_catalog = provider.settings_config.clone();
+    let default_from_config = extract_model(&live_config);
+    let default_from_form = extract_model(&config_text);
+    let mut merge_ids = Vec::new();
+    if let Some(m) = default_from_config.clone() {
+        merge_ids.push(m);
+    }
+    if let Some(m) = default_from_form {
+        merge_ids.push(m);
+    }
+    let _ = super::catalog::merge_models_into_settings(&mut settings_for_catalog, merge_ids);
 
     // Align top-level model with first mapped model when needed, then project
     // model_catalog_json so Codex `/model` lists third-party model names
-    // (cc-switch: DB modelCatalog is SSOT → live catalog file + pointer).
+    // Profile modelCatalog is SSOT → live catalog file + pointer.
     live_config = super::catalog::ensure_config_model_from_catalog(
         &live_config,
-        &provider.settings_config,
+        &settings_for_catalog,
     )?;
     let default_model = extract_model(&live_config);
     live_config = super::catalog::prepare_config_with_catalog(
         &home,
-        &provider.settings_config,
+        &settings_for_catalog,
         &live_config,
         default_model.as_deref(),
     )?;
 
+    let projected = super::catalog::model_slugs_from_catalog_file(&home);
+    // User-facing: only warn when mapping is empty (actionable). No catalog dump / inject toasts.
+    if projected.is_empty() {
+        warnings.push("模型映射为空，请在「模型映射」中添加可用模型后再用。".into());
+    }
+
     // Backup previous live files under app state (best-effort)
     let _ = backup_live_files();
 
-    write_atomic_auth_and_config(&live_auth, &live_config)?;
-    let has_catalog = live_config.contains("model_catalog_json");
-    if has_catalog {
-        warnings.push(
-            "已写入 ~/.codex/auth.json、config.toml，并生成 model_catalog_json（/model 第三方模型名）。请完全重启 Codex / CLI 后生效。"
-                .into(),
-        );
+    let preserve_auth = options.preserve_official_auth;
+    if preserve_auth {
+        // config-only: keep OAuth / login cache in auth.json
+        write_text_file(&config_path(), &live_config)?;
+        // Silent success — GUI already toasts「已启用」.
     } else {
+        // Legacy dual-write for environments that only honor auth.json keys.
+        let live_auth = json!({ "OPENAI_API_KEY": api_key });
+        write_atomic_auth_and_config(&live_auth, &live_config)?;
         warnings.push(
-            "已写入 ~/.codex/auth.json 与 config.toml。未配置模型映射时不会生成 model_catalog_json；可在编辑页添加映射后再次启用。"
+            "已写入 API Key 到登录文件（未保留官方登录）。如需保留 ChatGPT 登录，请开启「切换第三方时保留官方登录」。"
                 .into(),
         );
     }
+
+    // Desktop whitelist unlock — silent (no GUI toast). Best-effort.
+    let _ = super::model_unlock::try_inject_desktop_unlock(Some(&settings_for_catalog));
+
     Ok(warnings)
+}
+
+/// Ensure active `model_providers.<id>.requires_openai_auth = true` so Codex
+/// still loads ChatGPT login material from auth.json while using a custom base_url.
+fn ensure_requires_openai_auth(config_text: &str) -> Result<String, String> {
+    if config_text.trim().is_empty() {
+        return Ok(config_text.to_string());
+    }
+    let mut doc = config_text
+        .parse::<DocumentMut>()
+        .map_err(|e| format!("Invalid Codex config.toml: {e}"))?;
+    let provider_id = doc
+        .get("model_provider")
+        .and_then(|i| i.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+        .unwrap_or_else(|| "custom".into());
+    if let Some(providers) = doc
+        .get_mut("model_providers")
+        .and_then(|i| i.as_table_like_mut())
+    {
+        if let Some(table) = providers
+            .get_mut(provider_id.as_str())
+            .and_then(|i| i.as_table_like_mut())
+        {
+            table.insert("requires_openai_auth", toml_edit::value(true));
+        }
+    }
+    Ok(doc.to_string())
 }
 
 fn is_api_key_only_auth(auth: &Value) -> bool {
@@ -824,6 +964,13 @@ pub fn backfill_from_live(provider: &mut Provider) -> Result<(), String> {
     }
     let live_config = read_config_text()?;
     let live_auth = read_auth();
+    // Never backfill loopback proxy URLs into archives.
+    if let Some(base) = extract_base_url(&live_config) {
+        let cfg = super::store::load().map(|f| f.proxy).unwrap_or_default();
+        if crate::proxy::is_proxy_base_url(&base, &cfg) || base.contains("127.0.0.1") {
+            return Ok(());
+        }
+    }
     // Only backfill when live base_url still matches this provider
     let live_base = extract_base_url(&live_config);
     let stored_base = provider
@@ -834,11 +981,38 @@ pub fn backfill_from_live(provider: &mut Provider) -> Result<(), String> {
     if live_base.is_none() || live_base != stored_base {
         return Ok(());
     }
-    let key = extract_api_key(&live_auth, &live_config).unwrap_or_default();
-    // Strip bearer from config for storage (canonical key lives in auth)
+    // Prefer provider-scoped bearer from config so we never pull ChatGPT OAuth
+    // tokens into a third-party archive's auth blob.
+    let key = extract_bearer_token(&live_config)
+        .or_else(|| extract_api_key(&live_auth, &live_config))
+        .filter(|k| {
+            // Ignore OAuth-shaped live auth when it only has login material.
+            !k.is_empty()
+        })
+        .unwrap_or_default();
+    // If live auth is OAuth-only and config has no bearer, keep existing archive key.
+    let key = if key.is_empty() {
+        extract_api_key(
+            provider
+                .settings_config
+                .get("auth")
+                .unwrap_or(&json!({})),
+            provider
+                .settings_config
+                .get("config")
+                .and_then(|v| v.as_str())
+                .unwrap_or(""),
+        )
+        .unwrap_or_default()
+    } else {
+        key
+    };
+    // Strip bearer from config for storage (canonical key lives in archive auth)
     let cleaned = strip_bearer_token(&live_config).unwrap_or(live_config);
     if let Some(obj) = provider.settings_config.as_object_mut() {
-        obj.insert("auth".into(), json!({ "OPENAI_API_KEY": key }));
+        if !key.is_empty() {
+            obj.insert("auth".into(), json!({ "OPENAI_API_KEY": key }));
+        }
         obj.insert("config".into(), Value::String(cleaned));
     }
     provider.updated_at = Some(chrono::Utc::now().timestamp_millis());
@@ -897,6 +1071,10 @@ fn write_json_file(path: &Path, value: &Value) -> Result<(), String> {
 }
 
 fn write_text_file(path: &Path, text: &str) -> Result<(), String> {
+    // Serialize with skin/proxy writers when touching the live Codex config.
+    if path == config_path() {
+        return crate::live_config::write_text(path, text);
+    }
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(|e| format!("创建目录失败: {e}"))?;
     }
@@ -979,7 +1157,7 @@ pub fn settings_from_form(
         .unwrap_or("");
     let live_cfg = read_config_text().unwrap_or_default();
     // Always start from the richest document so MCP / desktop / features survive
-    // both structured patches and advanced partial edits (Codex++ preserve unmanaged).
+    // both structured patches and advanced partial edits (preserve unmanaged).
     let merge_base = richer_config_base(existing_cfg, &live_cfg);
 
     let config = if advanced {
@@ -1081,6 +1259,50 @@ mod tests {
     use super::*;
 
     #[test]
+    fn matches_live_ignores_model_switch() {
+        // Archive default model A; live user switched model in Codex GUI.
+        let archive = r#"
+model_provider = "custom"
+model = "model-a"
+
+[model_providers.custom]
+name = "OpenAI"
+base_url = "https://proxy.example.com/v1"
+wire_api = "responses"
+requires_openai_auth = true
+"#;
+        let provider = Provider::new(
+            "c1".into(),
+            "Custom".into(),
+            json!({
+                "auth": { "OPENAI_API_KEY": "sk-test" },
+                "config": archive,
+            }),
+        );
+        let live = LiveSnapshot {
+            base_url: Some("https://proxy.example.com/v1".into()),
+            model: Some("model-b".into()), // user switched in GUI
+            wire_api: Some("responses".into()),
+            has_api_key: true,
+            config_exists: true,
+            auth_exists: true,
+        };
+        assert!(
+            matches_live(&provider, &live),
+            "Codex GUI model switch must not mark 本机漂移 when base_url is unchanged"
+        );
+        let live_other = LiveSnapshot {
+            base_url: Some("https://other.example.com/v1".into()),
+            model: Some("model-a".into()),
+            wire_api: Some("responses".into()),
+            has_api_key: true,
+            config_exists: true,
+            auth_exists: true,
+        };
+        assert!(!matches_live(&provider, &live_other));
+    }
+
+    #[test]
     fn official_live_rejects_third_party_proxy() {
         let third = r#"
 model_provider = "cliproxyapi"
@@ -1088,7 +1310,7 @@ model = "gpt-5.6-sol"
 
 [model_providers.cliproxyapi]
 name = "OpenAI"
-base_url = "https://oai.livein.eu.org/v1"
+base_url = "https://proxy.example.com/v1"
 wire_api = "responses"
 requires_openai_auth = true
 "#;
@@ -1121,18 +1343,18 @@ model = "gpt-5.6-sol"
 model_provider = "cliproxyapi"
 
 [model_providers.cliproxyapi]
-base_url = "https://oai.livein.eu.org/v1"
+base_url = "https://proxy.example.com/v1"
 experimental_bearer_token = "sk-test"
 
 [mcp_servers.node_repl]
 command = "node"
 
-[projects.'e:\demo']
+[projects.'e:\projects\sample']
 trust_level = "trusted"
 "#;
         let cleaned = strip_to_official_routing(live).expect("strip");
         assert!(!cleaned.contains("cliproxyapi"));
-        assert!(!cleaned.contains("oai.livein.eu.org"));
+        assert!(!cleaned.contains("proxy.example.com"));
         assert!(!cleaned.contains("experimental_bearer_token"));
         assert!(cleaned.contains("mcp_servers") || cleaned.contains("node_repl"));
         assert!(cleaned.contains("projects") || cleaned.contains("trust_level"));
@@ -1169,6 +1391,55 @@ requires_openai_auth = true
         assert!(out.contains("https://new.example/v1"));
         assert!(out.contains("[mcp_servers.demo]"), "MCP must survive: {out}");
         assert!(out.contains("appearanceTheme"), "desktop must survive: {out}");
+    }
+
+    #[test]
+    fn provider_merge_preserves_live_appearance_pins() {
+        let live = r##"
+model = "old"
+model_provider = "custom"
+
+[model_providers.custom]
+base_url = "https://old.example/v1"
+
+[desktop]
+conversationDetailMode = "STEPS_COMMANDS"
+appearanceTheme = "light"
+appearanceLightCodeThemeId = "codex"
+appearanceLightChromeTheme = { accent = "#6A9EAB", surface = "#EEF3F2" }
+"##;
+        let archive = r##"
+model = "new-model"
+model_provider = "custom"
+
+[model_providers.custom]
+name = "New"
+base_url = "https://new.example/v1"
+wire_api = "responses"
+requires_openai_auth = true
+
+[desktop]
+conversationDetailMode = "STEPS_COMMANDS"
+appearanceTheme = "dark"
+appearanceLightCodeThemeId = "stale"
+appearanceLightChromeTheme = { accent = "#00F5D4" }
+"##;
+        let merged = merge_toml_overlay(live, archive).expect("merge");
+        let out = preserve_live_desktop_appearance(live, &merged).expect("preserve");
+        assert!(out.contains("new-model"), "routing updated: {out}");
+        assert!(
+            out.contains("appearanceLightCodeThemeId") && out.contains("codex"),
+            "live code theme kept: {out}"
+        );
+        assert!(
+            out.contains("#6A9EAB"),
+            "live chrome accent kept: {out}"
+        );
+        assert!(
+            !out.contains("appearanceLightCodeThemeId = \"stale\"")
+                && !out.contains("stale"),
+            "archive appearance must not win: {out}"
+        );
     }
 
     #[test]
@@ -1260,5 +1531,145 @@ requires_openai_auth = true
         assert!(config.contains("from-toml"));
         assert!(config.contains("https://toml.example.com/v1"));
         assert!(!config.contains("should-be-ignored"));
+    }
+
+    #[test]
+    fn set_bearer_token_sets_requires_openai_auth() {
+        let cfg = build_third_party_config(
+            "Demo",
+            "https://demo.example/v1",
+            "gpt-demo",
+            "responses",
+            "high",
+        );
+        let out = set_bearer_token(&cfg, "sk-test-key").expect("bearer");
+        assert!(out.contains("experimental_bearer_token"));
+        assert!(out.contains("sk-test-key"));
+        assert!(
+            out.contains("requires_openai_auth = true")
+                || out.contains("requires_openai_auth=true")
+        );
+        // name is always OpenAI, never the form display name "Demo"
+        assert!(out.contains("name = \"OpenAI\"") || out.contains("name=\"OpenAI\""));
+        assert!(!out.contains("name = \"Demo\""));
+    }
+
+    #[test]
+    fn third_party_config_name_is_always_openai() {
+        let cfg = build_third_party_config(
+            "My Supplier Title",
+            "https://x.example/v1",
+            "gpt-x",
+            "chat",
+            "medium",
+        );
+        assert!(cfg.contains("name = \"OpenAI\"") || cfg.contains("name=\"OpenAI\""));
+        assert!(!cfg.contains("My Supplier Title"));
+        let patched = patch_config_from_form(
+            &cfg,
+            "Another Title",
+            Some("https://y.example/v1"),
+            Some("gpt-y"),
+            Some("responses"),
+            Some("high"),
+        )
+        .expect("patch");
+        assert!(
+            patched.contains("name = \"OpenAI\"") || patched.contains("name=\"OpenAI\"")
+        );
+        assert!(!patched.contains("Another Title"));
+    }
+
+    #[test]
+    fn third_party_write_live_preserves_oauth_auth_json() {
+        let dir = std::env::temp_dir().join(format!(
+            "chatgpt-tools-codex-auth-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).expect("temp codex home");
+        std::env::set_var("CODEX_HOME", &dir);
+
+        let oauth = json!({
+            "tokens": {
+                "access_token": "atk-keep-me",
+                "refresh_token": "rtk-keep-me"
+            },
+            "auth_mode": "chatgpt"
+        });
+        write_json_file(&dir.join("auth.json"), &oauth).expect("seed oauth");
+        fs::write(
+            dir.join("config.toml"),
+            "model = \"gpt-5.5\"\n# official-ish seed\n",
+        )
+        .expect("seed config");
+
+        let provider = Provider::new(
+            "third".into(),
+            "Third".into(),
+            json!({
+                "auth": { "OPENAI_API_KEY": "sk-third-party" },
+                "config": build_third_party_config(
+                    "Third",
+                    "https://third.example/v1",
+                    "gpt-third",
+                    "responses",
+                    "high",
+                ),
+            }),
+        );
+
+        write_live_with_options(
+            &provider,
+            WriteLiveOptions {
+                preserve_official_auth: true,
+            },
+        )
+        .expect("write live preserve");
+
+        let auth_after: Value =
+            serde_json::from_str(&fs::read_to_string(dir.join("auth.json")).unwrap()).unwrap();
+        assert_eq!(
+            auth_after
+                .pointer("/tokens/access_token")
+                .and_then(|v| v.as_str()),
+            Some("atk-keep-me"),
+            "OAuth access_token must survive third-party enable"
+        );
+        assert!(
+            auth_after.get("OPENAI_API_KEY").is_none()
+                || auth_after
+                    .get("OPENAI_API_KEY")
+                    .and_then(|v| v.as_str())
+                    != Some("sk-third-party"),
+            "third-party key must not overwrite auth.json when preserve is on"
+        );
+
+        let cfg = fs::read_to_string(dir.join("config.toml")).unwrap();
+        assert!(cfg.contains("https://third.example/v1"));
+        assert!(cfg.contains("sk-third-party"));
+        assert!(
+            cfg.contains("requires_openai_auth = true")
+                || cfg.contains("requires_openai_auth=true")
+        );
+        assert!(cfg.contains("experimental_bearer_token"));
+
+        // Legacy path still dual-writes when preserve is off.
+        write_live_with_options(
+            &provider,
+            WriteLiveOptions {
+                preserve_official_auth: false,
+            },
+        )
+        .expect("write live legacy");
+        let auth_legacy: Value =
+            serde_json::from_str(&fs::read_to_string(dir.join("auth.json")).unwrap()).unwrap();
+        assert_eq!(
+            auth_legacy.get("OPENAI_API_KEY").and_then(|v| v.as_str()),
+            Some("sk-third-party")
+        );
+
+        let _ = fs::remove_dir_all(&dir);
+        std::env::remove_var("CODEX_HOME");
     }
 }

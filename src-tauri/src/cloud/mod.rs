@@ -4,19 +4,24 @@
 //! sha256 + import-grade validation prevent arbitrary remote hooks from
 //! installing skins.
 
+mod about;
 mod announcements;
 mod cache;
 mod catalog;
 mod config;
 mod download;
 mod http;
+mod preview;
 mod version;
 
+pub use about::get_about;
 pub use announcements::{get_announcements, mark_announcement_read, refresh_announcements};
 pub use cache::{clear_skin_cache, list_cached_skins};
 pub use catalog::{load_catalog_disk, merge_remote_into_status, refresh_catalog};
 pub use config::load_cloud_config;
 pub use download::download_skin;
+pub use preview::{attach_disk_previews, attach_remote_preview_meta, ensure_missing_previews};
+// clear_preview_cache available inside preview module when package wipe should also drop thumbs.
 pub use version::{check_app_version, check_app_version_opts};
 
 use crate::engine::EngineError;
@@ -63,7 +68,8 @@ pub fn soft_network_sync(cfg: &config::CloudConfig, force: bool) -> Value {
     }
     let _ = ensure_cloud_dirs();
     let has_disk = catalog::load_catalog_disk().is_some()
-        || cache::read_json(&cache::announcements_path()).is_some();
+        || cache::read_json(&cache::announcements_path()).is_some()
+        || about::load_about_disk().is_some();
 
     if !force && has_disk && disk_cache_fresh(CLOUD_SOFT_SYNC_TTL_SECS) {
         return json!({
@@ -78,6 +84,7 @@ pub fn soft_network_sync(cfg: &config::CloudConfig, force: bool) -> Value {
 
     let mut catalog_error = Value::Null;
     let mut announcements_error = Value::Null;
+    let mut about_error = Value::Null;
     let mut any_ok = false;
 
     match refresh_catalog(cfg) {
@@ -92,6 +99,10 @@ pub fn soft_network_sync(cfg: &config::CloudConfig, force: bool) -> Value {
     match refresh_announcements(cfg) {
         Ok(_) => any_ok = true,
         Err(e) => announcements_error = json!(e.to_string()),
+    }
+    match about::refresh_about(cfg) {
+        Ok(_) => any_ok = true,
+        Err(e) => about_error = json!(e.to_string()),
     }
 
     if any_ok && catalog_error.is_null() {
@@ -109,6 +120,7 @@ pub fn soft_network_sync(cfg: &config::CloudConfig, force: bool) -> Value {
         "fromCache": has_disk && !any_ok,
         "catalogError": catalog_error,
         "announcementsError": announcements_error,
+        "aboutError": about_error,
     })
 }
 
@@ -136,6 +148,8 @@ pub fn cloud_status_snapshot(force_refresh: bool) -> Value {
     let announcements = announcements::load_announcements_for_ui(&cfg);
     // Version from disk catalog only (no nested network during status).
     let version = check_app_version(&cfg, catalog.as_ref());
+    // About / contact from disk only during status (network via soft_network_sync / cloud_about).
+    let about = about::load_about_disk();
 
     json!({
         "ok": catalog.is_some() || sync_meta.get("ok").and_then(|v| v.as_bool()).unwrap_or(false),
@@ -146,9 +160,11 @@ pub fn cloud_status_snapshot(force_refresh: bool) -> Value {
         "catalog": catalog,
         "announcements": announcements,
         "version": version,
+        "about": about,
         "sync": sync_meta,
         "catalogError": sync_meta.get("catalogError").cloned().unwrap_or(Value::Null),
         "announcementsError": sync_meta.get("announcementsError").cloned().unwrap_or(Value::Null),
+        "aboutError": sync_meta.get("aboutError").cloned().unwrap_or(Value::Null),
         "cachedSkinIds": list_cached_skins()
             .into_iter()
             .filter_map(|s| s.get("id").and_then(|v| v.as_str()).map(|s| s.to_string()))

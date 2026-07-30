@@ -4,7 +4,7 @@
 //! - Codex: home SQLite + rollouts, delete backups under ChatGPT Tools app state
 //! - Grok Build: `~/.grok/sessions` summary.json + chat_history.jsonl
 //!
-//! Adapted from CodexPlusPlus Manager session admin and cc-switch Grok provider.
+//! Codex: home SQLite + rollouts; Grok: `~/.grok/sessions` summary + history.
 
 mod backup;
 pub mod commands;

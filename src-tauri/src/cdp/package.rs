@@ -175,7 +175,8 @@ fn add_dir_to_zip(
     Ok(())
 }
 
-/// Export skin directory to `.cgskin` / `.zip` with `skin/` root + package.json meta.
+/// Export skin directory to `.skin` / `.zip` with `skin/` root + package.json meta.
+/// Legacy `.cgskin` extension is still accepted as an output path.
 pub fn export_skin_native(skin_id: &str, output_path: &str) -> Result<Value, EngineError> {
     let skin = get_skin(skin_id)?;
     let dir = PathBuf::from(
@@ -191,8 +192,8 @@ pub fn export_skin_native(skin_id: &str, output_path: &str) -> Result<Value, Eng
 
     let mut out = output_path.to_string();
     let lower = out.to_ascii_lowercase();
-    if !lower.ends_with(".cgskin") && !lower.ends_with(".zip") {
-        out.push_str(".cgskin");
+    if !lower.ends_with(".skin") && !lower.ends_with(".zip") && !lower.ends_with(".cgskin") {
+        out.push_str(".skin");
     }
     if let Some(parent) = Path::new(&out).parent() {
         if !parent.as_os_str().is_empty() {
@@ -437,7 +438,7 @@ pub fn inspect_skin_native(package_path: &str) -> Result<Value, EngineError> {
     result
 }
 
-/// Import `.cgskin` / `.zip` into user skins directory.
+/// Import `.skin` / `.zip` (and legacy `.cgskin`) into user skins directory.
 pub fn import_skin_native(package_path: &str, overwrite: bool) -> Result<Value, EngineError> {
     let package = PathBuf::from(package_path);
     if !package.is_file() {

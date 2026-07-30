@@ -1,26 +1,41 @@
 {
   "name": "chatgpt-tools",
-  "version": "2.2.0",
+  "version": "1.1.12",
   "description": "ChatGPT Tools — 轻量 ChatGPT / Codex 桌面换肤工具箱（Tauri 2）",
   "private": true,
   "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/joshuamarke/chatgpt-tools.git"
+  },
+  "homepage": "https://github.com/joshuamarke/chatgpt-tools",
+  "bugs": {
+    "url": "https://github.com/joshuamarke/chatgpt-tools/issues"
+  },
   "scripts": {
     "dev": "tauri dev",
-    "build": "tauri build",
+    "build": "node scripts/inject-release-config.mjs && tauri build --config src-tauri/gen/tauri.release-overlay.json",
+    "build:smoke": "node scripts/inject-release-config.mjs && tauri build --config src-tauri/gen/tauri.release-overlay.json",
+    "stage:skins": "node scripts/stage-bundle-skins.mjs",
+    "inject:release": "node scripts/inject-release-config.mjs",
+    "stamp:repo": "node scripts/stamp-repo-meta.mjs",
     "tauri": "tauri",
     "engine": "node engine/cli.mjs",
     "engine:status": "node engine/cli.mjs status",
     "verify:engine": "node scripts/verify-engine.mjs",
-    "test:engine": "node --test engine/tests/*.test.mjs",
-    "check:payloads": "node engine/cli.mjs list-skins && node --test engine/tests/injector-self.test.mjs",
+    "test:engine": "node engine/injector.mjs --self-test",
+    "check:payloads": "node engine/cli.mjs list-skins",
     "doctor:selectors": "node scripts/doctor-selectors.mjs",
+    "check:gui": "node scripts/check-gui-regression.mjs",
     "postinstall": "node scripts/ensure-resources.mjs"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.5.0",
     "@tauri-apps/plugin-dialog": "^2.2.2",
     "@tauri-apps/plugin-opener": "^2.2.7",
+    "@tauri-apps/plugin-process": "^2.3.1",
     "@tauri-apps/plugin-shell": "^2.2.1",
+    "@tauri-apps/plugin-updater": "^2.10.1",
     "adm-zip": "^0.5.16",
     "ws": "^8.18.3"
   },

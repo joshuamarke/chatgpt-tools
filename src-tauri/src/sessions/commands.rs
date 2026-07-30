@@ -382,7 +382,7 @@ pub fn apply_session_index_cleanup_cmd(
     if sha.is_empty() {
         return Err("缺少 snapshotSha256，请先预览。".into());
     }
-    // Pass None so process-stop check matches Codex++ Manager safety gate.
+    // Pass None so process-stop check uses the default safety gate.
     let result = apply_index_cleanup(None, sha, &request.thread_ids).map_err(|e| {
         let mut msg = e.message;
         if let Some(dir) = e.backup_dir {

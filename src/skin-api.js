@@ -86,6 +86,12 @@
     envCheck: (opts = {}) =>
       invoke("env_check", { force: opts.force === true }),
     /**
+     * Probe a single Overview environment (card-level refresh).
+     * @param {string} id chatgpt-desktop | codex-cli | grok-build | node | npm
+     */
+    envCheckTool: (id) =>
+      invoke("env_check_tool", { id: String(id || "").trim() }),
+    /**
      * Open the OS default terminal and run an allow-listed npm install command.
      * Windows: cmd /K via start; macOS: Terminal.app via osascript.
      * @param {string} command
@@ -125,7 +131,53 @@
     /** Download by catalog skin id only — never pass arbitrary URLs. */
     cloudDownloadSkin: (skinId) =>
       invoke("cloud_download_skin", { skinId }),
+    /**
+     * Ensure catalog preview thumbnails are on disk; returns data-URLs.
+     * @param {string[]|null|undefined} [skinIds] subset; omit/empty = all catalog skins with preview
+     */
+    cloudEnsurePreviews: (skinIds) =>
+      invoke("cloud_ensure_previews", {
+        skinIds:
+          Array.isArray(skinIds) && skinIds.length > 0
+            ? skinIds.map((id) => String(id))
+            : null,
+      }),
+    /**
+     * @deprecated App updates use tauri-plugin-updater (`checkAppUpdate`).
+     * Kept for tooling; skin catalog version filters still use cloud.
+     */
     cloudCheckUpdate: () => invoke("cloud_check_update"),
+
+    /**
+     * Check GitHub/CDN `latest.json` via tauri-plugin-updater (multi-endpoint fallback).
+     * @returns {Promise<null|{ rid:number, currentVersion:string, version:string, date?:string, body?:string, rawJson?:any }>}
+     */
+    checkAppUpdate: (opts = {}) =>
+      invoke("plugin:updater|check", opts && typeof opts === "object" ? opts : {}),
+
+    /**
+     * Download + install a pending updater package, then caller should relaunch.
+     * @param {number|string} rid Update resource id from checkAppUpdate
+     * @param {(ev:any)=>void} [onEvent] progress channel messages
+     */
+    installAppUpdate: async (rid, onEvent) => {
+      const inv = await waitForInvoke();
+      const args = { rid };
+      const Channel = window.__TAURI__?.core?.Channel;
+      if (typeof onEvent === "function" && typeof Channel === "function") {
+        const channel = new Channel();
+        channel.onmessage = onEvent;
+        args.onEvent = channel;
+      }
+      await inv("plugin:updater|download_and_install", args);
+    },
+
+    /** Relaunch after a successful installAppUpdate. */
+    relaunchApp: () => invoke("plugin:process|restart"),
+
+    /** About / contact from CDN — independent of app version check. */
+    cloudAbout: (opts = {}) =>
+      invoke("cloud_about", { refresh: opts.refresh === true }),
     cloudClearSkinCache: (skinId) =>
       invoke("cloud_clear_skin_cache", {
         skinId: skinId == null || skinId === "" ? null : String(skinId),

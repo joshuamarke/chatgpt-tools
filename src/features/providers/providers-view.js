@@ -32,8 +32,74 @@
   let probeBusy = false;
   let fetchModelsSeq = 0;
 
+  /**
+   * Common model context-window presets (tokens).
+   * Matched by substring / regex against model id (supports vendor prefixes like `x-ai/grok-4.5`).
+   * Longer / more specific patterns should come first.
+   */
+  const MODEL_CONTEXT_PRESETS = [
+    { re: /gpt-5\.6-sol|gpt-5-6-sol/i, window: 372000, label: "GPT-5.6-sol · 372K" },
+    { re: /gpt-5\.5|gpt-5-5/i, window: 400000, label: "GPT-5.5 · 400K" },
+    { re: /gpt-5\.1|gpt-5-1|gpt-5\.2|gpt-5-2/i, window: 400000, label: "GPT-5.x · 400K" },
+    { re: /gpt-4\.1|gpt-4-1/i, window: 1047576, label: "GPT-4.1 · 1M" },
+    { re: /gpt-4o|gpt-4-turbo/i, window: 128000, label: "GPT-4o · 128K" },
+    { re: /o3-pro|o3-mini|o4-mini|\bo3\b|\bo1\b/i, window: 200000, label: "OpenAI o-series · 200K" },
+    { re: /grok-4\.5|grok-4-5/i, window: 5000000, label: "Grok 4.5 · 5M" },
+    { re: /grok-4|grok-3|grok-2/i, window: 131072, label: "Grok 3/4 · 128K" },
+    { re: /claude-(opus|sonnet|haiku)-4|claude-4/i, window: 200000, label: "Claude 4 · 200K" },
+    { re: /claude-3\.5|claude-3-5|claude-3\.7|claude-3-7/i, window: 200000, label: "Claude 3.5/3.7 · 200K" },
+    { re: /gemini-2\.5-pro|gemini-2-5-pro/i, window: 1048576, label: "Gemini 2.5 Pro · 1M" },
+    { re: /gemini-2\.5|gemini-2-5|gemini-2\.0|gemini-1\.5/i, window: 1048576, label: "Gemini 1.5/2.x · 1M" },
+    { re: /deepseek-reasoner|deepseek-r1/i, window: 128000, label: "DeepSeek R1 · 128K" },
+    { re: /deepseek-chat|deepseek-v3|deepseek/i, window: 128000, label: "DeepSeek · 128K" },
+    { re: /kimi-k2|moonshot|kimi/i, window: 256000, label: "Kimi · 256K" },
+    { re: /qwen2\.5|qwen3|qwen/i, window: 131072, label: "Qwen · 128K" },
+  ];
+
+  /** Quick-pick values shown in catalog context datalist. */
+  const CONTEXT_WINDOW_QUICK_PICKS = [
+    { value: 128000, label: "128K" },
+    { value: 200000, label: "200K" },
+    { value: 256000, label: "256K" },
+    { value: 372000, label: "372K" },
+    { value: 400000, label: "400K" },
+    { value: 500000, label: "500K" },
+    { value: 1048576, label: "1M" },
+    { value: 2000000, label: "2M" },
+    { value: 5000000, label: "5M" },
+  ];
+
   function $(id) {
     return document.getElementById(id);
+  }
+
+  /**
+   * Guess context window for a model id from built-in presets.
+   * @param {string} modelId
+   * @returns {number|null}
+   */
+  function guessContextWindow(modelId) {
+    const id = String(modelId || "").trim();
+    if (!id) return null;
+    const bare = id.includes("/") ? id.slice(id.lastIndexOf("/") + 1) : id;
+    for (const p of MODEL_CONTEXT_PRESETS) {
+      if (p.re.test(id) || p.re.test(bare)) return p.window;
+    }
+    return null;
+  }
+
+  /**
+   * Apply guessed context when the field is empty (or force overwrite).
+   * @param {string} modelId
+   * @param {string|number|null|undefined} current
+   * @param {{force?: boolean}} [opts]
+   * @returns {number|null}
+   */
+  function resolveContextWindow(modelId, current, opts) {
+    const force = !!opts?.force;
+    const n = Number.parseInt(String(current ?? "").trim(), 10);
+    if (!force && Number.isFinite(n) && n > 0) return n;
+    return guessContextWindow(modelId);
   }
 
   function readStoredApp() {
@@ -116,8 +182,24 @@
     const lead = $("provLead");
     if (!lead) return;
     lead.textContent = isGrok()
-      ? "管理 Grok Build 供应商。内置 Grok Official 走官方登录与默认模型；自定义渠道写 [model.*]，启用时写入 ~/.grok/config.toml（保留 MCP）。"
-      : "管理 Codex 供应商。内置 OpenAI Official 走 ChatGPT / Platform 官方路由；第三方渠道启用时写入 ~/.codex/auth.json + config.toml。";
+      ? "管理 Grok 供应商：添加渠道、启用切换，可选本地路由与故障转移。"
+      : "管理 Codex 供应商：添加渠道、启用切换，可选本地路由与故障转移。";
+    syncCodexAuthRow();
+    syncRouteToggle();
+  }
+
+  function syncCodexAuthRow() {
+    const row = $("provCodexAuthRow");
+    const box = $("provPreserveCodexAuth");
+    if (!row) return;
+    const show = !isGrok();
+    row.hidden = !show;
+    if (!show || !box) return;
+    const preserved =
+      listPayload?.preserveCodexOfficialAuth !== undefined
+        ? !!listPayload.preserveCodexOfficialAuth
+        : true;
+    box.checked = preserved;
   }
 
   function updateLiveBar() {
@@ -142,7 +224,7 @@
       title.textContent = titleText;
       title.title = currentName
         ? `当前启用的供应商：${currentName}`
-        : "尚未选择启用的供应商";
+        : "尚未在本工具中启用供应商（与本机 live 配置无关）";
     }
 
     if (!live) {
@@ -158,11 +240,15 @@
 
     const matches = !!live.currentMatchesLive;
     const exists = !!live.configExists;
+    const detailCode = live.detailCode || "";
+    // unlinked = live exists but no archive is marked enabled (not the same as drift).
     let state = "warn";
     if (!exists) {
       state = "off";
     } else if (matches) {
       state = "ok";
+    } else if (detailCode === "unlinked" || !currentId) {
+      state = "off";
     } else {
       state = "warn";
     }
@@ -185,14 +271,22 @@
     }
 
     if (meta) {
-      // Only show base_url (truncate visually via CSS); full URL in title.
       const base = (live.baseUrl || "").trim();
+      const parts = [];
       if (base) {
         const safe = escapeHtml(base);
-        meta.innerHTML = `<span class="prov-live-chip" title="${safe}">${safe}</span>`;
-      } else {
-        meta.innerHTML = "";
+        parts.push(`<span class="prov-live-chip" title="${safe}">${safe}</span>`);
       }
+      const code = live.detailCode || "";
+      if (code === "route_half" || code === "route_desync") {
+        parts.push(
+          `<button type="button" class="chip-btn prov-live-fix-btn" id="btnProvRepairRoute" title="重新投影本地路由">修复路由</button>`
+        );
+      }
+      meta.innerHTML = parts.join("");
+      $("btnProvRepairRoute")?.addEventListener("click", () => {
+        onRepairRoute().catch((err) => toast(err?.message || String(err), "error"));
+      });
     }
   }
 
@@ -266,20 +360,43 @@
 
     empty.hidden = true;
     list.hidden = false;
+    const routing = !!listPayload?.takeoverEnabled;
     list.innerHTML = providers
       .map((p) => {
         const active = p.isCurrent ? "is-current" : "";
+        const routingCls = routing && p.isCurrent ? "is-routing" : "";
         const badge = p.isCurrent
-          ? `<span class="prov-badge prov-badge-on">使用中</span>`
+          ? `<span class="prov-badge prov-badge-on">${routing ? "路由中" : "使用中"}</span>`
           : "";
         const cat = `<span class="prov-badge">${escapeHtml(categoryLabel(p.category))}</span>`;
         const readyBadge =
           p.category === "official" || p.ready
             ? ""
             : `<span class="prov-badge prov-badge-warn" title="缺少 Base URL 或 API Key">未就绪</span>`;
-        const driftBadge =
-          p.isCurrent && p.matchesLive === false
-            ? `<span class="prov-badge prov-badge-warn" title="与本机正在使用的配置不一致">本机漂移</span>`
+        const detailCode = listPayload?.liveStatus?.detailCode || "";
+        let driftBadge = "";
+        if (p.isCurrent && p.matchesLive === false) {
+          if (detailCode === "route_half" || detailCode === "route_desync") {
+            driftBadge = `<span class="prov-badge prov-badge-broken" title="${escapeHtml(listPayload?.liveStatus?.summary || "")}">路由异常</span>`;
+          } else {
+            driftBadge = `<span class="prov-badge prov-badge-warn" title="与本机正在使用的配置不一致">本机漂移</span>`;
+          }
+        }
+        // P1/P2 and circuit health only matter under local routing (same as「加入队列」).
+        // Queue can still be curated in 路由设置 when FO auto-switch is off.
+        const foBadge =
+          routing && p.failoverPriority
+            ? `<span class="prov-badge prov-badge-fo" title="故障转移优先级">P${escapeHtml(String(p.failoverPriority))}</span>`
+            : "";
+        const healthBadge =
+          routing && p.health && p.health !== "unknown"
+            ? `<span class="prov-badge prov-badge-health-${escapeHtml(p.health)}" title="健康状态">${escapeHtml(
+                p.health === "healthy"
+                  ? "健康"
+                  : p.health === "open"
+                    ? "熔断"
+                    : "降级"
+              )}</span>`
             : "";
 
         const chips = [];
@@ -310,33 +427,770 @@
           ? `<div class="prov-card-notes" title="${escapeHtml(p.notes)}">${escapeHtml(p.notes)}</div>`
           : "";
         const canSwitch =
-          !p.isCurrent && (p.category === "official" || p.ready !== false);
+          !p.isCurrent &&
+          (p.category === "official" || p.ready !== false) &&
+          !(routing && isGrok() && p.category === "official");
+        const switchTitle = routing
+          ? canSwitch
+            ? "热切换上游（本地路由）"
+            : "当前不可启用"
+          : canSwitch
+            ? "写入本机配置并启用"
+            : "请先补全 Base URL 与 API Key";
         const switchBtn = p.isCurrent
           ? ""
-          : `<button type="button" class="chip-btn chip-primary prov-act" data-act="switch" data-id="${escapeHtml(p.id)}" ${canSwitch ? "" : "disabled"} title="${canSwitch ? "写入本机配置并启用" : "请先补全 Base URL 与 API Key"}">启用</button>`;
+          : `<button type="button" class="chip-btn chip-primary prov-act" data-act="switch" data-id="${escapeHtml(p.id)}" ${canSwitch ? "" : "disabled"} title="${switchTitle}">启用</button>`;
+        // Failover queue actions only make sense under local routing; hide otherwise.
+        // Queue can still be curated in 路由设置 even when FO auto-switch is off.
+        const foToggle =
+          routing &&
+          p.category !== "official" &&
+          !(isGrok() && p.category === "official")
+            ? `<button type="button" class="chip-btn prov-act" data-act="failover" data-id="${escapeHtml(p.id)}" title="${p.inFailoverQueue ? "移出故障转移队列" : "加入故障转移队列"}">${p.inFailoverQueue ? "队列中" : "加入队列"}</button>`
+            : "";
         const delBtn =
           p.category === "official"
             ? ""
             : `<button type="button" class="chip-btn chip-danger prov-act" data-act="delete" data-id="${escapeHtml(p.id)}" ${p.isCurrent ? "disabled" : ""}>删除</button>`;
         return `
-<article class="prov-card ${active}" data-id="${escapeHtml(p.id)}">
+<article class="prov-card ${active} ${routingCls}" data-id="${escapeHtml(p.id)}">
   <div class="${providerIconClass(p)}" aria-hidden="true">${providerIconSvg(p)}</div>
   <div class="prov-card-main">
     <div class="prov-card-title-row">
       <h3 class="prov-card-name" title="${escapeHtml(p.name)}">${escapeHtml(p.name)}</h3>
-      ${badge}${cat}${readyBadge}${driftBadge}
+      ${badge}${cat}${readyBadge}${driftBadge}${foBadge}${healthBadge}
     </div>
     ${meta}
     ${notes}
   </div>
   <div class="prov-card-actions">
     ${switchBtn}
+    ${foToggle}
     <button type="button" class="chip-btn prov-act" data-act="edit" data-id="${escapeHtml(p.id)}">编辑</button>
     ${delBtn}
   </div>
 </article>`;
       })
       .join("");
+  }
+
+  function syncRouteToggle() {
+    const btn = $("provRouteToggle");
+    if (!btn) return;
+    const on = !!listPayload?.takeoverEnabled;
+    btn.setAttribute("aria-checked", on ? "true" : "false");
+    btn.classList.toggle("is-on", on);
+    const host = $("provRouteListenHost");
+    const port = $("provRouteListenPort");
+    const log = $("provRouteLogging");
+    const fo = $("provRouteAutoFailover");
+    const retries = $("provRouteMaxRetries");
+    const egress = $("provRouteEgressProxy");
+    const proxy = listPayload?.proxy || {};
+    if (host && document.activeElement !== host) host.value = proxy.listenAddress || "127.0.0.1";
+    if (port && document.activeElement !== port) port.value = String(proxy.listenPort || 18964);
+    if (log) log.checked = proxy.enableLogging !== false;
+    // Default ON: missing / undefined → checked; only explicit false unchecks
+    if (fo) fo.checked = listPayload?.autoFailoverEnabled !== false;
+    if (egress && document.activeElement !== egress) {
+      egress.value = proxy.egressProxy || "";
+    }
+    // max retries from last settings load if present
+    if (retries && window.__provAppProxySettings?.maxRetries != null) {
+      retries.value = String(window.__provAppProxySettings.maxRetries);
+    }
+  }
+
+  async function loadAppProxySettings() {
+    try {
+      if (!window.providerAPI?.getAppProxySettings) return;
+      window.__provAppProxySettings = await window.providerAPI.getAppProxySettings(app);
+      const retries = $("provRouteMaxRetries");
+      if (retries && window.__provAppProxySettings?.maxRetries != null) {
+        retries.value = String(window.__provAppProxySettings.maxRetries);
+      }
+      const fo = $("provRouteAutoFailover");
+      if (fo) {
+        const v = window.__provAppProxySettings?.autoFailoverEnabled;
+        fo.checked = v !== false;
+      }
+    } catch (err) {
+      console.warn("loadAppProxySettings", err);
+    }
+  }
+
+  async function onToggleRoute() {
+    const btn = $("provRouteToggle");
+    const currentlyOn = btn?.getAttribute("aria-checked") === "true";
+    const next = !currentlyOn;
+    if (next) {
+      const ok = await confirm({
+        title: "开启本地路由",
+        message: isGrok()
+          ? "将为 Grok 开启本机代理，切换供应商时可热生效。关闭后恢复直连。"
+          : "将为 Codex 开启本机代理，切换供应商时可热生效；官方登录不会被清除。关闭后恢复直连。",
+        confirmText: "开启本地路由",
+        variant: "primary",
+      });
+      if (!ok) return;
+    }
+    try {
+      const res = await window.providerAPI.setTakeover(app, next);
+      const warnings = (res?.warnings || [])
+        .filter(Boolean)
+        .filter((w) => !/注入|白名单|catalog|CDP|auth\.json|config\.toml|model_providers/i.test(w));
+      toast(
+        warnings[0] || (next ? "本地路由已开启" : "本地路由已关闭"),
+        "ok"
+      );
+      await loadList();
+    } catch (err) {
+      toast(err?.message || String(err), "error");
+    }
+  }
+
+  async function onSaveRouteSettings() {
+    try {
+      const host = ($("provRouteListenHost")?.value || "127.0.0.1").trim();
+      const port = Number($("provRouteListenPort")?.value || 18964);
+      const enableLogging = !!$("provRouteLogging")?.checked;
+      const egressProxy = ($("provRouteEgressProxy")?.value || "").trim();
+      if (!Number.isFinite(port) || port < 1024 || port > 65535) {
+        toast("端口需在 1024–65535", "error");
+        return;
+      }
+      const prevProxy = listPayload?.proxy || {};
+      await window.providerAPI.updateProxyConfig({
+        listenAddress: host,
+        listenPort: port,
+        enableLogging,
+        logRetentionDays: Number(prevProxy.logRetentionDays) || 7,
+        egressProxy,
+      });
+      const maxRetries = Number($("provRouteMaxRetries")?.value ?? 3);
+      const cur = window.__provAppProxySettings || {};
+      await window.providerAPI.updateAppProxySettings({
+        app,
+        takeoverEnabled: !!listPayload?.takeoverEnabled,
+        autoFailoverEnabled: !!$("provRouteAutoFailover")?.checked,
+        maxRetries: Number.isFinite(maxRetries) ? maxRetries : 3,
+        circuit: cur.circuit || {
+          failureThreshold: 4,
+          successThreshold: 2,
+          timeoutSeconds: 60,
+          errorRateThreshold: 0.6,
+          minRequests: 10,
+        },
+        streamingFirstByteTimeout: cur.streamingFirstByteTimeout || 60,
+        streamingIdleTimeout: cur.streamingIdleTimeout || 120,
+        nonStreamingTimeout: cur.nonStreamingTimeout || 600,
+      });
+      const fo = !!$("provRouteAutoFailover")?.checked;
+      const prevFo = listPayload?.autoFailoverEnabled !== false;
+      if (fo !== prevFo) {
+        await window.providerAPI.setAutoFailover(app, fo);
+      }
+      toast("路由设置已保存", "ok");
+      closeRouteModal();
+      await loadList();
+      await loadAppProxySettings();
+    } catch (err) {
+      toast(err?.message || String(err), "error");
+    }
+  }
+
+  function openRouteModal() {
+    const modal = $("provRouteModal");
+    if (!modal) return;
+    syncRouteToggle();
+    setProbeStatus("provRoutePortStatus", "", "");
+    loadAppProxySettings().catch(() => {});
+    refreshFoQueuePanel().catch(() => {});
+    showModal(modal);
+  }
+
+  function closeRouteModal() {
+    hideModal($("provRouteModal"));
+  }
+
+  // ── Request logs modal ─────────────────────────────────────────────────
+  /** @type {{ page: number, pageSize: number, total: number, selectedId: string|null }} */
+  const logsState = {
+    page: 0,
+    pageSize: 20,
+    total: 0,
+    selectedId: null,
+    loading: false,
+    searchTimer: null,
+  };
+
+  function logsFilters() {
+    const appFilter = ($("provLogsFilterApp")?.value || "all").trim();
+    const status = ($("provLogsFilterStatus")?.value || "all").trim();
+    const q = ($("provLogsFilterQ")?.value || "").trim();
+    return {
+      app: appFilter === "all" ? null : appFilter,
+      statusClass: status === "all" ? null : status,
+      q: q || null,
+      page: logsState.page,
+      pageSize: logsState.pageSize,
+    };
+  }
+
+  function formatLogTime(ts) {
+    if (!ts) return "—";
+    try {
+      const d = new Date(Number(ts) * 1000);
+      if (Number.isNaN(d.getTime())) return "—";
+      const pad = (n) => String(n).padStart(2, "0");
+      return `${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+    } catch {
+      return "—";
+    }
+  }
+
+  function formatLatency(ms) {
+    const n = Number(ms) || 0;
+    if (n < 1000) return `${n} ms`;
+    return `${(n / 1000).toFixed(n < 10000 ? 1 : 0)} s`;
+  }
+
+  /** Compact token count: 266556 → "266.6k", 1200 → "1.2k", 999 → "999". */
+  function formatTokenCount(n) {
+    const v = Number(n) || 0;
+    if (v < 1000) return String(v);
+    const k = v / 1000;
+    // 1 decimal under 100k, integer at/above 100k (e.g. 266.6k, 1.2M later)
+    if (k < 1000) {
+      return `${k.toFixed(k >= 100 ? 0 : 1)}k`;
+    }
+    const m = k / 1000;
+    return `${m.toFixed(m >= 100 ? 0 : 1)}M`;
+  }
+
+  /** Compact in/out token display for the log table. */
+  function formatTokens(r) {
+    const inn = Number(r?.inputTokens) || 0;
+    const out = Number(r?.outputTokens) || 0;
+    if (!inn && !out) return "—";
+    return `${formatTokenCount(inn)}→${formatTokenCount(out)}`;
+  }
+
+  function formatFirstToken(ms) {
+    if (ms == null || ms === "") return "—";
+    const n = Number(ms);
+    if (!Number.isFinite(n) || n < 0) return "—";
+    return formatLatency(n);
+  }
+
+  /** Same client label in list + detail (aligned with AppKind::display_name). */
+  function formatLogApp(app) {
+    const a = String(app || "").trim().toLowerCase();
+    if (a === "grok" || a === "grokbuild" || a === "grok-build") return "Grok Build";
+    if (a === "codex" || a === "chatgpt" || a === "openai") return "Codex";
+    return app ? String(app) : "—";
+  }
+
+  /** Status text color only (no badge pill): 2xx green, 4xx amber, 5xx/err red. */
+  function statusCodeClass(code, hasErr) {
+    const c = Number(code) || 0;
+    if (c >= 200 && c < 300) return "prov-logs-status is-ok";
+    if (c >= 400 && c < 500) return "prov-logs-status is-warn";
+    if (c >= 500 || c === 0 || hasErr) return "prov-logs-status is-error";
+    return "prov-logs-status";
+  }
+
+  async function openLogsModal() {
+    const modal = $("provLogsModal");
+    if (!modal) return;
+    logsState.page = 0;
+    hideDetail();
+    // Default filter to current app tab
+    const appSel = $("provLogsFilterApp");
+    if (appSel && !appSel.dataset.userTouched) {
+      appSel.value = app || "all";
+    }
+    showModal(modal);
+    try {
+      if (window.providerAPI?.getLogRetentionDays) {
+        const days = await window.providerAPI.getLogRetentionDays();
+        const input = $("provLogsRetentionDays");
+        if (input) input.value = String(days || 7);
+      }
+    } catch {
+      /* ignore */
+    }
+    await loadLogs();
+  }
+
+  function closeLogsModal() {
+    hideDetail();
+    hideModal($("provLogsModal"));
+  }
+
+  async function loadLogs() {
+    if (!window.providerAPI?.listRequestLogs) {
+      toast("日志接口不可用", "error");
+      return;
+    }
+    if (logsState.loading) return;
+    logsState.loading = true;
+    const tbody = $("provLogsTbody");
+    const totalEl = $("provLogsTotal");
+    try {
+      const page = await window.providerAPI.listRequestLogs(logsFilters());
+      logsState.total = Number(page?.total) || 0;
+      logsState.page = Number(page?.page) || 0;
+      logsState.pageSize = Number(page?.pageSize) || 20;
+      if (totalEl) totalEl.textContent = `共 ${logsState.total} 条`;
+
+      const kicker = $("provLogsKicker");
+      if (kicker) {
+        const on = page?.loggingEnabled !== false;
+        kicker.textContent = on
+          ? "本地路由转发记录 · 只记录本地路由转发，未开启本地路由的不参与统计。"
+          : "当前未启用请求日志（路由设置），仅显示历史记录";
+      }
+      if (page?.retentionDays != null) {
+        const input = $("provLogsRetentionDays");
+        if (input && document.activeElement !== input) {
+          input.value = String(page.retentionDays);
+        }
+      }
+
+      const rows = Array.isArray(page?.data) ? page.data : [];
+      if (!tbody) return;
+      if (!rows.length) {
+        tbody.innerHTML = `<tr class="prov-logs-empty-row"><td colspan="7">
+          <div class="session-empty">
+            <div class="session-empty-title">暂无请求日志</div>
+            <div class="session-empty-detail">开启本地路由并在路由设置中勾选「请求日志」后，经代理的请求会显示在这里。</div>
+          </div>
+        </td></tr>`;
+        hideDetail();
+      } else {
+        tbody.innerHTML = rows
+          .map((r) => {
+            const sel = r.id === logsState.selectedId ? " is-selected" : "";
+            const sc = statusCodeClass(r.statusCode, !!r.errorMessage);
+            const stream = r.isStreaming
+              ? ` <span class="prov-badge prov-badge-fo" title="流式请求">流式</span>`
+              : "";
+            const appLabel = formatLogApp(r.app);
+            const latTitle =
+              r.firstTokenMs != null
+                ? `总耗时 ${formatLatency(r.latencyMs)} · 首字节 ${formatFirstToken(r.firstTokenMs)}`
+                : `总耗时 ${formatLatency(r.latencyMs)}`;
+            const tok = formatTokens(r);
+            const innExact = Number(r.inputTokens) || 0;
+            const outExact = Number(r.outputTokens) || 0;
+            const tokTitle =
+              innExact || outExact
+                ? `输入 ${innExact.toLocaleString()} · 输出 ${outExact.toLocaleString()}`
+                : "无 token 统计";
+            return `<tr class="prov-logs-row${sel}" data-log-id="${escapeHtml(r.id)}" tabindex="0">
+              <td class="tabular-nums">${escapeHtml(formatLogTime(r.createdAt))}</td>
+              <td>${escapeHtml(appLabel)}</td>
+              <td title="${escapeHtml(r.providerName || r.providerId || "")}">${escapeHtml(r.providerName || r.providerId || "—")}</td>
+              <td title="${escapeHtml(r.model || "")}"><span class="prov-meta-chip" title="模型">${escapeHtml(r.model || "—")}</span>${stream}</td>
+              <td class="tabular-nums" title="${escapeHtml(latTitle)}">${escapeHtml(formatLatency(r.latencyMs))}</td>
+              <td class="tabular-nums" title="${escapeHtml(tokTitle)}">${escapeHtml(tok)}</td>
+              <td><span class="${sc}">${r.statusCode || "—"}</span></td>
+            </tr>`;
+          })
+          .join("");
+        // Keep detail if selection still present
+        if (logsState.selectedId && rows.some((r) => r.id === logsState.selectedId)) {
+          const hit = rows.find((r) => r.id === logsState.selectedId);
+          if (hit) renderDetail(hit);
+        } else {
+          hideDetail();
+        }
+      }
+      renderPager();
+    } catch (err) {
+      toast(err?.message || String(err), "error");
+    } finally {
+      logsState.loading = false;
+    }
+  }
+
+  function renderPager() {
+    const pager = $("provLogsPager");
+    if (!pager) return;
+    const totalPages = Math.max(1, Math.ceil(logsState.total / logsState.pageSize) || 1);
+    const show = logsState.total > logsState.pageSize;
+    pager.hidden = !show;
+    const label = $("provLogsPageLabel");
+    if (label) label.textContent = `第 ${logsState.page + 1} / ${totalPages} 页`;
+    const prev = $("btnProvLogsPrev");
+    const next = $("btnProvLogsNext");
+    if (prev) prev.disabled = logsState.page <= 0;
+    if (next) next.disabled = logsState.page + 1 >= totalPages;
+  }
+
+  function clearLogRowSelection() {
+    $("provLogsTbody")
+      ?.querySelectorAll(".prov-logs-row.is-selected")
+      .forEach((tr) => tr.classList.remove("is-selected"));
+  }
+
+  function hideDetail() {
+    const el = $("provLogsDetail");
+    if (el) {
+      el.hidden = true;
+      el.setAttribute("hidden", "");
+    }
+    logsState.selectedId = null;
+    clearLogRowSelection();
+  }
+
+  function isDetailVisible() {
+    const el = $("provLogsDetail");
+    return !!(el && !el.hidden);
+  }
+
+  function renderDetail(r) {
+    const el = $("provLogsDetail");
+    const grid = $("provLogsDetailGrid");
+    if (!el || !grid || !r) return;
+    el.hidden = false;
+    el.removeAttribute("hidden");
+    const statusCls = statusCodeClass(r.statusCode, !!r.errorMessage);
+    const rows = [
+      ["请求 ID", escapeHtml(r.id)],
+      ["时间", escapeHtml(formatLogTime(r.createdAt))],
+      ["应用", escapeHtml(formatLogApp(r.app))],
+      ["供应商", escapeHtml(`${r.providerName || "—"} (${r.providerId || "—"})`)],
+      ["模型", escapeHtml(r.model || "—")],
+      ["方法", escapeHtml(r.method || "—")],
+      ["路径", escapeHtml(r.path || "—")],
+      [
+        "状态",
+        `<span class="${statusCls}">${escapeHtml(String(r.statusCode ?? "—"))}</span>`,
+      ],
+      ["耗时", escapeHtml(formatLatency(r.latencyMs))],
+      ["首字节", escapeHtml(formatFirstToken(r.firstTokenMs))],
+      [
+        "输入 Token",
+        escapeHtml(formatTokenCount(r.inputTokens)),
+      ],
+      [
+        "输出 Token",
+        escapeHtml(formatTokenCount(r.outputTokens)),
+      ],
+      ["流式", escapeHtml(r.isStreaming ? "是" : "否")],
+      ["尝试次数", escapeHtml(String(r.attempt ?? 1))],
+      ["错误", escapeHtml(r.errorMessage || "—")],
+    ];
+    grid.innerHTML = rows
+      .map(([k, v]) => `<div class="ov-meta-row"><dt>${escapeHtml(k)}</dt><dd>${v}</dd></div>`)
+      .join("");
+  }
+
+  function setLogRowSelected(id) {
+    $("provLogsTbody")
+      ?.querySelectorAll(".prov-logs-row")
+      .forEach((tr) => {
+        tr.classList.toggle("is-selected", tr.getAttribute("data-log-id") === id);
+      });
+  }
+
+  /**
+   * Open detail for a row; click the same selected row again to collapse.
+   */
+  async function onSelectLogRow(id) {
+    if (!id) return;
+    // Toggle off when re-clicking the open row
+    if (logsState.selectedId === id && isDetailVisible()) {
+      hideDetail();
+      return;
+    }
+    logsState.selectedId = id;
+    setLogRowSelected(id);
+    try {
+      let detail = null;
+      if (window.providerAPI?.getRequestLog) {
+        detail = await window.providerAPI.getRequestLog(id);
+      }
+      // Selection may have changed while awaiting
+      if (logsState.selectedId !== id) return;
+      if (detail) {
+        renderDetail(detail);
+      } else {
+        hideDetail();
+        toast("未找到该条日志", "error");
+      }
+    } catch (err) {
+      if (logsState.selectedId === id) hideDetail();
+      toast(err?.message || String(err), "error");
+    }
+  }
+
+  async function onClearLogs() {
+    const ok = await confirm({
+      title: "清空请求日志",
+      message: "将删除全部本地请求日志，且不可恢复。是否继续？",
+      confirmText: "清空",
+      variant: "danger",
+    });
+    if (!ok) return;
+    try {
+      const res = await window.providerAPI.clearRequestLogs();
+      const n = Number(res?.deleted) || 0;
+      toast(n ? `已删除 ${n} 条日志` : "日志已清空", "ok");
+      logsState.page = 0;
+      hideDetail();
+      await loadLogs();
+    } catch (err) {
+      toast(err?.message || String(err), "error");
+    }
+  }
+
+  async function onSaveRetention() {
+    const raw = Number($("provLogsRetentionDays")?.value || 7);
+    const days = Math.min(365, Math.max(1, Number.isFinite(raw) ? Math.round(raw) : 7));
+    try {
+      const saved = await window.providerAPI.setLogRetentionDays(days);
+      const input = $("provLogsRetentionDays");
+      if (input) input.value = String(saved || days);
+      // Keep GlobalProxyConfig in sync when possible
+      try {
+        const cfg = await window.providerAPI.getProxyConfig();
+        if (cfg && Number(cfg.logRetentionDays) !== Number(saved)) {
+          await window.providerAPI.updateProxyConfig({
+            ...cfg,
+            logRetentionDays: saved || days,
+          });
+        }
+      } catch {
+        /* optional */
+      }
+      toast(`已设置保留 ${saved || days} 天`, "ok");
+      logsState.page = 0;
+      await loadLogs();
+    } catch (err) {
+      toast(err?.message || String(err), "error");
+    }
+  }
+
+  function setPortStatus(ok, message) {
+    // Reuse provider form probe status styles (is-ok / is-error)
+    setProbeStatus("provRoutePortStatus", message || "", ok ? "ok" : "error");
+  }
+
+  async function onCheckPort() {
+    const host = ($("provRouteListenHost")?.value || "127.0.0.1").trim();
+    const port = Number($("provRouteListenPort")?.value || 18964);
+    try {
+      if (!window.providerAPI?.checkListenPort) {
+        toast("检测接口不可用", "error");
+        return;
+      }
+      const r = await window.providerAPI.checkListenPort(host, port);
+      if (r?.available) {
+        setPortStatus(true, r.message || `${host}:${port} 可用`);
+        toast("端口可用", "ok");
+      } else {
+        const sug = r?.suggestedPort;
+        setPortStatus(
+          false,
+          (r?.message || "端口不可用") +
+            (sug ? ` — 可改用 ${sug}` : "")
+        );
+        if (sug && $("provRouteListenPort")) {
+          const use = await confirm({
+            title: "端口被占用",
+            message: `${host}:${port} 无法绑定。\n是否改用建议端口 ${sug}？`,
+            confirmText: `使用 ${sug}`,
+            variant: "primary",
+          });
+          if (use) {
+            $("provRouteListenPort").value = String(sug);
+            setPortStatus(true, `已填入建议端口 ${sug}，请保存设置`);
+          }
+        }
+        toast(r?.message || "端口不可用", "error");
+      }
+    } catch (err) {
+      setPortStatus(false, err?.message || String(err));
+      toast(err?.message || String(err), "error");
+    }
+  }
+
+  async function onToggleFailover(id) {
+    const p = (listPayload?.providers || []).find((x) => x.id === id);
+    if (!p) return;
+    try {
+      if (p.inFailoverQueue) {
+        await window.providerAPI.removeFromFailover(app, id);
+        toast("已移出故障转移队列", "ok");
+      } else {
+        await window.providerAPI.addToFailover(app, id);
+        toast("已加入故障转移队列", "ok");
+      }
+      await loadList();
+      await refreshFoQueuePanel();
+    } catch (err) {
+      toast(err?.message || String(err), "error");
+    }
+  }
+
+  async function onRepairRoute() {
+    try {
+      const res = await window.providerAPI.repairTakeover(app);
+      const w = (res?.warnings || [])
+        .filter(Boolean)
+        .filter((x) => !/注入|白名单|catalog|CDP/i.test(x));
+      toast(w[0] || "已修复本地路由", "ok");
+      await loadList();
+    } catch (err) {
+      toast(err?.message || String(err), "error");
+    }
+  }
+
+  async function refreshFoQueuePanel() {
+    const listEl = $("provFoQueueList");
+    const sel = $("provFoQueueAddSelect");
+    if (!listEl || !window.providerAPI?.getFailoverQueue) return;
+    try {
+      const queue = (await window.providerAPI.getFailoverQueue(app)) || [];
+      if (!queue.length) {
+        listEl.innerHTML =
+          `<div class="prov-fo-queue-empty ui-empty-inline">队列为空。从下方下拉添加备用供应商，或在列表卡片上点「加入队列」。</div>`;
+      } else {
+        listEl.innerHTML = queue
+          .map((item, i) => {
+            const cur = item.isCurrent ? "is-current" : "";
+            let healthBadge = "";
+            if (item.health === "healthy") {
+              healthBadge = `<span class="prov-badge prov-badge-health-healthy">健康</span>`;
+            } else if (item.health === "open") {
+              healthBadge = `<span class="prov-badge prov-badge-health-open">熔断</span>`;
+            } else if (item.health === "degraded") {
+              healthBadge = `<span class="prov-badge prov-badge-health-degraded">降级</span>`;
+            }
+            const curBadge = item.isCurrent
+              ? `<span class="prov-badge prov-badge-route">当前</span>`
+              : "";
+            const switchBtn = item.isCurrent
+              ? `<button type="button" class="chip-btn" disabled title="已是当前启用">使用中</button>`
+              : `<button type="button" class="chip-btn chip-primary" data-fo-act="switch" data-id="${escapeHtml(item.providerId)}" title="切换为当前供应商（本地路由开启时热生效）">切换</button>`;
+            return `<div class="prov-fo-queue-row ${cur}" data-fo-id="${escapeHtml(item.providerId)}">
+  <span class="prov-fo-queue-idx" title="优先级">P${i + 1}</span>
+  <div class="prov-fo-queue-main">
+    <span class="prov-fo-queue-name" title="${escapeHtml(item.providerName)}">${escapeHtml(item.providerName)}</span>
+    <span class="prov-fo-queue-meta">${curBadge}${healthBadge}</span>
+  </div>
+  <span class="prov-fo-queue-actions">
+    ${switchBtn}
+    <button type="button" class="chip-btn" data-fo-act="up" data-id="${escapeHtml(item.providerId)}" title="上移提高优先级">↑</button>
+    <button type="button" class="chip-btn" data-fo-act="down" data-id="${escapeHtml(item.providerId)}" title="下移降低优先级">↓</button>
+    <button type="button" class="chip-btn chip-danger" data-fo-act="remove" data-id="${escapeHtml(item.providerId)}" title="移出队列">移除</button>
+  </span>
+</div>`;
+          })
+          .join("");
+      }
+      // Fill add select with providers not already in queue
+      const inQ = new Set(queue.map((q) => q.providerId));
+      const candidates = (listPayload?.providers || []).filter(
+        (p) => p.category !== "official" && !inQ.has(p.id)
+      );
+      if (sel) {
+        sel.innerHTML =
+          `<option value="">添加供应商到队列…</option>` +
+          candidates
+            .map(
+              (p) =>
+                `<option value="${escapeHtml(p.id)}">${escapeHtml(p.name)}</option>`
+            )
+            .join("");
+      }
+    } catch (err) {
+      listEl.innerHTML = `<div class="prov-fo-queue-empty">加载队列失败：${escapeHtml(err?.message || err)}</div>`;
+    }
+  }
+
+  async function onFoQueueAction(act, id) {
+    try {
+      const queue = (await window.providerAPI.getFailoverQueue(app)) || [];
+      const ids = queue.map((q) => q.providerId);
+      const idx = ids.indexOf(id);
+      if (act === "switch") {
+        await switchFromFailoverQueue(id, ids);
+        return;
+      }
+      if (act === "remove") {
+        await window.providerAPI.removeFromFailover(app, id);
+      } else if (act === "up" && idx > 0) {
+        const next = ids.slice();
+        [next[idx - 1], next[idx]] = [next[idx], next[idx - 1]];
+        await window.providerAPI.reorderFailover(app, next);
+      } else if (act === "down" && idx >= 0 && idx < ids.length - 1) {
+        const next = ids.slice();
+        [next[idx + 1], next[idx]] = [next[idx], next[idx + 1]];
+        await window.providerAPI.reorderFailover(app, next);
+      } else {
+        return;
+      }
+      await loadList();
+      await refreshFoQueuePanel();
+    } catch (err) {
+      toast(err?.message || String(err), "error");
+    }
+  }
+
+  /**
+   * Manually switch to a provider listed in the failover queue.
+   * Under local routing this is a hot switch; also pin it to queue front (P1).
+   */
+  async function switchFromFailoverQueue(id, queueIds) {
+    const p = (listPayload?.providers || []).find((x) => x.id === id);
+    if (!p) {
+      toast("供应商不在列表中", "error");
+      return;
+    }
+    if (p.isCurrent) {
+      toast("已是当前启用", "ok");
+      return;
+    }
+    if (p.ready === false && p.category !== "official") {
+      toast("该供应商尚未就绪：请先编辑并填写 Base URL 与 API Key", "error");
+      return;
+    }
+    const routing = !!listPayload?.takeoverEnabled;
+    const name = p.name || id;
+    if (!routing) {
+      const ok = await confirm({
+        title: "切换供应商",
+        message: `尚未开启本地路由。切换「${name}」将写入本机 live 配置（与列表「启用」相同）。\n\n建议先开启本地路由，以便队列内热切换。`,
+        confirmText: "仍然切换",
+        variant: "primary",
+      });
+      if (!ok) return;
+    }
+    try {
+      const res = await window.providerAPI.switch(app, id);
+      // Pin switched provider to front so FO order matches sticky primary.
+      const rest = (queueIds || []).filter((x) => x !== id);
+      const nextOrder = [id, ...rest];
+      try {
+        if (window.providerAPI?.reorderFailover) {
+          await window.providerAPI.reorderFailover(app, nextOrder);
+        }
+      } catch (reorderErr) {
+        console.warn("reorder after queue switch", reorderErr);
+      }
+      const msg =
+        res?.message ||
+        (routing ? `已热切换至「${name}」` : `已启用「${name}」`);
+      toast(msg, "ok");
+      await loadList();
+      await refreshFoQueuePanel();
+    } catch (err) {
+      toast(err?.message || String(err), "error");
+    }
   }
 
   async function loadPresets() {
@@ -352,9 +1206,30 @@
     }
   }
 
-  async function loadList() {
+  function setRefreshLoading(on) {
+    const btn = $("btnProvRefresh");
+    if (!btn) return;
+    btn.disabled = !!on;
+    btn.classList.toggle("is-loading", !!on);
+    btn.setAttribute("aria-busy", on ? "true" : "false");
+    const label = btn.querySelector(".chip-label");
+    if (label) {
+      if (on) {
+        if (!btn.dataset.labelIdle) {
+          btn.dataset.labelIdle = label.textContent || "刷新";
+        }
+        label.textContent = "刷新中…";
+      } else {
+        label.textContent = btn.dataset.labelIdle || "刷新";
+      }
+    }
+  }
+
+  async function loadList(opts) {
+    const showRefreshLoading = opts?.refresh === true;
     const seq = ++loadSeq;
     loading = true;
+    if (showRefreshLoading) setRefreshLoading(true);
     renderList();
     updateLiveBar();
     try {
@@ -368,7 +1243,10 @@
       loading = false;
       updateLead();
       updateLiveBar();
+      syncRouteToggle();
       renderList();
+      loadAppProxySettings().catch(() => {});
+      if (showRefreshLoading) toast("供应商列表已刷新", "ok");
     } catch (err) {
       if (seq !== loadSeq) return;
       loading = false;
@@ -385,6 +1263,8 @@
           `<div class="session-empty-detail">${escapeHtml(err?.message || err)}</div>`;
       }
       toast(err?.message || String(err), "error");
+    } finally {
+      if (seq === loadSeq) setRefreshLoading(false);
     }
   }
 
@@ -467,11 +1347,32 @@
             ? "chat_completions"
             : "responses";
       }
-      setField("provFormContextWindow", "500000");
+      const grokCw = guessContextWindow(p.model || "grok-4.5") || 500000;
+      setField("provFormContextWindow", String(grokCw));
     } else {
-      // Codex: seed model mapping so enable writes model_catalog_json
-      const m = (p.model || "").trim();
-      if (m) renderCatalogRows([{ model: m, displayName: m }]);
+      // Codex: seed model mapping so enable writes full model_catalog_json
+      // (third-party: DeepSeek / Claude / Gemini / Grok / … must all be listed).
+      const presetModels = Array.isArray(p.models)
+        ? p.models.map((x) => String(x || "").trim()).filter(Boolean)
+        : [];
+      if (presetModels.length) {
+        renderCatalogRows(
+          presetModels.map((id) => {
+            const row = { model: id, displayName: id };
+            const cw = guessContextWindow(id);
+            if (cw) row.contextWindow = cw;
+            return row;
+          })
+        );
+      } else {
+        const m = (p.model || "").trim();
+        if (m) {
+          const row = { model: m, displayName: m };
+          const cw = guessContextWindow(m);
+          if (cw) row.contextWindow = cw;
+          renderCatalogRows([row]);
+        }
+      }
     }
 
     const hint = $("provFormPresetHint");
@@ -520,7 +1421,7 @@
           "写入 [model.*].model。可手填；点右侧「拉取模型」获取列表并填入第一项。";
       } else {
         modelHint.textContent =
-          "写入 Codex 顶层 model。完整列表请在下方「模型映射」中拉取或添加。";
+          "默认使用模型。桌面/CLI 可选列表 = 下方「模型映射」全量（须含 DeepSeek/Claude/Gemini/Grok 等实际要用的 id）。";
       }
     }
 
@@ -728,11 +1629,10 @@
       if (formIsOfficial) {
         keyHint.textContent = "官方供应商不使用自定义 API Key";
       } else if (isGrok()) {
-        keyHint.textContent =
-          "编辑时会回显已保存的 Key。必填才能启用；写入 ~/.grok/config.toml 的 [model.*].api_key";
+        keyHint.textContent = "必填才能启用；编辑时会回显已保存的 Key。";
       } else {
         keyHint.textContent =
-          "编辑时会回显已保存的 Key。必填才能启用；写入 ~/.codex/auth.json（OPENAI_API_KEY）";
+          "必填才能启用；编辑时会回显已保存的 Key（可保留官方登录时不覆盖 ChatGPT 登录）。";
       }
     }
 
@@ -855,7 +1755,7 @@
     clearFieldErrors();
   }
 
-  // ── Connectivity + model list (ported from cc-switch) ───────────────────
+  // ── Connectivity + model list ───────────────────────────────────────────
 
   function resetProbeUi() {
     fetchModelsSeq += 1;
@@ -947,19 +1847,35 @@
   }
 
   function catalogRowHtml(row, index) {
-    const model = escapeHtml(row?.model || "");
+    const modelRaw = row?.model || "";
+    const model = escapeHtml(modelRaw);
     const display = escapeHtml(row?.displayName || row?.display_name || "");
-    const cw =
+    let cw =
       row?.contextWindow || row?.context_window
         ? String(row.contextWindow || row.context_window)
         : "";
+    // Auto-fill known mainstream models when context is empty.
+    if (!cw && modelRaw) {
+      const guessed = guessContextWindow(modelRaw);
+      if (guessed) cw = String(guessed);
+    }
+    const listId = `provCtxPresetList-${index}`;
+    const opts = CONTEXT_WINDOW_QUICK_PICKS.map(
+      (p) =>
+        `<option value="${p.value}" label="${escapeHtml(p.label)}">${escapeHtml(
+          p.label
+        )}</option>`
+    ).join("");
     return `<tr data-catalog-idx="${index}">
       <td><input type="text" data-cat="model" value="${model}" placeholder="model-id" spellcheck="false" autocomplete="off" /></td>
       <td><input type="text" data-cat="displayName" value="${display}" placeholder="可选" spellcheck="false" autocomplete="off" /></td>
-      <td><input type="number" data-cat="contextWindow" value="${escapeHtml(
-        cw
-      )}" placeholder="128000" min="1" step="1" inputmode="numeric" /></td>
-      <td><button type="button" class="prov-catalog-del" data-cat-del title="删除行" aria-label="删除行">×</button></td>
+      <td class="prov-cat-ctx">
+        <input type="number" data-cat="contextWindow" value="${escapeHtml(
+          cw
+        )}" placeholder="128000" min="1" step="1" inputmode="numeric" list="${listId}" title="可选手动填写，或从预设选择；识别到常见模型会自动填入" />
+        <datalist id="${listId}">${opts}</datalist>
+      </td>
+      <td><button type="button" class="icon-btn delete-btn prov-catalog-del" data-cat-del title="删除行" aria-label="删除行">×</button></td>
     </tr>`;
   }
 
@@ -986,10 +1902,15 @@
       rows.push(item);
     });
     // No mapping rows → seed from the default model field so enable always
-    // projects model_catalog_json (cc-switch: mapping drives /model list).
+    // projects model_catalog_json (mapping drives /model list).
     if (!rows.length) {
       const fallback = ($("provFormModel")?.value || "").trim();
-      if (fallback) rows.push({ model: fallback, displayName: fallback });
+      if (fallback) {
+        const item = { model: fallback, displayName: fallback };
+        const cw = guessContextWindow(fallback);
+        if (cw) item.contextWindow = cw;
+        rows.push(item);
+      }
     }
     return rows;
   }
@@ -997,14 +1918,45 @@
   function addCatalogRow(seed) {
     const body = $("provCatalogBody");
     if (!body) return;
-    const row = seed || {
-      model: ($("provFormModel")?.value || "").trim() || "",
-      displayName: "",
-    };
+    const model =
+      (seed && seed.model) ||
+      ($("provFormModel")?.value || "").trim() ||
+      "";
+    const row = seed
+      ? { ...seed }
+      : {
+          model,
+          displayName: "",
+        };
+    if (!row.contextWindow) {
+      const cw = resolveContextWindow(row.model, row.contextWindow);
+      if (cw) row.contextWindow = cw;
+    }
     body.insertAdjacentHTML(
       "beforeend",
       catalogRowHtml(row, body.children.length)
     );
+  }
+
+  /**
+   * When user edits model id in mapping table, fill context if empty (or re-guess).
+   * @param {HTMLInputElement} modelInput
+   */
+  function onCatalogModelIdChange(modelInput) {
+    if (!modelInput || modelInput.getAttribute("data-cat") !== "model") return;
+    const tr = modelInput.closest("tr");
+    if (!tr) return;
+    const cwInput = tr.querySelector('[data-cat="contextWindow"]');
+    if (!cwInput) return;
+    const model = (modelInput.value || "").trim();
+    const existing = (cwInput.value || "").trim();
+    // Only auto-fill when empty, so user overrides are preserved.
+    if (existing) return;
+    const guessed = guessContextWindow(model);
+    if (guessed) {
+      cwInput.value = String(guessed);
+      markStructuredEdit();
+    }
   }
 
   /** Clear model datalist suggestions; keep current free-text value. */
@@ -1075,7 +2027,8 @@
         model: id,
         displayName: prev?.displayName || id,
       };
-      if (prev?.contextWindow) row.contextWindow = prev.contextWindow;
+      const cw = resolveContextWindow(id, prev?.contextWindow);
+      if (cw) row.contextWindow = cw;
       return row;
     });
     renderCatalogRows(rows);
@@ -1085,8 +2038,8 @@
 
   /**
    * Fill editable model input + datalist suggestions (id only, no ownedBy suffix).
-   * For Codex, also project the full list into the model-mapping table (Codex++
-   * model_list style — catalog must contain every model that should appear in /model).
+   * For Codex, also project the full list into the model-mapping table
+   * (catalog must contain every model that should appear in /model).
    * @param {any} models
    * @param {{selectFirst?: boolean, fillCatalog?: boolean}} [opts]
    * @returns {{ count: number, catalogRows: number, models: Array<{id:string,ownedBy?:string}> }}
@@ -1330,7 +2283,7 @@
       ($("provFormProxyHeaders")?.value || "").trim() || null;
     const localProxyBodyJson =
       ($("provFormProxyBody")?.value || "").trim() || null;
-    const modelCatalog = collectCatalogRows();
+    let modelCatalog = collectCatalogRows();
     const configTomlRaw = ($("provFormConfigToml")?.value || "").trim();
     const wireRaw = ($("provFormWireApi")?.value || "responses").trim();
     const wireApi = wireRaw === "chat" ? "chat" : "responses";
@@ -1361,10 +2314,22 @@
     // Otherwise form fields win (fixes "edit then save has no effect").
     const useConfigToml = advancedDirty && !!configTomlRaw;
 
-    // Prefer first mapped model when the default model field is empty (cc-switch).
+    // Prefer first mapped model when the default model field is empty.
     let modelOut = model;
     if (!useConfigToml && !modelOut && modelCatalog.length) {
       modelOut = modelCatalog[0].model || null;
+    }
+
+    // Always merge default model into catalog.
+    // Prevents "only GPT shows" when user only filled the single model field.
+    if (!isGrok() && !formIsOfficial && modelOut) {
+      const has = modelCatalog.some((r) => r.model === modelOut);
+      if (!has) {
+        modelCatalog = [
+          { model: modelOut, displayName: modelOut },
+          ...modelCatalog,
+        ];
+      }
     }
 
     return {
@@ -1476,14 +2441,17 @@
     clearFormError();
 
     if (activate) {
+      const mapCount = Array.isArray(req.modelCatalog)
+        ? req.modelCatalog.length
+        : 0;
       const ok = await confirm({
         title: "保存并启用",
-        message:
-          `将保存「${req.name}」并写回本机正在使用的配置：\n` +
-          (isGrok()
-            ? "· Grok：~/.grok/config.toml（尽量保留 MCP 段）\n"
-            : "· Codex：~/.codex/auth.json + config.toml（含 wire_api）\n") +
-          `\n写入后通常需要重启对应客户端 / CLI 才能完全生效。`,
+        message: isGrok()
+          ? `将保存并启用「${req.name}」，写入 Grok 本机配置。`
+          : `将保存并启用「${req.name}」，写入 Codex 本机配置。` +
+            (mapCount
+              ? `\n已包含 ${mapCount} 个模型映射。`
+              : "\n尚未添加模型映射，启用后可再编辑补充。"),
         confirmText: "保存并启用",
         variant: "primary",
       });
@@ -1520,13 +2488,23 @@
         activate: !!activate,
       };
 
+      let result;
       if (editingId) {
-        await window.providerAPI.update(app, editingId, payload);
+        result = await window.providerAPI.update(app, editingId, payload);
         toast(activate ? "已保存并启用" : "已保存供应商", "ok");
       } else {
-        await window.providerAPI.add(app, payload);
+        result = await window.providerAPI.add(app, payload);
         toast(activate ? "已添加并启用" : "已添加供应商", "ok");
       }
+      // Unlock / catalog projection: backend best-effort, silent (no inject toasts).
+      if (activate && !isGrok()) {
+        try {
+          await window.providerAPI.refreshModelUnlock?.();
+        } catch {
+          /* ignore */
+        }
+      }
+      void result;
       closeForm();
       await loadList();
     } catch (err) {
@@ -1557,23 +2535,23 @@
       return;
     }
     const ok = await confirm({
-      title: "切换供应商",
-      message:
-        `将启用「${p?.name || id}」并写回本机正在使用的配置。\n\n` +
-        (isGrok()
-          ? "Grok：写入 ~/.grok/config.toml（尽量保留现有 MCP 段）。\n"
-          : "Codex：双写 auth.json（API Key）与 config.toml（含 wire_api）。\n") +
-        `切换后通常需要重启对应客户端 / CLI 才能完全生效。`,
+      title: "启用供应商",
+      message: isGrok()
+        ? `将启用「${p?.name || id}」并写入 Grok 本机配置。`
+        : `将启用「${p?.name || id}」并写入 Codex 本机配置。`,
       confirmText: "启用",
       variant: "primary",
     });
     if (!ok) return;
     try {
       const res = await window.providerAPI.switch(app, id);
-      const warn = (res?.warnings || []).filter(Boolean);
-      toast(res?.message || "已切换", warn.length ? "warn" : "ok");
+      // Only surface actionable warnings (e.g. empty model map); never inject/catalog dumps.
+      const warn = (res?.warnings || [])
+        .filter(Boolean)
+        .filter((w) => !/注入|白名单|catalog|model_catalog|CDP|experimental_bearer|auth\.json|config\.toml|CLI\s*\/model/i.test(w));
+      toast(res?.message || "已启用", "ok");
       if (warn.length) {
-        setTimeout(() => toast(warn.join("；"), "warn"), 500);
+        setTimeout(() => toast(warn[0], "warn"), 400);
       }
       await loadList();
     } catch (err) {
@@ -1613,11 +2591,9 @@
   async function onImportLive() {
     const ok = await confirm({
       title: "从本机配置导入",
-      message:
-        `读取本机正在使用的配置，另存为一条供应商档案（不会自动启用）：\n\n` +
-        (isGrok()
-          ? "· 路径：~/.grok/config.toml\n· 内容：当前默认模型 / base_url / api_key 等"
-          : "· 路径：~/.codex/auth.json + config.toml\n· 内容：当前 model_provider / base_url / API Key 等"),
+      message: isGrok()
+        ? "读取 Grok 本机配置，另存为一条供应商档案（不会自动启用）。"
+        : "读取 Codex 本机配置，另存为一条供应商档案（不会自动启用）。",
       confirmText: "导入",
     });
     if (!ok) return;
@@ -1639,18 +2615,30 @@
     openForm("add", null);
   }
 
+  function isRouteModalOpen() {
+    const m = $("provRouteModal");
+    return !!(m && !m.hidden && m.classList.contains("show"));
+  }
+
   function onFormKeydown(e) {
-    if (!isFormOpen()) return;
-    // Confirm dialog uses capture Escape; if confirm is open, let it win
     const confirmModal = $("confirmModal");
     if (confirmModal && !confirmModal.hidden) return;
 
     if (e.key === "Escape") {
-      e.preventDefault();
-      e.stopPropagation();
-      if (!formBusy) closeForm();
+      if (isRouteModalOpen()) {
+        e.preventDefault();
+        e.stopPropagation();
+        closeRouteModal();
+        return;
+      }
+      if (isFormOpen()) {
+        e.preventDefault();
+        e.stopPropagation();
+        if (!formBusy) closeForm();
+      }
       return;
     }
+    if (!isFormOpen()) return;
     if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
       e.preventDefault();
       const enableBtn = $("btnProviderFormSaveEnable");
@@ -1688,7 +2676,30 @@
       loadList();
     });
 
-    $("btnProvRefresh")?.addEventListener("click", () => loadList());
+    $("provPreserveCodexAuth")?.addEventListener("change", async (e) => {
+      const enabled = !!e.target?.checked;
+      try {
+        if (!window.providerAPI?.setPreserveCodexAuth) {
+          throw new Error("providerAPI 未加载");
+        }
+        const next = await window.providerAPI.setPreserveCodexAuth(enabled);
+        if (listPayload) listPayload.preserveCodexOfficialAuth = !!next;
+        toast(
+          enabled
+            ? "已开启：第三方启用将保留 auth.json 官方登录"
+            : "已关闭：第三方启用会写入 auth.json（可能覆盖官方登录）",
+          enabled ? "ok" : "warn"
+        );
+      } catch (err) {
+        e.target.checked = !enabled;
+        toast(err?.message || String(err), "error");
+      }
+    });
+
+    $("btnProvRefresh")?.addEventListener("click", () => {
+      if (loading) return;
+      loadList({ refresh: true });
+    });
     $("btnProvAdd")?.addEventListener("click", () => {
       onAddClick().catch((err) => toast(err?.message || String(err), "error"));
     });
@@ -1703,6 +2714,128 @@
       if (act === "switch") onSwitch(id);
       else if (act === "edit") onEdit(id);
       else if (act === "delete") onDelete(id);
+      else if (act === "failover") onToggleFailover(id);
+    });
+
+    $("provRouteToggle")?.addEventListener("click", () => {
+      onToggleRoute().catch((err) => toast(err?.message || String(err), "error"));
+    });
+    $("btnProvRouteSettings")?.addEventListener("click", () => openRouteModal());
+    $("btnProvRouteLogs")?.addEventListener("click", () => {
+      openLogsModal().catch((err) => toast(err?.message || String(err), "error"));
+    });
+    $("btnProvRouteModalClose")?.addEventListener("click", () => closeRouteModal());
+    $("btnProvRouteModalCancel")?.addEventListener("click", () => closeRouteModal());
+    $("provRouteModal")?.addEventListener("click", (e) => {
+      if (e.target === $("provRouteModal") && !formBusy) closeRouteModal();
+    });
+    $("btnProvLogsModalClose")?.addEventListener("click", () => closeLogsModal());
+    $("btnProvLogsDetailClose")?.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      hideDetail();
+    });
+    $("provLogsModal")?.addEventListener("click", (e) => {
+      if (e.target === $("provLogsModal") && !formBusy) closeLogsModal();
+    });
+    // Esc: first collapse detail, then close modal
+    document.addEventListener("keydown", (e) => {
+      if (e.key !== "Escape") return;
+      const modal = $("provLogsModal");
+      if (!modal || modal.hidden || !modal.classList.contains("show")) return;
+      if (isDetailVisible()) {
+        e.preventDefault();
+        e.stopPropagation();
+        hideDetail();
+      }
+    }, true);
+    $("btnProvLogsRefresh")?.addEventListener("click", () => {
+      loadLogs().catch((err) => toast(err?.message || String(err), "error"));
+    });
+    $("btnProvLogsClear")?.addEventListener("click", () => {
+      onClearLogs().catch((err) => toast(err?.message || String(err), "error"));
+    });
+    $("btnProvLogsRetentionSave")?.addEventListener("click", () => {
+      onSaveRetention().catch((err) => toast(err?.message || String(err), "error"));
+    });
+    $("provLogsFilterApp")?.addEventListener("change", () => {
+      $("provLogsFilterApp").dataset.userTouched = "1";
+      logsState.page = 0;
+      loadLogs().catch((err) => toast(err?.message || String(err), "error"));
+    });
+    $("provLogsFilterStatus")?.addEventListener("change", () => {
+      logsState.page = 0;
+      loadLogs().catch((err) => toast(err?.message || String(err), "error"));
+    });
+    $("provLogsFilterQ")?.addEventListener("input", () => {
+      if (logsState.searchTimer) clearTimeout(logsState.searchTimer);
+      logsState.searchTimer = setTimeout(() => {
+        logsState.page = 0;
+        loadLogs().catch((err) => toast(err?.message || String(err), "error"));
+      }, 300);
+    });
+    $("btnProvLogsPrev")?.addEventListener("click", () => {
+      if (logsState.page <= 0) return;
+      logsState.page -= 1;
+      loadLogs().catch((err) => toast(err?.message || String(err), "error"));
+    });
+    $("btnProvLogsNext")?.addEventListener("click", () => {
+      const totalPages = Math.max(1, Math.ceil(logsState.total / logsState.pageSize) || 1);
+      if (logsState.page + 1 >= totalPages) return;
+      logsState.page += 1;
+      loadLogs().catch((err) => toast(err?.message || String(err), "error"));
+    });
+    $("provLogsTbody")?.addEventListener("click", (e) => {
+      const tr = e.target?.closest?.("tr[data-log-id]");
+      if (!tr) return;
+      onSelectLogRow(tr.getAttribute("data-log-id")).catch((err) =>
+        toast(err?.message || String(err), "error")
+      );
+    });
+    $("provLogsTbody")?.addEventListener("keydown", (e) => {
+      if (e.key !== "Enter" && e.key !== " ") return;
+      const tr = e.target?.closest?.("tr[data-log-id]");
+      if (!tr) return;
+      e.preventDefault();
+      onSelectLogRow(tr.getAttribute("data-log-id")).catch((err) =>
+        toast(err?.message || String(err), "error")
+      );
+    });
+    $("provFoQueueList")?.addEventListener("click", (e) => {
+      const btn = e.target?.closest?.("[data-fo-act]");
+      if (!btn) return;
+      e.preventDefault();
+      e.stopPropagation();
+      const act = btn.getAttribute("data-fo-act");
+      const id = btn.getAttribute("data-id");
+      if (act && id) {
+        onFoQueueAction(act, id).catch((err) =>
+          toast(err?.message || String(err), "error")
+        );
+      }
+    });
+    $("btnProvFoQueueAdd")?.addEventListener("click", async () => {
+      const id = $("provFoQueueAddSelect")?.value;
+      if (!id) {
+        toast("请选择要加入队列的供应商", "error");
+        return;
+      }
+      try {
+        await window.providerAPI.addToFailover(app, id);
+        toast("已加入故障转移队列", "ok");
+        await loadList();
+        await refreshFoQueuePanel();
+      } catch (err) {
+        toast(err?.message || String(err), "error");
+      }
+    });
+    $("btnProvRouteSaveCfg")?.addEventListener("click", () => {
+      onSaveRouteSettings().catch((err) =>
+        toast(err?.message || String(err), "error")
+      );
+    });
+    $("btnProvRouteCheckPort")?.addEventListener("click", () => {
+      onCheckPort().catch((err) => toast(err?.message || String(err), "error"));
     });
 
     $("provFormPreset")?.addEventListener("change", (e) => {
@@ -1792,6 +2925,29 @@
       }
     });
     $("btnProvCatalogAdd")?.addEventListener("click", () => addCatalogRow());
+    $("provCatalogBody")?.addEventListener("change", (e) => {
+      const t = e.target;
+      if (t?.getAttribute?.("data-cat") === "model") {
+        onCatalogModelIdChange(t);
+      }
+    });
+    $("provCatalogBody")?.addEventListener("blur", (e) => {
+      const t = e.target;
+      if (t?.getAttribute?.("data-cat") === "model") {
+        onCatalogModelIdChange(t);
+      }
+    }, true);
+    $("provFormModel")?.addEventListener("change", () => {
+      if (!isGrok() || formIsOfficial) return;
+      const cwEl = $("provFormContextWindow");
+      if (!cwEl) return;
+      if ((cwEl.value || "").trim()) return;
+      const guessed = guessContextWindow(($("provFormModel")?.value || "").trim());
+      if (guessed) {
+        cwEl.value = String(guessed);
+        markStructuredEdit();
+      }
+    });
     // Wire/reasoning/apiBackend selects: keep ui-select label in sync after programmatic sets
     ["provFormWireApi", "provFormReasoning", "provFormApiBackend"].forEach(
       (id) => {
@@ -1835,5 +2991,11 @@
     closeForm();
   }
 
-  window.providersView = { enter, leave };
+  /** Reload list after tray / external provider switch (no-op if not mounted). */
+  function reload() {
+    if (!bound) return;
+    loadList();
+  }
+
+  window.providersView = { enter, leave, reload };
 })();

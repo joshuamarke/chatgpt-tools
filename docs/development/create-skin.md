@@ -1,6 +1,6 @@
 # 新建皮肤方法
 
-本文说明如何在 **ChatGPT Tools** 中新增一款内置皮肤，或导出为可导入的 `.cgskin` 包。
+本文说明如何在 **ChatGPT Tools** 中新增一款内置皮肤，或导出为可导入的 `.skin` 包。
 
 > **引擎 v2 三层模型**（详见 [skin-contract.md](./skin-contract.md)）：  
 > 1. **框架**提供自适应全窗 / 原生控件 / 建议卡 / 壁纸布局**能力基线**（`renderer-core` + `immersive-skin.css`）  
@@ -231,8 +231,9 @@ html.codex-my-skin.skins-art-wide .composer-surface-chrome { /* 可覆盖基线 
 ## 5. 本地验证
 
 ```powershell
-cd E:\demo\chatgpt-tools
+cd chatgpt-tools   # 或你的克隆路径
 npm run test:engine
+npm run doctor:selectors
 node engine/cli.mjs check-payload --skin-id my-skin
 node engine/cli.mjs status
 # 有 ChatGPT 调试口时：
@@ -242,7 +243,7 @@ node engine/cli.mjs verify --skin-id my-skin
 
 ## 6. 导出 / 导入
 
-- GUI：卡片「导出」→ `.cgskin`
+- GUI：卡片「导出」→ `.skin`
 - CLI：`export-skin` / `import-skin` / `inspect-skin`
 - 用户目录：`%LOCALAPPDATA%\ChatGPTTools\skins\<id>\`
 

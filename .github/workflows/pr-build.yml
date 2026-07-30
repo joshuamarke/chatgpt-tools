@@ -1,0 +1,202 @@
+# Smoke-build installers on PR / main (artifacts only, no Release upload).
+name: PR build artifacts
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  windows-artifacts:
+    name: Windows artifacts
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Stamp repo meta (GitHub link in about UI)
+        run: node scripts/stamp-repo-meta.mjs
+
+      - name: Disable updater signing for smoke build
+        shell: pwsh
+        run: |
+          $p = "src-tauri/tauri.conf.json"
+          $j = Get-Content $p -Raw | ConvertFrom-Json
+          $j.bundle | Add-Member -NotePropertyName createUpdaterArtifacts -NotePropertyValue $false -Force
+          ($j | ConvertTo-Json -Depth 20) | Set-Content $p -Encoding UTF8
+
+      - name: Engine self-check
+        run: npm run verify:engine
+        continue-on-error: true
+
+      - name: GUI / selectors static checks
+        run: |
+          npm run doctor:selectors
+          npm run check:gui
+        continue-on-error: true
+
+      - name: Build Tauri (Windows smoke)
+        env:
+          # Smoke: stamp meta for UI, but do not embed production endpoints
+          SKIP_RELEASE_INJECT: "1"
+        run: npm run build
+
+      - name: Stage Windows artifacts
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $version = "${{ github.ref_name }}".TrimStart("v", "V") -replace '[\\/]', '-'
+          if (-not $version -or $version -eq "main") {
+            $version = "0.0.0-${{ github.run_number }}"
+          }
+          $dist = "dist/windows"
+          New-Item -ItemType Directory -Force $dist | Out-Null
+
+          $nsisDir = "src-tauri/target/release/bundle/nsis"
+          $msiDir = "src-tauri/target/release/bundle/msi"
+          $exe = "src-tauri/target/release/chatgpt-tools.exe"
+
+          if (Test-Path $nsisDir) {
+            Get-ChildItem $nsisDir -Filter "*.exe" | ForEach-Object {
+              Copy-Item $_.FullName (Join-Path $dist "ChatGPTTools-$version-windows-x64-setup.exe") -Force
+            }
+          }
+          if (Test-Path $msiDir) {
+            Get-ChildItem $msiDir -Filter "*.msi" | ForEach-Object {
+              Copy-Item $_.FullName (Join-Path $dist "ChatGPTTools-$version-windows-x64.msi") -Force
+            }
+          }
+
+          # Portable zip (smoke)
+          if (Test-Path $exe) {
+            $app = Join-Path $dist "portable/ChatGPT Tools"
+            New-Item -ItemType Directory -Force $app | Out-Null
+            Copy-Item $exe (Join-Path $app "ChatGPT Tools.exe") -Force
+            foreach ($name in @("engine", "skins", "resources", "logo.png")) {
+              $src = Join-Path "src-tauri/target/release" $name
+              if (Test-Path $src) { Copy-Item $src (Join-Path $app $name) -Recurse -Force }
+            }
+            Compress-Archive -Path (Join-Path $dist "portable/*") -DestinationPath (Join-Path $dist "ChatGPTTools-$version-windows-x64-portable.zip") -Force
+          }
+
+          if (-not (Get-ChildItem $dist -File -ErrorAction SilentlyContinue)) {
+            Write-Error "No Windows bundle outputs found"
+          }
+          Get-ChildItem $dist -File | Format-Table Name, Length -AutoSize
+
+      - name: Upload Windows installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: chatgpt-tools-windows-installer
+          path: |
+            dist/windows/*.exe
+            dist/windows/*.msi
+            dist/windows/*-portable.zip
+          if-no-files-found: error
+
+  macos-dmg:
+    name: macOS DMG (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: arm64
+            runner: macos-14
+            target: aarch64-apple-darwin
+          - arch: x64
+            runner: macos-14
+            target: x86_64-apple-darwin
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+          key: ${{ matrix.target }}
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Stamp repo meta (GitHub link in about UI)
+        run: node scripts/stamp-repo-meta.mjs
+
+      - name: Disable updater signing for smoke build
+        run: |
+          node -e "const fs=require('fs');const p='src-tauri/tauri.conf.json';const j=JSON.parse(fs.readFileSync(p,'utf8'));j.bundle=j.bundle||{};j.bundle.createUpdaterArtifacts=false;fs.writeFileSync(p,JSON.stringify(j,null,2)+'\n');"
+
+      - name: Build Tauri (macOS ${{ matrix.arch }} smoke)
+        env:
+          SKIP_RELEASE_INJECT: "1"
+        run: |
+          node scripts/inject-release-config.mjs
+          npx tauri build --target ${{ matrix.target }} --config src-tauri/gen/tauri.release-overlay.json
+
+      - name: Stage macOS DMG
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="${GITHUB_REF_NAME#v}"
+          VERSION="${VERSION#V}"
+          VERSION="${VERSION//\//-}"
+          if [ -z "$VERSION" ] || [ "$VERSION" = "main" ]; then
+            VERSION="0.0.0-${GITHUB_RUN_NUMBER}"
+          fi
+          DIST="dist/macos"
+          mkdir -p "$DIST"
+          DMG_DIR="src-tauri/target/${{ matrix.target }}/release/bundle/dmg"
+          if [ ! -d "$DMG_DIR" ]; then
+            echo "missing $DMG_DIR" >&2
+            ls -laR "src-tauri/target/${{ matrix.target }}/release/bundle" || true
+            exit 1
+          fi
+          shopt -s nullglob
+          for f in "$DMG_DIR"/*.dmg; do
+            cp "$f" "$DIST/ChatGPTTools-${VERSION}-macos-${{ matrix.arch }}.dmg"
+          done
+          shopt -u nullglob
+          ls -lh "$DIST"
+
+      - name: Upload macOS DMG
+        uses: actions/upload-artifact@v4
+        with:
+          name: chatgpt-tools-macos-${{ matrix.arch }}-dmg
+          path: dist/macos/*.dmg
+          if-no-files-found: error

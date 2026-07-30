@@ -1,5 +1,5 @@
 //! Discover Codex session SQLite databases under the Codex home.
-//! Adapted from CodexPlusPlus `codex-plus-core::codex_sqlite` (session DB discovery only).
+//! Discover local Codex session SQLite databases under Codex home.
 
 use std::ffi::{OsStr, OsString};
 use std::fs;

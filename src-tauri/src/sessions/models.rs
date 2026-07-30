@@ -1,5 +1,5 @@
 //! Session identity and delete/export result types.
-//! Adapted from CodexPlusPlus `codex-plus-core::models` (session-related subset).
+//! Session domain models (list rows, delete results, export payloads).
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]

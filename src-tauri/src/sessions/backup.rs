@@ -1,5 +1,5 @@
 //! JSON undo backups for deleted local sessions.
-//! Adapted from CodexPlusPlus `codex-plus-data::backup`.
+//! Undo backup store for deleted Codex sessions.
 
 use anyhow::Context;
 use serde_json::json;

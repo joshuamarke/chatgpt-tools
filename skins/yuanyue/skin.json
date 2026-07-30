@@ -1,0 +1,48 @@
+{
+  "id": "yuanyue",
+  "name": "圆月 · 海棠",
+  "nameEn": "Full Moon Begonia",
+  "description": "夜空下绽放的海棠花，圆月映照花枝；清冷浪漫的夜晚静谧",
+  "categories": ["nature", "art"],
+  "tags": [
+    "夜空",
+    "圆月",
+    "海棠",
+    "夜晚",
+    "月光",
+    "花卉",
+    "静谧"
+  ],
+  "previewGradient": "linear-gradient(135deg, #0a1a3a 0%, #1e3a6e 50%, #c9a8c0 100%)",
+  "accent": "#f5e8c0",
+  "port": 9335,
+  "assets": {
+    "css": "assets/yuanyue-skin.css",
+    "art": "assets/yuanyue-art.jpg",
+    "artMime": "image/jpeg",
+    "plugin": "assets/plugin.json",
+    "screenshot": "assets/screenshot.jpg"
+  },
+  "markers": {
+    "rootClass": "codex-yuanyue-skin",
+    "homeClass": "yuanyue-home",
+    "styleId": "codex-yuanyue-skin-style",
+    "chromeId": "codex-yuanyue-skin-chrome",
+    "stateKey": "__CODEX_YUANYUE_SKIN_STATE__",
+    "disabledKey": "__CODEX_YUANYUE_SKIN_DISABLED__",
+    "artVar": "--yuanyue-art"
+  },
+  "desktopTheme": {
+    "appearanceTheme": "dark",
+    "appearanceDarkCodeThemeId": "codex",
+    "appearanceLightChromeTheme": "{ accent = \"#f5e8c0\", contrast = 62, fonts = { code = \"SF Mono\", ui = \"PingFang SC\" }, ink = \"#e8d0ff\", opaqueWindows = true, semanticColors = { diffAdded = \"#a5f3fc\", diffRemoved = \"#fda4af\", skill = \"#c084fc\" }, surface = \"#0a1a3a\" }"
+  },
+  "appearance": "auto",
+  "art": {
+    "focusX": 0.78,
+    "focusY": 0.38,
+    "safeArea": "left",
+    "taskMode": "ambient"
+  },
+  "version": "3.0.0"
+}

@@ -609,7 +609,25 @@ html.codex-qingkong-skin main.main-surface .bg-token-main-surface-secondary {
   background-image: none !important;
 }
 
-/* ── 首页布局：不改宿主 flex 几何 ── */
+/*
+ * ── 首页布局（CDP 实测宿主 DOM）──
+ *
+ * .qingkong-home [role=main]
+ *   > div:first-child          banners（常空 h=0）
+ *   > div:nth-child(2)         中区 col：min-h-0 flex-1 pt-6 flex flex-col
+ *     > div:first-child        grow：flex grow basis-0 items-end justify-center pb-24
+ *       > div:first-child      标题壳 relative mx-auto w-[min(100%,var(--thread-content-max-width))]
+ *         > div:first-child    文案槽 flex min-h-28 items-end justify-center
+ *           > div              flex-col items-center → [data-feature=game-source]
+ *         > div.absolute       推荐卡轨 top-full mt-8（依赖壳 overflow:visible）
+ *     > div:nth-child(2)       composer 区
+ *
+ * 关键约束：
+ *   · 推荐卡轨是标题壳的 absolute top-full 子节点 → 壳的底边决定卡的落点
+ *   · 禁止改 grow 的 items-end（否则壳+卡整组上移）
+ *   · 做法：壳 align-self:stretch 吃满 grow 高度（底边仍在原处），
+ *     仅把文案盒 absolute 钉在壳内右上角；卡仍贴壳底 top-full
+ */
 html.codex-qingkong-skin .qingkong-home {
   /*
    * 对齐宿主 body 默认 --thread-content-max-width: 48rem（CDP 实测 768px）。
@@ -622,18 +640,36 @@ html.codex-qingkong-skin .qingkong-home {
   background: transparent !important;
 }
 
-.qingkong-home > div:first-child {
+/* banners + 中区：透明（不锁 flex / pt / items-end） */
+.qingkong-home > div:first-child,
+.qingkong-home > div:nth-child(2),
+.qingkong-home > div:has(> div [data-feature="game-source"]) {
   background: transparent !important;
 }
 
-.qingkong-home > div:first-child > div:first-child {
+/*
+ * grow：只透明 + 保 overflow 可见。
+ * 不改 align-items / justify-content / padding-bottom（宿主 items-end + pb-24）。
+ */
+.qingkong-home > div > div:has(> div [data-feature="game-source"]) {
   background: transparent !important;
+  overflow: visible !important;
 }
 
-/* 标题壳：透明，不二次裁切立绘 */
-.qingkong-home > div:first-child > div:first-child > div:first-child {
+/*
+ * 标题壳：
+ *   · align-self:stretch → 在 grow(row + items-end) 上拉满交叉轴高度
+ *   · 底边仍落在 grow 内容区底（与短壳 items-end 时相同）→ 卡轨 top-full 不跟着文案走
+ *   · 文案绝对定位到壳内右上，吃上方空白
+ */
+.qingkong-home > div > div > div:has([data-feature="game-source"]) {
   position: relative !important;
   isolation: isolate;
+  /* 单行 flex + 容器确定高度时，stretch 拉满 grow 交叉轴；height:100% 双保险 */
+  align-self: stretch !important;
+  height: 100% !important;
+  max-height: 100% !important;
+  min-height: 0 !important;
   overflow: visible !important;
   border: 0 !important;
   border-radius: 0 !important;
@@ -641,50 +677,78 @@ html.codex-qingkong-skin .qingkong-home {
   box-shadow: none !important;
   backdrop-filter: none !important;
   -webkit-backdrop-filter: none !important;
-  height: auto !important;
-  min-height: 0 !important;
   padding: 0 !important;
+  width: min(100%, var(--thread-content-max-width)) !important;
+  margin-inline: auto !important;
+  box-sizing: border-box !important;
 }
 
-.qingkong-home > div:first-child > div:first-child > div:first-child::before,
-.qingkong-home > div:first-child > div:first-child > div:first-child::after {
+.qingkong-home > div > div > div:has([data-feature="game-source"])::before,
+.qingkong-home > div > div > div:has([data-feature="game-source"])::after {
   content: none !important;
   display: none !important;
 }
 
-/* 文案区：相对标题壳左对齐（宿主默认 justify-center / items-center） */
-.qingkong-home > div:first-child > div:first-child > div:first-child > div:first-child {
-  position: relative;
+/*
+ * 文案槽：脱离文档流占位（避免把壳撑出「内容高度」）；
+ * 实际视觉由 game-source absolute 承担。
+ */
+.qingkong-home > div > div > div:has([data-feature="game-source"]) > div:first-child {
+  position: static;
   z-index: 1;
-  justify-content: flex-start !important;
-  align-items: flex-end !important;
   width: 100% !important;
+  min-height: 0 !important;
+  height: 0 !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  overflow: visible !important;
+  background: transparent !important;
+  pointer-events: none;
 }
 
-.qingkong-home > div:first-child > div:first-child > div:first-child > div:first-child > div:first-child {
-  align-items: flex-start !important;
-  width: 100% !important;
-  max-width: 100% !important;
+.qingkong-home
+  > div
+  > div
+  > div:has([data-feature="game-source"])
+  > div:first-child
+  > div:first-child {
+  position: static;
+  width: 0 !important;
+  max-width: none !important;
+  height: 0 !important;
+  margin: 0 !important;
+  gap: 0 !important;
+  overflow: visible !important;
+  pointer-events: none;
 }
 
 .qingkong-home [data-testid="home-icon"] {
   display: none !important;
 }
 
-/* 主标题：左对齐，与下方推荐卡轨左侧齐平 */
+/*
+ * 主标题整盒：钉在标题壳右上角（壳已 stretch 到 grow 顶）。
+ * 推荐卡仍是壳底 absolute top-full，位置不随文案上移。
+ */
 .qingkong-home [data-feature="game-source"] {
+  position: absolute !important;
+  top: 0.35rem !important;
+  right: 0.35rem !important;
+  left: auto !important;
+  bottom: auto !important;
+  z-index: 2;
   display: flex !important;
   flex-direction: column !important;
   align-items: flex-start !important;
-  justify-content: flex-end !important;
-  align-self: flex-start !important;
-  width: 100% !important;
-  max-width: 100% !important;
-  margin-inline: 0 !important;
+  justify-content: flex-start !important;
+  align-self: auto !important;
+  width: fit-content !important;
+  max-width: min(28rem, calc(100% - 0.7rem)) !important;
+  margin: 0 !important;
   color: #1e3a5f !important;
-  font-size: clamp(22px, 2.4vw, 36px) !important;
+  font-size: clamp(16px, 1.6vw, 26px) !important;
   line-height: 1.35 !important;
-  font-weight: 700 !important;
+  font-weight: 600 !important;
   text-align: left !important;
   letter-spacing: 0.06em;
   text-shadow:

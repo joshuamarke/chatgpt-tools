@@ -1,5 +1,5 @@
 //! Local Codex session list/delete (SQLite + rollout).
-//! Adapted from CodexPlusPlus `codex-plus-data::storage`.
+//! Local Codex session storage (SQLite + rollouts + undo backups).
 //!
 //! Undo / move / sort-key helpers are retained for Phase 2; allow dead_code until exposed.
 
