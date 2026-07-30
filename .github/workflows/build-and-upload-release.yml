@@ -156,15 +156,13 @@ jobs:
             if (Copy-Res $cand "logo.png") { break }
           }
 
-          @"
-ChatGPT Tools — 免安装便携版
-============================
-1. 解压整个「ChatGPT Tools」文件夹到任意目录（不要只拷贝单个 exe）
-2. 双击「ChatGPT Tools.exe」运行
-3. 应用内「检查更新」面向 NSIS 安装版；便携版请到 GitHub Releases 下载新的 portable.zip 覆盖
-
-Version: $version
-"@ | Set-Content -Path (Join-Path $portableApp "使用说明.txt") -Encoding UTF8
+          @(
+            "ChatGPT Tools portable build",
+            "1. Extract the whole folder",
+            "2. Run ChatGPT Tools.exe",
+            "3. In-app update targets the NSIS installer build; portable users re-download zip",
+            "Version: $version"
+          ) | Set-Content -Path (Join-Path $portableApp "readme.txt") -Encoding UTF8
 
           $portableZip = Join-Path $dist "ChatGPTTools-$version-windows-x64-portable.zip"
           if (Test-Path $portableZip) { Remove-Item $portableZip -Force }
