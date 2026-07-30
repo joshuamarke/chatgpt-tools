@@ -6,7 +6,7 @@ ChatGPT Tools 是面向 ChatGPT / Codex **桌面端**的本机工具箱。皮肤
 
 | 功能域 | 用户价值 | 代码落点 | IPC | 状态 |
 |--------|----------|----------|-----|------|
-| **Skins** | 换肤、导入导出、自定义壁纸、云目录 | `engine/` · `skins/` · `src-tauri/cdp/` · `cloud/` · `src/skin-api.js` | `window.skinAPI` | 已落地 |
+| **Skins** | 换肤、导入导出、自定义壁纸 | `engine/` · `skins/` · `src-tauri/cdp/` · `src/skin-api.js` | `window.skinAPI` | 已落地 |
 | **Sessions** | 浏览 / 导出 / 清理本机 Codex 与 Grok 会话；Codex 另含 provider 修复与 index 清理 | `src-tauri/sessions/` · `src/features/sessions/` | `window.sessionAPI` | Phase 2 + Grok Tab |
 | **Providers** | 渠道供应商：预设添加、校验启用、Codex 双写 / Grok MCP 保留、live 状态 | `src-tauri/providers/` · `src/features/providers/` | `window.providerAPI` | 可用闭环 |
 | **Future** | 更多本机工具 | `src-tauri/<domain>/` · `src/features/<domain>/` | 独立 `*API` | 规划中 |
@@ -30,7 +30,7 @@ src/                          # GUI 壳（vanilla JS，无 bundler）
   skin-api.js                 # 皮肤 IPC
   features/<domain>/          # 各功能前端模块
 src-tauri/src/
-  cdp/ · cloud/ · engine.rs   # 皮肤相关
+  cdp/ · engine.rs            # 皮肤相关
   sessions/                   # 会话功能域
   <future>/                   # 下一个功能域
 engine/ · skins/              # 仅皮肤

@@ -1,25 +1,19 @@
 /**
- * Inject production cloud / updater endpoints at **package time only**.
+ * Inject package-time updater endpoints (and optional extra hosts).
  *
  * Sources (priority high → low):
  *   1) process env (CI Secrets / shell)
- *   2) keys/release.env  (local, gitignored)
+ *   2) keys/release.env  (local only, entire keys/ is gitignored)
  *   3) GitHub Releases default from repo-meta / GITHUB_REPOSITORY
  *      → https://github.com/{owner}/{repo}/releases/latest/download/latest.json
- *
- * Cloud CDN URL is optional (open-source builds can ship with bundled skins only).
- * Updater endpoints default to the public GitHub latest.json when the repo is known.
  *
  * Writes (gitignored):
  *   src-tauri/gen/release-config.json          → embedded by build.rs
  *   src-tauri/gen/tauri.release-overlay.json   → `tauri build --config …`
  *
  * Env:
- *   CODEX_SKIN_CLOUD_URL          optional production cloud API base
- *   CODEX_SKIN_CLOUD_EXTRA_HOSTS  optional extra allowlist hosts
  *   TAURI_UPDATER_ENDPOINTS       optional override; else GitHub latest.json
  *   REQUIRE_RELEASE_SECRETS=1     fail if no updater endpoint can be resolved
- *   REQUIRE_CLOUD_URL=1           also require CODEX_SKIN_CLOUD_URL
  *   SKIP_RELEASE_INJECT=1         empty inject (smoke builds)
  */
 import fs from "node:fs";
@@ -218,8 +212,7 @@ if (requireSecrets) {
   if (missing.length) {
     console.error(
       `[inject-release-config] missing required config: ${missing.join(", ")}\n` +
-        `  Set CI Secrets, keys/release.env, or create the GitHub repo and stamp meta.\n` +
-        `  See keys/release.env.example and keys/README.md`
+        `  Set TAURI_UPDATER_ENDPOINTS, or ensure GITHUB_REPOSITORY / src/repo-meta.json is set.`
     );
     process.exit(1);
   }

@@ -30,13 +30,9 @@ pnpm-debug.log*
 .env.*
 !.env.example
 
-# Tauri updater signing private key (public key lives in tauri.conf.json)
-keys/*.key
-!keys/*.key.pub
-!keys/README.md
-# Production cloud / updater endpoints (same secrecy class as private keys)
-keys/release.env
-!keys/release.env.example
+# Local signing keys / package-time env — entire directory stays off git
+# (public key for updater lives in src-tauri/tauri.conf.json)
+keys/
 
 # OS
 .DS_Store

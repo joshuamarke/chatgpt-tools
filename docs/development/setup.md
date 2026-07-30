@@ -61,25 +61,6 @@ node engine/cli.mjs apply --skin-id dream --restart true
 node engine/cli.mjs restore
 ```
 
-## 云端开发预览（CDN）
-
-本机对接 `chatgpt-tools-cdn`（覆盖生产默认，改用本地 `http://127.0.0.1:8788/v1`）：
-
-```powershell
-# 终端 1：CDN
-cd E:\demo\chatgpt-tools-cdn
-npm run serve
-
-# 终端 2：客户端
-cd E:\demo\chatgpt-tools
-$env:CODEX_SKIN_CLOUD_URL = "http://127.0.0.1:8788/v1"
-npm run dev
-```
-
-关闭云端：`$env:CODEX_SKIN_CLOUD_DISABLED = "1"`。  
-生产云端 baseUrl **仅在打包时**由 Secrets / `keys/release.env` 注入（勿写入源码或文档）；开发默认本机 `http://127.0.0.1:8788/v1`。安装包默认只内置 `qingkong`，其它皮肤走 catalog。  
-完整契约见 [../cloud-integration.md](../cloud-integration.md)；发版机密见 [../../keys/README.md](../../keys/README.md)。
-
 ## 日志位置
 
 状态根目录下：
@@ -87,9 +68,7 @@ npm run dev
 - `diag.log` — 管理器诊断  
 - `injector.log` / `injector-error.log` — 注入守护  
 - `state.json` — 当前皮肤与 injector PID  
-- `settings.json` — 手动指定的客户端路径（可含 `cloud` 段）  
-- `cloud\` — catalog / announcements 缓存  
-- `cache\skins\` — 云端皮肤缓存  
+- `settings.json` — 手动指定的客户端路径等  
 
 ## 图标
 
@@ -107,7 +86,7 @@ npm run tauri -- icon logo.png
 
 - 工作流：`.github/workflows/release-assets.yml`、`.github/workflows/pr-build.yml`
 - 更新日志：`CHANGELOG.md`
-- 签名私钥 Secret：`TAURI_SIGNING_PRIVATE_KEY`（见 [`keys/README.md`](../../keys/README.md)）
-- 应用内更新默认：`https://github.com/<owner>/<repo>/releases/latest/download/latest.json`（CI 自动注入，无需手写 endpoint）
+- 签名私钥 Secret：`TAURI_SIGNING_PRIVATE_KEY`（仅放 Actions Secrets，勿提交仓库）
+- 应用内更新默认：`https://github.com/<owner>/<repo>/releases/latest/download/latest.json`（CI 自动注入）
 - 关于页 GitHub 按钮：`src/repo-meta.json`（`npm run stamp:repo` 或 CI 写入）
 - 完整步骤见仓库根目录 [README.md](../../README.md) 的「GitHub Releases」一节

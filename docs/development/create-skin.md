@@ -105,7 +105,7 @@ skins/my-skin/
 | 字段 | 说明 |
 |------|------|
 | `id` | 唯一 ID；用户导入同 id 会覆盖内置 |
-| `categories` | **GUI 侧栏分类**（字符串数组）。取值须与 `src/skin-categories.json` 中 `kind=filter` 的 `id` 一致，如 `anime` / `tech` / `nature` / `game` / `art` / `minimal`。可多选；GUI **不再**用名称/tags 关键词猜测分类。云端 catalog 可写同名字段，本地 `skin.json` 优先 |
+| `categories` | **GUI 侧栏分类**（字符串数组）。取值须与 `src/skin-categories.json` 中 `kind=filter` 的 `id` 一致，如 `anime` / `tech` / `nature` / `game` / `art` / `minimal`。可多选；GUI **不再**用名称/tags 关键词猜测分类 |
 | `tags` | 展示用标签（卡片上最多显示 3 个），**不**驱动侧栏分类 |
 | `appearance` | `auto`（跟随 Codex/系统）\| `light` \| `dark` |
 | `art.mode` | **壁纸策略**：`wallpaper`（默认，全窗）\| `token-only`（只注入 CSS 变量，皮肤自挂）\| `none`（纯样式无图） |

@@ -5,7 +5,7 @@
 | 脚本 | 用途 | 入口 |
 |------|------|------|
 | `stamp-repo-meta.mjs` | 写入 `src/repo-meta.json`（GitHub 链接 / 默认 updater URL） | `npm run stamp:repo`；CI 自动 |
-| `inject-release-config.mjs` | 打包注入云端 / updater（默认 GitHub `latest.json`） | `npm run build` / `inject:release` |
+| `inject-release-config.mjs` | 打包注入 updater endpoints（默认 GitHub `latest.json`） | `npm run build` / `inject:release` |
 | `stage-bundle-skins.mjs` | 安装包仅内置默认皮肤 | `beforeBuildCommand` / `stage:skins` |
 | `ensure-resources.mjs` | 安装后资源完整性提示 | `postinstall` |
 | `build-latest-json.mjs` | 从 Release 资产生成 Tauri `latest.json` | Release workflow |

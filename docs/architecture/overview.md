@@ -72,12 +72,9 @@
 扩展：`enginePaths` / `engineVersion` / `hostStatus({ force })`；  
 status / hostStatus 含 `paused` / `protocol` / `lifecycle` / `lifecycleRaw` / `confidence` / `canHotApply` / `needsRestartForInject` / `shellOk` / `artOk`。
 
-云端扩展（见 [../cloud-integration.md](../cloud-integration.md)）：  
-`cloudStatus` / `cloudRefresh` / `cloudAnnouncements` / `cloudMarkAnnouncementRead` /  
-`cloudDownloadSkin` / `cloudCheckUpdate` / `cloudClearSkinCache`。  
-皮肤来源：`bundled` \| `user` \| `cache` \| `remote`；下载仅 Rust + catalog 白名单。
+皮肤来源：`bundled` \| `user`（本机导入）等。
 
-**GUI 轮询**：pill 用轻量 `hostStatus`（TTL 缓存 + 滞回）；全量 `status` 仅在启动 / 换肤 / 导入后刷新皮肤列表；启动后异步 `cloudRefresh` 合并远程目录与公告。
+**GUI 轮询**：pill 用轻量 `hostStatus`（TTL 缓存 + 滞回）；全量 `status` 仅在启动 / 换肤 / 导入后刷新皮肤列表。
 
 ### 4.2 引擎 CLI
 

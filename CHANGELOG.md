@@ -6,9 +6,8 @@
 
 - 多功能桌面工具箱：皮肤引擎、会话管理、供应商 / 本地路由等模块。
 - 换肤热路径以纯 Rust CDP 为主（apply / status / restore 等）。
-- 云端 catalog / 公告 / 版本检查对接 CDN 契约。
 - 新增 GitHub Actions：`Release assets`（发布 Release 后自动上传 Win/macOS 安装包）与 `PR build artifacts`（PR/main 冒烟构建）。
-- GitHub Release 增加 Windows **免安装 portable zip**；应用检查更新改为 **`tauri-plugin-updater`**（`latest.json` + minisign 签名，多 endpoint / GitHub 镜像 fallback）。
+- GitHub Release 增加 Windows **免安装 portable zip**；应用检查更新使用 **`tauri-plugin-updater`**（`latest.json` + minisign 签名）。
 
 ## 如何写下一版
 

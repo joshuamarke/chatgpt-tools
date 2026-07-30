@@ -100,23 +100,13 @@ npm run build
 | 环境 | 皮肤来源 |
 |------|----------|
 | **开发** `npm run dev` | 仓库完整 `skins/`（含全部主题，便于调试） |
-| **安装包** `npm run build` | 仅 **`qingkong`**（`beforeBuildCommand` → `scripts/stage-bundle-skins.mjs`） |
-| **其余皮肤** | 运行时从 **打包时注入** 的云端 catalog 拉取（`cloudDownloadSkin` 缓存到本机） |
-
-生产云端 baseUrl / updater endpoints **不写进仓库**，与私钥一样只在打包阶段注入（`keys/release.env` 或 CI Secrets）。见 [`keys/README.md`](keys/README.md)。
+| **安装包** `npm run build` | 仅 **`qingkong`**（`beforeBuildCommand` → `scripts/stage-bundle-skins.mjs`）；其余可本机导入 |
 
 覆盖内置列表（构建时）：
 
 ```powershell
 $env:CODEX_SKIN_BUNDLE_SKINS = "qingkong"
 npm run build
-```
-
-本地联调 CDN 时：
-
-```powershell
-$env:CODEX_SKIN_CLOUD_URL = "http://127.0.0.1:8788/v1"
-npm run dev
 ```
 
 ---
@@ -141,10 +131,10 @@ https://github.com/<owner>/<repo>/releases/latest/download/latest.json
 
 推送前请在 **Settings → Secrets and variables → Actions** 配置：
 
-- **`TAURI_SIGNING_PRIVATE_KEY`**（`npx tauri signer generate -w keys/chatgpt-tools.key --ci` 生成的私钥全文）  
-- 可选：`TAURI_SIGNING_PRIVATE_KEY_PASSWORD`、独立 CDN 的 `CODEX_SKIN_CLOUD_URL` / `TAURI_UPDATER_ENDPOINTS`
+- **`TAURI_SIGNING_PRIVATE_KEY`**（本机 `npx tauri signer generate` 生成的私钥全文；**不要**提交到仓库）  
+- 可选：`TAURI_SIGNING_PRIVATE_KEY_PASSWORD`、`TAURI_UPDATER_ENDPOINTS`（默认已指向本仓库 `latest.json`）
 
-推 `main` 后 **PR build** 应冒烟通过；再按下方步骤发首个 Release。详情见 [`keys/README.md`](keys/README.md)。
+推 `main` 后 **PR build** 应冒烟通过；再按下方步骤发首个 Release。
 
 ### 工作流
 
@@ -175,7 +165,7 @@ git push origin main --tags
    - 描述粘贴 `CHANGELOG.md` 中对应段落（这就是 Releases 页显示的更新日志）
    - 选择 **Publish release**（不要只存 Draft；workflow 只监听 `published`）
 5. 确认 Actions Secret **`TAURI_SIGNING_PRIVATE_KEY`** 已配置（见上）。  
-   云端 CDN **不是**必需；不配时 updater 自动指向本仓库 Releases 的 `latest.json`。
+   未覆盖 `TAURI_UPDATER_ENDPOINTS` 时，updater 自动指向本仓库 Releases 的 `latest.json`。
 6. 等待 **Release assets** 跑完。资产会自动挂到该 Release：
 
 | 资产 | 说明 |
@@ -192,7 +182,7 @@ git push origin main --tags
 
 - 关于页「检查更新」→ 官方 updater 拉取 `latest.json`
 - **默认 endpoint**：本仓库 `releases/latest/download/latest.json`（打包时由 `inject-release-config` 写入）
-- 可选：`TAURI_UPDATER_ENDPOINTS` 覆盖或前置 CDN 镜像（多地址 fallback）
+- 可选：`TAURI_UPDATER_ENDPOINTS` 覆盖（多地址 fallback）
 - 仓库内 `tauri.conf.json` 的 `endpoints` 保持为空，只在打包 overlay 合并
 - 验签：`createUpdaterArtifacts` + CI 私钥签发 `.sig`
 - 关于页「查看开源协议」旁 **GitHub** 按钮 → 仓库主页（`src/repo-meta.json`）

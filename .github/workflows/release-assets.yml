@@ -56,12 +56,8 @@ jobs:
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-          # GITHUB_REPOSITORY is automatic → default updater endpoint =
-          # https://github.com/<owner>/<repo>/releases/latest/download/latest.json
+          # GITHUB_REPOSITORY → default updater latest.json on this repo
           REQUIRE_RELEASE_SECRETS: "1"
-          # Cloud CDN optional; only required if you set REQUIRE_CLOUD_URL=1
-          CODEX_SKIN_CLOUD_URL: ${{ secrets.CODEX_SKIN_CLOUD_URL }}
-          CODEX_SKIN_CLOUD_EXTRA_HOSTS: ${{ secrets.CODEX_SKIN_CLOUD_EXTRA_HOSTS }}
           # Optional override; empty → GitHub Releases latest.json
           TAURI_UPDATER_ENDPOINTS: ${{ secrets.TAURI_UPDATER_ENDPOINTS }}
         run: npm run build
@@ -246,8 +242,6 @@ Version: $version
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
           REQUIRE_RELEASE_SECRETS: "1"
-          CODEX_SKIN_CLOUD_URL: ${{ secrets.CODEX_SKIN_CLOUD_URL }}
-          CODEX_SKIN_CLOUD_EXTRA_HOSTS: ${{ secrets.CODEX_SKIN_CLOUD_EXTRA_HOSTS }}
           TAURI_UPDATER_ENDPOINTS: ${{ secrets.TAURI_UPDATER_ENDPOINTS }}
         run: |
           node scripts/inject-release-config.mjs

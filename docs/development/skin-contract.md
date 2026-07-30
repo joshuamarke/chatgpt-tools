@@ -154,7 +154,7 @@ html.codex-my-skin.skins-art-wide .composer-surface-chrome {
 | 全窗/原生/建议卡**默认能力** | 引擎 → `immersive-skin.css` | 全部皮肤（基线） |
 | 视觉契约文档 | 引擎文档 | 指导制作，非运行时锁 |
 | 色板、品牌、布局细化、自定义样式 | 皮肤作者 → `skins/<id>/` | 单皮肤，作者自实现 |
-| GUI 侧栏分类归属 | 皮肤 / catalog → `categories: string[]` | 须匹配 `src/skin-categories.json` 的 filter id；**禁止**在 `app.js` 用关键词硬编码 |
+| GUI 侧栏分类归属 | 皮肤 `categories: string[]` | 须匹配 `src/skin-categories.json` 的 filter id；**禁止**在 `app.js` 用关键词硬编码 |
 | 侧栏分类列表与文案 | 产品 → `src/skin-categories.json` | 增删分类改此文件，不必改皮肤 |
 
 **产品方向**：多皮肤 + 共享 core + 框架提供自适应全窗能力；个性化在框架上由皮肤自己细化；引擎不强制限制皮肤 CSS。
