@@ -13,7 +13,7 @@
     "url": "https://github.com/joshuamarke/chatgpt-tools/issues"
   },
   "scripts": {
-    "dev": "tauri dev",
+    "dev": "node scripts/inject-release-config.mjs && tauri dev --config src-tauri/gen/tauri.release-overlay.json",
     "build": "node scripts/inject-release-config.mjs && tauri build --config src-tauri/gen/tauri.release-overlay.json",
     "build:smoke": "node scripts/inject-release-config.mjs && tauri build --config src-tauri/gen/tauri.release-overlay.json",
     "stage:skins": "node scripts/stage-bundle-skins.mjs",
