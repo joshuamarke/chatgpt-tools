@@ -9,6 +9,8 @@
 
 > 非 OpenAI 官方产品。不修改官方 `app.asar` / 安装包签名。皮肤通过本机 `127.0.0.1` CDP 注入；会话管理读写本机 Codex 数据目录。皮肤引擎参考 **[Codex Dream Skin](https://github.com/Fei-Away/Codex-Dream-Skin)** 项目实现，感谢原作者的方案。
 
+*![](https://jsd.itbaihui.com/gh/useritotoo/htmcssimg/2a7e74f692ca384d95cbf2012d7a3071.jpg)*
+
 ---
 
 ## 功能一览
