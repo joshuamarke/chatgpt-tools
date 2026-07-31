@@ -38,10 +38,10 @@ fn bool_str(v: bool) -> &'static str {
     }
 }
 
-async fn run_cli_async(args: Vec<String>) -> Result<Value, String> {
+async fn run_engine_async(args: Vec<String>) -> Result<Value, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
-        // Prefer native Rust CDP for hot apply/status; Node for cold launch & package ops.
+        // Single path: in-process Rust engine only (no Node spawn).
         engine::run_engine(&refs)
     })
     .await
@@ -74,11 +74,10 @@ fn enrich_previews(mut status: Value) -> Result<Value, EngineError> {
         return Ok(status);
     };
 
-    // 单次 status 总预览体积上限，避免 WebView IPC 撑爆导致界面卡死/白屏
-    const MAX_TOTAL_PREVIEW: usize = 12_000_000;
-    // Prefer assets/screenshot.*; art fallback still capped so multi-MB wallpapers
-    // do not flood IPC (full art inject uses staged path, not this preview path).
-    const MAX_SINGLE_PREVIEW: usize = 4_000_000;
+    // Keep status IPC light so first paint is not multi-second base64 work.
+    // Full wallpapers are for inject only — GUI cards use screenshot/preview thumbs.
+    const MAX_TOTAL_PREVIEW: usize = 2_500_000;
+    const MAX_SINGLE_PREVIEW: usize = 350_000;
     let mut total = 0usize;
 
     for skin in skins.iter_mut() {
@@ -94,16 +93,15 @@ fn enrich_previews(mut status: Value) -> Result<Value, EngineError> {
             break;
         }
 
-        // preview → screenshot → art（引擎 resolve-asset 的 preview 已封装优先级）
-        let kinds = ["preview", "screenshot", "art"];
-        let mut loaded = false;
+        // Never pull multi-MB `art` into status previews (was a major boot stall).
+        // resolve-asset("preview") already prefers screenshot over art when present.
+        let kinds = ["preview", "screenshot"];
         for kind in kinds {
             match engine::run_engine(&["resolve-asset", "--skin-id", &id, "--kind", kind]) {
                 Ok(resolved) => {
                     if let Some(path) = resolved.get("path").and_then(|p| p.as_str()) {
                         if let Ok(bytes) = engine::read_file_bytes(std::path::Path::new(path)) {
                             if bytes.len() > MAX_SINGLE_PREVIEW {
-                                // 过大则尝试下一个 kind（例如 art 过大但已有 screenshot 时不会走到这里）
                                 continue;
                             }
                             if total + bytes.len() > MAX_TOTAL_PREVIEW {
@@ -119,7 +117,6 @@ fn enrich_previews(mut status: Value) -> Result<Value, EngineError> {
                                     Value::String(kind.to_string()),
                                 );
                             }
-                            loaded = true;
                             break;
                         }
                     }
@@ -127,14 +124,13 @@ fn enrich_previews(mut status: Value) -> Result<Value, EngineError> {
                 Err(_) => continue,
             }
         }
-        let _ = loaded;
     }
     Ok(status)
 }
 
 #[tauri::command]
 pub async fn status() -> Result<Value, String> {
-    let raw = run_cli_async(vec!["status".into()]).await?;
+    let raw = run_engine_async(vec!["status".into()]).await?;
     tauri::async_runtime::spawn_blocking(move || {
         let mut status = enrich_previews(raw)?;
         // Merge disk catalog (network refresh is explicit via cloud_refresh).
@@ -158,7 +154,7 @@ pub async fn status() -> Result<Value, String> {
 #[tauri::command]
 pub async fn host_status(force: Option<bool>) -> Result<Value, String> {
     let force = force.unwrap_or(false);
-    run_cli_async(vec![
+    run_engine_async(vec![
         "host-status".into(),
         "--force".into(),
         bool_str(force).into(),
@@ -168,14 +164,14 @@ pub async fn host_status(force: Option<bool>) -> Result<Value, String> {
 
 #[tauri::command]
 pub async fn detect() -> Result<Value, String> {
-    run_cli_async(vec!["detect".into()]).await
+    run_engine_async(vec!["detect".into()]).await
 }
 
 #[tauri::command]
 pub async fn apply(skin_id: String, restart: Option<bool>) -> Result<Value, String> {
     // Default false: prefer hot-switch; GUI checkbox opts into client restart.
     let restart = restart.unwrap_or(false);
-    run_cli_async(vec![
+    run_engine_async(vec![
         "apply".into(),
         "--skin-id".into(),
         skin_id,
@@ -188,7 +184,7 @@ pub async fn apply(skin_id: String, restart: Option<bool>) -> Result<Value, Stri
 #[tauri::command]
 pub async fn restore(restore_theme: Option<bool>) -> Result<Value, String> {
     let restore_theme = restore_theme.unwrap_or(true);
-    run_cli_async(vec![
+    run_engine_async(vec![
         "restore".into(),
         "--restore-theme".into(),
         bool_str(restore_theme).into(),
@@ -198,13 +194,13 @@ pub async fn restore(restore_theme: Option<bool>) -> Result<Value, String> {
 
 #[tauri::command]
 pub async fn pause() -> Result<Value, String> {
-    run_cli_async(vec!["pause".into()]).await
+    run_engine_async(vec!["pause".into()]).await
 }
 
 #[tauri::command]
 pub async fn resume(restart: Option<bool>) -> Result<Value, String> {
     let restart = restart.unwrap_or(false);
-    run_cli_async(vec![
+    run_engine_async(vec![
         "resume".into(),
         "--restart".into(),
         bool_str(restart).into(),
@@ -215,7 +211,7 @@ pub async fn resume(restart: Option<bool>) -> Result<Value, String> {
 /// Launch ChatGPT/Codex; re-apply last session skin when available.
 #[tauri::command]
 pub async fn start_host() -> Result<Value, String> {
-    run_cli_async(vec!["start-host".into()]).await
+    run_engine_async(vec!["start-host".into()]).await
 }
 
 #[tauri::command]
@@ -233,7 +229,7 @@ pub async fn export_skin(app: AppHandle, skin_id: String) -> Result<Value, Strin
         return Ok(json!({ "ok": false, "canceled": true }));
     };
     let out = file_path_to_string(path)?;
-    run_cli_async(vec![
+    run_engine_async(vec![
         "export-skin".into(),
         "--skin-id".into(),
         skin_id,
@@ -277,7 +273,7 @@ pub async fn import_skin(app: AppHandle) -> Result<Value, String> {
     };
     let package_path = file_path_to_string(path)?;
 
-    let info = run_cli_async(vec![
+    let info = run_engine_async(vec![
         "inspect-skin".into(),
         "--path".into(),
         package_path.clone(),
@@ -355,7 +351,7 @@ pub async fn import_skin(app: AppHandle) -> Result<Value, String> {
         return Ok(json!({ "ok": false, "canceled": true }));
     }
 
-    let mut result = run_cli_async(vec![
+    let mut result = run_engine_async(vec![
         "import-skin".into(),
         "--path".into(),
         package_path,
@@ -371,7 +367,7 @@ pub async fn import_skin(app: AppHandle) -> Result<Value, String> {
 
 #[tauri::command]
 pub async fn delete_skin(skin_id: String) -> Result<Value, String> {
-    run_cli_async(vec!["delete-skin".into(), "--skin-id".into(), skin_id]).await
+    run_engine_async(vec!["delete-skin".into(), "--skin-id".into(), skin_id]).await
 }
 
 #[derive(Debug, Deserialize, serde::Serialize)]
@@ -390,23 +386,21 @@ pub struct WallpaperPayload {
     pub radius: Option<serde_json::Value>,
     pub overlay: Option<serde_json::Value>,
     pub opacity: Option<serde_json::Value>,
+    pub appearance: Option<String>,
+    pub focus_x: Option<serde_json::Value>,
+    pub focus_y: Option<serde_json::Value>,
+    pub safe_area: Option<String>,
+    pub task_mode: Option<String>,
 }
 
 #[tauri::command]
 pub async fn design_wallpaper(payload: WallpaperPayload) -> Result<Value, String> {
     let value = serde_json::to_value(&payload).map_err(|e| e.to_string())?;
-    let root = engine::project_root();
-    let tmp = root.join(".tmp-wallpaper-payload.json");
-    std::fs::write(&tmp, value.to_string()).map_err(|e| e.to_string())?;
-    let path_str = tmp.to_string_lossy().to_string();
-    let result = run_cli_async(vec![
-        "design-wallpaper".into(),
-        "--payload".into(),
-        path_str,
-    ])
-    .await;
-    let _ = std::fs::remove_file(&tmp);
-    result
+    tauri::async_runtime::spawn_blocking(move || {
+        crate::cdp::design_wallpaper_native(&value).map_err(map_err)
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
@@ -422,12 +416,12 @@ pub async fn choose_app(app: AppHandle) -> Result<Value, String> {
         return Ok(json!({ "canceled": true }));
     };
     let p = file_path_to_string(path)?;
-    run_cli_async(vec!["set-app-path".into(), "--path".into(), p]).await
+    run_engine_async(vec!["set-app-path".into(), "--path".into(), p]).await
 }
 
 #[tauri::command]
 pub async fn clear_app_path() -> Result<Value, String> {
-    run_cli_async(vec!["clear-app-path".into()]).await
+    run_engine_async(vec!["clear-app-path".into()]).await
 }
 
 #[tauri::command]
@@ -500,12 +494,12 @@ pub async fn reveal_export(app: AppHandle, file_path: String) -> Result<(), Stri
 
 #[tauri::command]
 pub async fn engine_paths() -> Result<Value, String> {
-    run_cli_async(vec!["paths".into()]).await
+    run_engine_async(vec!["paths".into()]).await
 }
 
 #[tauri::command]
 pub async fn engine_version() -> Result<Value, String> {
-    run_cli_async(vec!["version".into()]).await
+    run_engine_async(vec!["version".into()]).await
 }
 
 /// Open (or focus) the independent Skin DevTools window.
@@ -560,7 +554,9 @@ pub async fn open_devtools(app: AppHandle) -> Result<Value, String> {
         }
     });
 
-    // Packaged builds: same WebView chrome lock as main (right-click / F12).
+    // Debug: allow inspect on Skin DevTools window too; release: lock chrome.
+    #[cfg(debug_assertions)]
+    crate::webview_guard::enable_dev_inspect_window(&win);
     #[cfg(not(debug_assertions))]
     crate::webview_guard::harden_window(&win);
 

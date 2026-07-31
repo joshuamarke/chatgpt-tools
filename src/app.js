@@ -4004,58 +4004,70 @@ window.addEventListener("focus", () => {
 });
 
 (async () => {
-  // 先保证壳可见：即使后端失败，header / 空网格 / toast 仍应渲染
+  // ── First paint (sync-ish): shell + overview scaffold before any heavy invoke ──
+  // Do not await force host probe / full status here — those were the multi-second
+  // white-screen stall (CDP timeouts when ChatGPT is offline + base64 previews).
+  try {
+    ensureOverviewScaffold();
+    setMainView("overview");
+    paintPromo(0);
+    if (pillCodex) {
+      pillCodex.textContent = "连接中…";
+      pillCodex.className = "pill";
+    }
+  } catch {
+    /* ignore */
+  }
+
+  // Window chrome + tray prefs: non-critical for first content paint
   try {
     await setupWindowControls();
   } catch {
     /* ignore */
   }
-
-  // Tray / close-to-tray prefs + provider switch events from tray menu
   try {
     bindTraySettingsUi();
     bindProviderTrayEvents();
-    await loadTrayUiSettings();
+    // Fire-and-forget: do not block overview on settings round-trip
+    void loadTrayUiSettings().catch(() => {});
   } catch {
     /* ignore */
   }
 
-  // Sidebar categories from skin-categories.json (not hardcoded skin membership)
-  try {
-    await loadSkinCategories();
-  } catch {
-    renderCategoryNav();
-  }
-
-  // Default promo until cloud responds
-  paintPromo(0);
-
-  // 默认进入概览：先画常驻骨架；环境检测改为手动「刷新检测」（启动不自动跑）
-  try {
-    ensureOverviewScaffold();
-    setMainView("overview");
-  } catch {
-    /* ignore */
-  }
-
-  try {
-    pillCodex.textContent = "连接中…";
-    pillCodex.className = "pill";
-    // Light host probe first (fast pill), then full catalog
+  // Sidebar categories (local JSON) — cheap; still don't block host/status
+  void loadSkinCategories().catch(() => {
     try {
-      await pollHostStatus(true);
+      renderCategoryNav();
     } catch {
-      /* full refresh may still work */
+      /* ignore */
     }
-    await refresh();
-    scheduleHostPoll();
-    // Cloud: announcements + catalog merge (async, non-fatal)
+  });
+
+  // ── Background data (parallel, non-blocking for shell) ──
+  // Soft host poll first (uses TTL cache, short CDP timeouts). Avoid force on boot.
+  void pollHostStatus(false)
+    .catch(() => null)
+    .finally(() => {
+      scheduleHostPoll();
+    });
+
+  void refresh()
+    .catch((err) => {
+      if (pillCodex && !latestHost) {
+        pillCodex.textContent = "引擎未就绪";
+        pillCodex.className = "pill warn";
+      }
+      if (pillActive) pillActive.textContent = "当前皮肤：—";
+      if (grid && !latestStatus?.skins?.length) {
+        grid.innerHTML = `<article class="card"><div class="meta"><h2>无法加载皮肤列表</h2><p>${escapeHtml(friendlyError(err))}</p><p class="muted">请确认用 <code>npm run dev</code> 或安装包启动本应用。</p></div></article>`;
+      }
+      showToast(friendlyError(err), "error");
+    });
+
+  // Cloud: announcements + catalog merge (already delayed internally)
+  try {
     bootCloud();
-  } catch (err) {
-    pillCodex.textContent = "引擎未就绪";
-    pillCodex.className = "pill warn";
-    pillActive.textContent = "当前皮肤：—";
-    grid.innerHTML = `<article class="card"><div class="meta"><h2>无法加载皮肤列表</h2><p>${escapeHtml(friendlyError(err))}</p><p class="muted">请确认用 <code>npm run dev</code> 启动，并已安装 Node.js 18+。</p></div></article>`;
-    showToast(friendlyError(err), "error");
+  } catch {
+    /* ignore */
   }
 })();

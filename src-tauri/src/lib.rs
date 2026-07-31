@@ -9,8 +9,7 @@ mod providers;
 mod proxy;
 mod sessions;
 mod tray;
-/// Release-only: disable GUI WebView right-click + F12 (see module docs).
-#[cfg(not(debug_assertions))]
+/// GUI WebView inspect policy (debug allow / release block). See module docs.
 pub(crate) mod webview_guard;
 
 use tauri::{Manager, RunEvent, WindowEvent};
@@ -28,22 +27,25 @@ pub fn run() {
         std::env::set_var("CODEX_SKIN_APP_VERSION", "1.1.12");
     }
 
-    let mut builder = tauri::Builder::default();
+    // Rebind (not `mut`) so debug builds — which skip the release-only plugins
+    // below — do not warn about unused mutability.
+    let builder = tauri::Builder::default();
 
-    // Second launch focuses the existing instance (required for tray-resident apps).
-    #[cfg(any(target_os = "macos", windows, target_os = "linux"))]
-    {
-        builder = builder.plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
-            tray::show_main_window(app);
-        }));
-    }
+    // Second launch focuses the existing instance (tray-resident apps).
+    // Debug only: skip single-instance so `tauri dev` is never swallowed by an
+    // already-running *release* install (same bundle id) — that made F12/右键
+    // look "broken in dev" while the focused window was actually packaged.
+    #[cfg(all(
+        not(debug_assertions),
+        any(target_os = "macos", windows, target_os = "linux")
+    ))]
+    let builder = builder.plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+        tray::show_main_window(app);
+    }));
 
     // Packaged/release only: strip WebView right-click menu + F12 / DevTools hotkeys.
-    // `tauri dev` (debug) keeps browser-like inspect. Unrelated to Skin DevTools / CDP.
     #[cfg(not(debug_assertions))]
-    {
-        builder = builder.plugin(webview_guard::plugin());
-    }
+    let builder = builder.plugin(webview_guard::plugin());
 
     builder
         .plugin(tauri_plugin_dialog::init())
@@ -73,9 +75,7 @@ pub fn run() {
                     resource_dir.join(".."),
                 ];
                 for c in candidates {
-                    if c.join("engine").join("cli.mjs").is_file()
-                        || c.join("engine").join("manager.js").is_file()
-                    {
+                    if engine::is_app_root(&c) {
                         let normalized = c.canonicalize().unwrap_or(c);
                         engine::init_project_root(normalized.clone());
                         std::env::set_var("CODEX_SKIN_ROOT", &normalized);
@@ -90,7 +90,10 @@ pub fn run() {
                 let _ = window.remove_menu();
             }
 
-            // Release: WebView2 native off for right-click menu + F12 (JS guard already injected).
+            // Debug: force WebView2 context menu + DevTools on (F12 / 右键审查).
+            // Release: native off + JS guard plugin already registered above.
+            #[cfg(debug_assertions)]
+            webview_guard::enable_dev_inspect_all(app.handle());
             #[cfg(not(debug_assertions))]
             webview_guard::harden_all(app.handle());
 
@@ -102,8 +105,14 @@ pub fn run() {
                 eprintln!("[tray] setup failed: {e}");
             }
 
-            // Re-assert local routing if last session left takeover enabled.
-            proxy::restore_on_startup();
+            // Re-assert local routing off the setup critical path so first paint
+            // is not blocked by proxy bind / live config rewrite.
+            tauri::async_runtime::spawn(async {
+                let _ = tauri::async_runtime::spawn_blocking(|| {
+                    proxy::restore_on_startup();
+                })
+                .await;
+            });
 
             Ok(())
         })
@@ -216,7 +225,7 @@ pub fn run() {
 fn resolve_app_root() -> std::path::PathBuf {
     if let Ok(env_root) = std::env::var("CODEX_SKIN_ROOT") {
         let p = std::path::PathBuf::from(env_root);
-        if p.join("engine").join("cli.mjs").is_file() {
+        if engine::is_app_root(&p) {
             return p;
         }
     }
@@ -226,7 +235,7 @@ fn resolve_app_root() -> std::path::PathBuf {
         .parent()
         .map(|p| p.to_path_buf())
         .unwrap_or(manifest);
-    if repo.join("engine").join("cli.mjs").is_file() {
+    if engine::is_app_root(&repo) {
         return repo;
     }
     std::env::current_dir().unwrap_or(repo)

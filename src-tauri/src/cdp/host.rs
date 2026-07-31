@@ -354,14 +354,16 @@ impl ProbeOpts {
 fn probe_cdp_parallel(port: u16) -> (bool, bool) {
     let (tx_port, rx_port) = std::sync::mpsc::channel();
     let (tx_rend, rx_rend) = std::sync::mpsc::channel();
+    // Short timeouts: GUI host pill / boot must not wait multi-seconds when
+    // nothing listens on the debug port (common cold start).
     std::thread::spawn(move || {
-        let _ = tx_port.send(is_debug_port_open(port, 2000));
+        let _ = tx_port.send(is_debug_port_open(port, 450));
     });
     std::thread::spawn(move || {
         let _ = tx_rend.send(is_renderer_ready(port));
     });
-    let debug_port_open = rx_port.recv_timeout(Duration::from_millis(3500)).unwrap_or(false);
-    let renderer_ready = rx_rend.recv_timeout(Duration::from_millis(3500)).unwrap_or(false);
+    let debug_port_open = rx_port.recv_timeout(Duration::from_millis(800)).unwrap_or(false);
+    let renderer_ready = rx_rend.recv_timeout(Duration::from_millis(800)).unwrap_or(false);
     // If renderer is ready, port must be open (list succeeded).
     let debug_port_open = debug_port_open || renderer_ready;
     (debug_port_open, renderer_ready)

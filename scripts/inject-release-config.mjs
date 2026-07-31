@@ -12,9 +12,12 @@
  * manifest uses proxied asset URLs so installers also fall back off GitHub.
  *
  * Env:
+ *   CODEX_SKIN_CLOUD_URL             production skin CDN base (e.g. https://cdn.aiku.cc.cd/v1)
+ *   CODEX_SKIN_CLOUD_EXTRA_HOSTS     optional extra allowlist hosts
  *   TAURI_UPDATER_ENDPOINTS          optional full override (comma / JSON array)
  *   GITHUB_RELEASE_MIRROR_PREFIXES   comma list of proxy prefixes (default: ghfast.top)
  *   REQUIRE_RELEASE_SECRETS=1        fail if no updater endpoint can be resolved
+ *   REQUIRE_CLOUD_URL=1              fail if CODEX_SKIN_CLOUD_URL missing (Release builds)
  *   SKIP_RELEASE_INJECT=1            empty inject (smoke builds)
  */
 import fs from "node:fs";

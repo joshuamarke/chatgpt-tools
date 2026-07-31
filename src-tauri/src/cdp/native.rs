@@ -1,5 +1,5 @@
-//! High-level native engine ops: apply (hot + cold), status, restore.
-//! Import/export/design-wallpaper still fall back to Node CLI.
+//! High-level native engine ops: apply (hot + cold), status, restore, packages.
+//! Single path — no Node CLI fallback.
 
 use super::host::{
     self, append_diag, host_lifecycle_to_json, host_status_json, invalidate_host_lifecycle_sticky,

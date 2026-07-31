@@ -36,6 +36,9 @@ pub struct CdpTarget {
 }
 
 /// GET `http://127.0.0.1:{port}{path}` and parse JSON.
+///
+/// Connect timeout is capped low: when ChatGPT is offline, a long connect wait
+/// is the main cause of multi-second GUI freezes on boot / host_status force.
 pub fn fetch_json(port: u16, path: &str, timeout_ms: u64) -> Result<Value, CdpHttpError> {
     if !(1024..=65535).contains(&port) {
         return Err(CdpHttpError::msg(format!("invalid CDP port {port}")));
@@ -46,10 +49,13 @@ pub fn fetch_json(port: u16, path: &str, timeout_ms: u64) -> Result<Value, CdpHt
         format!("/{path}")
     };
     let url = format!("http://127.0.0.1:{port}{pathname}");
+    // Offline port: fail connect fast (≤400ms). Read may still use full timeout_ms
+    // when the host is up and returning large /json/list payloads.
+    let connect_ms = timeout_ms.min(400).max(120);
     let agent = ureq::AgentBuilder::new()
-        .timeout_connect(Duration::from_millis(timeout_ms.min(3000)))
+        .timeout_connect(Duration::from_millis(connect_ms))
         .timeout_read(Duration::from_millis(timeout_ms))
-        .timeout_write(Duration::from_millis(timeout_ms.min(3000)))
+        .timeout_write(Duration::from_millis(timeout_ms.min(1500)))
         .build();
     let resp = agent
         .get(&url)
@@ -148,7 +154,8 @@ fn app_target_rank(url: &str) -> u8 {
 }
 
 pub fn list_app_targets(port: u16) -> Result<Vec<CdpTarget>, CdpHttpError> {
-    let list = fetch_json(port, "/json/list", 3000)?;
+    // Probe path: keep short so offline boot does not stall ~3s on /json/list.
+    let list = fetch_json(port, "/json/list", 900)?;
     let arr = list
         .as_array()
         .ok_or_else(|| CdpHttpError::msg("Invalid /json/list payload"))?;

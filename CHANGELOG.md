@@ -2,6 +2,13 @@
 
 格式参考 [Keep a Changelog](https://keepachangelog.com/)。发版时把对应版本段落粘贴到 GitHub Release 描述中。
 
+## Unreleased
+
+- **单一路径引擎**：GUI 运行时不再 spawn Node / `engine/cli.mjs`；失败不再静默回退。
+- **自定义壁纸**改为 Tauri/Rust 实现（`src-tauri/src/cdp/design.rs`），无系统 Node。
+- 资源根发现以 `engine/runtime/renderer-core.js` 为准。
+- Release 构建要求 Secret `CODEX_SKIN_CLOUD_URL`（例：`https://cdn.aiku.cc.cd/v1`）以嵌入默认云端 catalog。
+
 ## 1.1.12 - 2026-07-29
 
 - 多功能桌面工具箱：皮肤引擎、会话管理、供应商 / 本地路由等模块，不修改客户端通过CDP注入实现。

@@ -25,6 +25,7 @@
     "verify:engine": "node scripts/verify-engine.mjs",
     "test:engine": "node engine/injector.mjs --self-test",
     "check:payloads": "node engine/cli.mjs list-skins",
+    "check:native": "cargo test --manifest-path src-tauri/Cargo.toml --lib cdp::design::tests",
     "doctor:selectors": "node scripts/doctor-selectors.mjs",
     "check:gui": "node scripts/check-gui-regression.mjs",
     "postinstall": "node scripts/ensure-resources.mjs"

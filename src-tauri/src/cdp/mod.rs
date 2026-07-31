@@ -1,8 +1,9 @@
-//! Loopback-only Chrome DevTools Protocol client + native skin engine path.
+//! Loopback-only Chrome DevTools Protocol client + **single-path** skin engine.
 //!
-//! Hot + cold apply, status/detect, settings, and restore without system Node
-//! for the main user path. Import/export/design still fall back to Node CLI.
+//! All skin ops (apply / status / restore / package / design-wallpaper) run
+//! in-process. Host inject assets still load from `engine/runtime/*`.
 
+mod design;
 mod host;
 pub(crate) mod http;
 mod image;
@@ -18,6 +19,7 @@ mod theme;
 #[cfg(windows)]
 mod win_native;
 
+pub use design::design_wallpaper_native;
 pub use native::{
     apply_skin_native_opts, delete_skin_native, detect_native, engine_paths_native,
     engine_version_native, get_host_status_native, get_status_native, pause_skin_native,

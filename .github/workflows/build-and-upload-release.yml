@@ -79,6 +79,10 @@ jobs:
         env:
           # GITHUB_REPOSITORY → default updater latest.json on this repo
           REQUIRE_RELEASE_SECRETS: "1"
+          # Embed production skin CDN base URL (must set Actions Secret)
+          REQUIRE_CLOUD_URL: "1"
+          CODEX_SKIN_CLOUD_URL: ${{ secrets.CODEX_SKIN_CLOUD_URL }}
+          CODEX_SKIN_CLOUD_EXTRA_HOSTS: ${{ secrets.CODEX_SKIN_CLOUD_EXTRA_HOSTS }}
           # Optional override; empty → GitHub Releases latest.json
           TAURI_UPDATER_ENDPOINTS: ${{ secrets.TAURI_UPDATER_ENDPOINTS }}
         run: npm run build
@@ -272,6 +276,9 @@ jobs:
       - name: Stamp repo meta + build Tauri (macOS ${{ matrix.arch }}, signed)
         env:
           REQUIRE_RELEASE_SECRETS: "1"
+          REQUIRE_CLOUD_URL: "1"
+          CODEX_SKIN_CLOUD_URL: ${{ secrets.CODEX_SKIN_CLOUD_URL }}
+          CODEX_SKIN_CLOUD_EXTRA_HOSTS: ${{ secrets.CODEX_SKIN_CLOUD_EXTRA_HOSTS }}
           TAURI_UPDATER_ENDPOINTS: ${{ secrets.TAURI_UPDATER_ENDPOINTS }}
         run: |
           node scripts/inject-release-config.mjs

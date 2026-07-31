@@ -1,17 +1,15 @@
-//! Release-only WebView hardening: block browser-like right-click menus and
-//! DevTools hotkeys (F12 / Ctrl+Shift+I|J|C / Cmd+Option+I).
+//! WebView inspect policy:
+//! - **Debug** (`tauri dev` / debug binary): allow right-click menus + F12 / DevTools
+//! - **Release** (packaged): block browser-like right-click and DevTools hotkeys
 //!
-//! Enabled only when `not(debug_assertions)` so `tauri dev` keeps full inspect.
-//! This does **not** touch Skin DevTools / CDP inject — only the GUI WebView chrome.
-//!
-//! Layers:
-//! 1. Early JS init (all platforms) — suppress `contextmenu` + DevTools shortcuts
-//! 2. Windows WebView2 settings — native off for default menus + DevTools
+//! Does **not** touch Skin DevTools / host CDP inject — only this app's GUI WebView.
+//! Release-only and debug-only symbols are `cfg`-gated so each profile compiles cleanly.
 
 use tauri::Manager;
 
 /// Early init script: runs before page scripts (plugin `js_init_script`).
 /// Capture-phase listeners so app handlers still work; we only suppress defaults.
+#[cfg(not(debug_assertions))]
 const RELEASE_WEBVIEW_GUARD_JS: &str = r#"
 try {
   document.addEventListener('contextmenu', function (e) {
@@ -45,7 +43,8 @@ try {
 } catch (_) {}
 "#;
 
-/// Plugin that injects the guard into every WebView (main + secondary).
+/// Plugin that injects the **release** guard into every WebView (main + secondary).
+#[cfg(not(debug_assertions))]
 pub fn plugin<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
     tauri::plugin::Builder::new("release-webview-guard")
         .js_init_script(RELEASE_WEBVIEW_GUARD_JS)
@@ -53,19 +52,17 @@ pub fn plugin<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
 }
 
 /// Apply native WebView2 settings (Windows). No-op on other platforms.
-/// Call after a window exists (setup + any late-created window).
 #[allow(unused_variables)]
-pub fn harden_window(window: &tauri::WebviewWindow) {
+fn set_webview2_inspect(window: &tauri::WebviewWindow, enabled: bool) {
     #[cfg(windows)]
     {
-        let _ = window.with_webview(|webview| {
-            // PlatformWebview::controller is WebView2-only; disable menus + inspector natively.
+        let _ = window.with_webview(move |webview| {
             unsafe {
                 let controller = webview.controller();
                 if let Ok(core) = controller.CoreWebView2() {
                     if let Ok(settings) = core.Settings() {
-                        let _ = settings.SetAreDefaultContextMenusEnabled(false);
-                        let _ = settings.SetAreDevToolsEnabled(false);
+                        let _ = settings.SetAreDefaultContextMenusEnabled(enabled);
+                        let _ = settings.SetAreDevToolsEnabled(enabled);
                     }
                 }
             }
@@ -73,9 +70,30 @@ pub fn harden_window(window: &tauri::WebviewWindow) {
     }
 }
 
-/// Harden every currently open WebView window.
+/// Release: native off for default menus + DevTools.
+#[cfg(not(debug_assertions))]
+pub fn harden_window(window: &tauri::WebviewWindow) {
+    set_webview2_inspect(window, false);
+}
+
+/// Debug: native on so right-click + F12 work in `tauri dev`.
+#[cfg(debug_assertions)]
+pub fn enable_dev_inspect_window(window: &tauri::WebviewWindow) {
+    set_webview2_inspect(window, true);
+}
+
+/// Harden every currently open WebView window (release).
+#[cfg(not(debug_assertions))]
 pub fn harden_all(app: &tauri::AppHandle) {
     for (_, window) in app.webview_windows() {
         harden_window(&window);
+    }
+}
+
+/// Enable inspect on every open WebView (debug / `tauri dev`).
+#[cfg(debug_assertions)]
+pub fn enable_dev_inspect_all(app: &tauri::AppHandle) {
+    for (_, window) in app.webview_windows() {
+        enable_dev_inspect_window(&window);
     }
 }

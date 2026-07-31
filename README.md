@@ -2,10 +2,8 @@
 
 轻量、跨平台的 **ChatGPT / Codex 桌面端工具箱**。
 
-- **产品名**：ChatGPT Tools  
 - **UI 框架**：Tauri 2  
 - **功能域**：皮肤引擎 · 会话管理 · 第三方api渠道切换（后续更多本机工具）  
-- **界面**：`src/` 侧栏多视图；皮肤卡片 + 会话列表  
 
 > 非 OpenAI 官方产品。不修改官方 `app.asar` / 安装包签名。皮肤通过本机 `127.0.0.1` CDP 注入；会话管理读写本机 Codex 数据目录。皮肤引擎参考 **[Codex Dream Skin](https://github.com/Fei-Away/Codex-Dream-Skin)** 项目实现，感谢原作者的方案。
 
@@ -21,12 +19,9 @@
 | **供应商管理** | 支持开启本地路由，多供应商切换，支持还原官方默认登录，支持codex解锁第三方模型列表 |
 | 多皮肤浏览 | 内置多套皮肤，CDP注入在不切换深色/浅色模式时可以热切皮肤不用重启。 |
 | 一键应用 / 还原 | 自动处理调试端口与可选重启；慢启动 lifecycle 探测 |
-| 大图立绘 | 允许高质量原图；shell 先成功，立绘异步贴入 |
-| 暂停 / 继续 | 不杀客户端的卸皮 / 恢复（CLI：`pause` / `resume`） |
 | 导入 / 导出 | `.skin` / `.zip` + inspect 风险扫描 |
 | 自定义皮肤 | 基于目标皮肤模板；自适应构图 + 自定义颜色 / 壁纸（≤16 MB） |
 | 共享渲染内核 | 新增皮肤只需 CSS + `plugin.json`（无 inject 脚本），不必改 core |
-| 宿主选择器契约 | `engine/runtime/selectors.json` + `npm run doctor:selectors`；模板 `skins/_template` |
 | 纯 Rust 热路径 | 日常 apply/status/restore 可不依赖系统 Node；页内 Operation UI |
 | 指定客户端 | 手动选择 ChatGPT / Codex 路径 |
 | 非侵入 | 不改官方安装目录 |
@@ -35,7 +30,7 @@
 
 | 组件 | 版本 | 用途 |
 |------|------|------|
-| **Node.js** | ≥ 18 | 注入引擎（`运行`可不依赖node）与开发依赖 |
+| **Node.js** | ≥ 18 | 注入引擎（`运行`不依赖node）与开发依赖 |
 | **Rust / Cargo** | stable | 编译 Tauri 2 |
 | **Tauri 系统依赖** | 见官方文档 | Windows：WebView2（Win10/11 通常已自带） |
 | **ChatGPT / Codex 桌面版** | 已安装 | 换肤目标 |
@@ -53,15 +48,14 @@ npm run dev
 开发模式会：
 
 1. 启动 Tauri 窗口加载 `src/index.html`  
-2. 通过 Rust `invoke` 调用 `node engine/cli.mjs …`  
-3. 引擎读写状态目录并（按需）启动 CDP 注入守护进程  
+2. 通过 Rust `invoke` 走**进程内** `src-tauri/src/cdp` 引擎（不 spawn Node）  
+3. 读写状态目录；`keep` 线程在进程内保活注入  
 
-仅调试引擎（无 GUI）：
+可选：仓库仍保留 `engine/cli.mjs` 供无 GUI 冒烟（与产品路径无关）：
 
 ```bash
 npm run engine -- status
 npm run engine -- list-skins
-npm run engine -- apply --skin-id dream --restart true
 ```
 
 新建 / 改名皮肤：见 [docs/development/create-skin.md](docs/development/create-skin.md)。  
@@ -91,19 +85,14 @@ chatgpt-tools/
 │   ├── styles.css
 │   ├── app.js
 │   └── skin-api.js              # window.skinAPI → Tauri invoke
-├── engine/                      # 换肤引擎 v2.2（Node）
-│   ├── cli.mjs                  # 稳定 JSON CLI（protocol 2）
-│   ├── version.js               # 引擎版本单一源
-│   ├── host-probe.js            # 进程/端口/app:// 生命周期
-│   ├── manager.js               # 互斥 / apply / 导入导出 / 壁纸
-│   ├── injector.mjs             # CDP 会话 + soft/hard verify + watch
-│   ├── payload.mjs              # 指纹缓存 + 共享 runtime 组装
-│   ├── image-metadata.mjs       # 立绘硬限 / 像素炸弹防护
-│   ├── purge-all.mjs            # 多 markers + 注册表清理
-│   ├── runtime/renderer-core.js # 多皮肤共享渲染（增删皮肤不改此文件）
-│   └── tests/                   # node:test 自检
+├── engine/
+│   └── runtime/                 # 注入到宿主的共享资源（非 Node 进程）
+│       ├── renderer-core.js
+│       ├── immersive-skin.css
+│       └── selectors.json
+│   # cli.mjs / manager.js 等：可选开发冒烟，GUI 已不调用
 ├── skins/<id>/                  # 内置皮肤：CSS + art + plugin.json
-├── src-tauri/                   # Tauri 2 / Rust
+├── src-tauri/                   # Tauri 2 / Rust 单一引擎（cdp/*）
 ├── docs/
 ├── scripts/                     # 构建 / 发版 / 契约与冒烟（无探针杂项）
 ├── package.json
