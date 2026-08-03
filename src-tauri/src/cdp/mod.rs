@@ -11,6 +11,7 @@ mod inject;
 pub mod inspect;
 mod keep;
 mod launch;
+pub(crate) mod library;
 pub(crate) mod native;
 mod package;
 mod payload;
@@ -39,7 +40,29 @@ pub fn store_package_status_json() -> serde_json::Value {
 }
 
 pub fn native_safe_skin_id(id: &str) -> String {
-    native::safe_skin_id_pub(id)
+    library::safe_skin_id(id)
+}
+
+/// Unique skin install root (`%STATE%/library`).
+pub fn native_library_dir() -> std::path::PathBuf {
+    library::library_dir()
+}
+
+pub fn install_skin_to_library(
+    src: &std::path::Path,
+    id: &str,
+    origin: &str,
+    extra_meta: serde_json::Value,
+) -> Result<std::path::PathBuf, crate::engine::EngineError> {
+    library::install_skin_tree(src, id, origin, extra_meta)
+}
+
+pub fn read_library_cloud_meta(skin_id: &str) -> Option<serde_json::Value> {
+    library::read_library_cloud_meta(skin_id)
+}
+
+pub fn library_skin_path(skin_id: &str) -> std::path::PathBuf {
+    library::library_skin_dir(skin_id)
 }
 
 pub fn native_engine_protocol() -> u32 {

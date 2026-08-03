@@ -393,48 +393,48 @@ html.codex-ningyao-skin main.main-surface:not(.ningyao-home-shell):not(:has(.thr
  * 勿用 main > * { position:relative } 波及 header（会打坏宿主顶栏几何）。
  * 仅抬升非顶栏内容绘制层。
  */
-html.codex-ningyao-skin main.main-surface > *:not(header.app-header-tint) {
+html.codex-ningyao-skin main.main-surface > *:not(header) {
   position: relative;
   z-index: 1;
 }
 
-html.codex-ningyao-skin main.main-surface > header.app-header-tint,
-html.codex-ningyao-skin main.main-surface > header.app-header-tint * {
+html.codex-ningyao-skin main.main-surface > header,
+html.codex-ningyao-skin main.main-surface > header * {
   --text-primary: #3f4a50 !important;
   --text-secondary: #6a767c !important;
   --icon-primary: #4a565c !important;
   --icon-secondary: #6a767c !important;
 }
 
-html.codex-ningyao-skin main.main-surface > header.app-header-tint button:not([class~="bg-token-foreground"]),
-html.codex-ningyao-skin main.main-surface > header.app-header-tint a:not([class~="bg-token-foreground"]),
-html.codex-ningyao-skin main.main-surface > header.app-header-tint [role="button"]:not([class~="bg-token-foreground"]),
-html.codex-ningyao-skin main.main-surface > header.app-header-tint [data-state]:not([class~="bg-token-foreground"]) {
+html.codex-ningyao-skin main.main-surface > header button:not([class~="bg-token-foreground"]),
+html.codex-ningyao-skin main.main-surface > header a:not([class~="bg-token-foreground"]),
+html.codex-ningyao-skin main.main-surface > header [role="button"]:not([class~="bg-token-foreground"]),
+html.codex-ningyao-skin main.main-surface > header [data-state]:not([class~="bg-token-foreground"]) {
   color: #3f4a50 !important;
   pointer-events: auto !important;
 }
 
-html.codex-ningyao-skin main.main-surface > header.app-header-tint svg {
+html.codex-ningyao-skin main.main-surface > header svg {
   color: #4a565c !important;
   opacity: 1 !important;
 }
 
-html.codex-ningyao-skin main.main-surface > header.app-header-tint button[class~="bg-token-foreground"],
-html.codex-ningyao-skin main.main-surface > header.app-header-tint button[class~="bg-token-foreground"] * {
+html.codex-ningyao-skin main.main-surface > header button[class~="bg-token-foreground"],
+html.codex-ningyao-skin main.main-surface > header button[class~="bg-token-foreground"] * {
   color: #f8f7f4 !important;
   --text-primary: #f8f7f4 !important;
   --text-secondary: #f8f7f4 !important;
   --icon-primary: #f8f7f4 !important;
 }
 
-html.codex-ningyao-skin main.main-surface > header.app-header-tint button[class~="bg-token-foreground"] svg {
+html.codex-ningyao-skin main.main-surface > header button[class~="bg-token-foreground"] svg {
   color: #f8f7f4 !important;
   opacity: 1 !important;
 }
 
 /* 首页 / 对话顶栏透明，露出 main 立绘 */
-html.codex-ningyao-skin main.main-surface.ningyao-home-shell > header.app-header-tint,
-html.codex-ningyao-skin main.main-surface:has(.thread-scroll-container) > header.app-header-tint {
+html.codex-ningyao-skin main.main-surface.ningyao-home-shell > header,
+html.codex-ningyao-skin main.main-surface:has(.thread-scroll-container) > header {
   background: transparent !important;
   background-image: none !important;
   border-bottom: 0 !important;
@@ -449,7 +449,7 @@ html.codex-ningyao-skin main.main-surface:has(.thread-scroll-container) > header
 
 /* 设置等：实底顶栏 */
 html.codex-ningyao-skin main.main-surface:not(.ningyao-home-shell):not(:has(.thread-scroll-container))
-  > header.app-header-tint {
+  > header {
   background: #eef3f2 !important;
   background-image: none !important;
   border-bottom: 1px solid rgba(106, 158, 171, 0.12) !important;
@@ -1112,4 +1112,28 @@ html.codex-ningyao-skin main.main-surface .app-shell-main-content-top-fade {
     min-height: 100px !important;
     font-size: 12px !important;
   }
+}
+
+/*
+ * 宿主 MainContentTopFade（CDP）：header 底缘压暗渐变（非 box-shadow）。
+ * 沉浸式壁纸下会在顶栏/品牌下形成黑带；关掉以保持连续立绘。
+ * 契约 key: main-content-top-fade（engine/runtime/selectors.json）
+ */
+html.codex-ningyao-skin main.main-surface [class*="MainContentTopFade"],
+html.codex-ningyao-skin main.main-surface [class*="_MainContentTopFade_"],
+html.codex-ningyao-skin main.main-surface.ningyao-home-shell [class*="TopFade"],
+html.codex-ningyao-skin.skins-art-wide main.main-surface [class*="MainContentTopFade"],
+html.codex-ningyao-skin.skins-art-wide main.main-surface [class*="TopFade"] {
+  display: none !important;
+  opacity: 0 !important;
+  visibility: hidden !important;
+  height: 0 !important;
+  min-height: 0 !important;
+  max-height: 0 !important;
+  background: none !important;
+  background-image: none !important;
+  background-color: transparent !important;
+  box-shadow: none !important;
+  border: 0 !important;
+  pointer-events: none !important;
 }

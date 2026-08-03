@@ -5,11 +5,11 @@
     "source": "Live CDP probe on Windows Store Codex + ChatGPT Tools runtime",
     "hostPackage": "OpenAI.Codex_26.721.3996.0_x64__2p2nqsd0c76g0",
     "packageVersion": "26.721.3996.0",
-    "probedAt": "2026-07-25",
-    "activeSkin": "bengong",
+    "probedAt": "2026-08-03",
+    "activeSkin": "jiuyi",
     "route": "home (app://-/index.html)",
     "probeScript": null,
-    "result": "All required L1 anchors present; L2 missing only route/overlay/settings scoped",
+    "result": "Host header no longer exposes app-header-tint; use main.main-surface > header + data-app-shell-application-menu-bar. Application menu is ApplicationMenuTopBar CSS module.",
     "notes": "升级 Codex/ChatGPT 桌面后先跑 npm run doctor:selectors（静态契约）。引擎 token/class 为 --skins-* / skins-*（legacy dream-* 仅清理兼容）。"
   },
   "appearanceSignal": {
@@ -28,11 +28,16 @@
   "selectors": [
     {
       "key": "shell-main",
-      "selector": "main.main-surface",
+      "selector": "main:is(.main-surface, [data-app-shell-main-surface], [class*=\"_MainContentSurface_\"])",
       "tier": "L1",
       "scope": "all",
       "required": true,
-      "fallback": ["main", "[role=\"main\"]"],
+      "fallback": [
+        "main[data-app-shell-main-surface]",
+        "main[class*=\"MainContentSurface\"]",
+        "main",
+        "[role=\"main\"]"
+      ],
       "notes": "shell-guard 主锚。侧栏可缺；无 main 则清皮（宠物窗）。"
     },
     {
@@ -45,11 +50,40 @@
     },
     {
       "key": "header-tint",
-      "selector": "header.app-header-tint",
+      "selector": "main.main-surface > header",
       "tier": "L1",
       "scope": "all",
       "required": true,
-      "notes": "皮肤勿改 position/top/z-index/transform。"
+      "fallback": [
+        "main.main-surface > header[data-app-shell-application-menu-bar]",
+        "header[data-app-shell-application-menu-bar]",
+        "header.app-header-tint",
+        "header"
+      ],
+      "notes": "CDP 2026-08：宿主已去掉 app-header-tint，改为 CSS Modules _Header_* + data-app-shell-application-menu-bar；原生 position:fixed; z-index:30; top:var(--height-toolbar-sm)。皮肤勿改 position/top/z-index/transform。CSS 推荐 main.main-surface > header。"
+    },
+    {
+      "key": "application-menu-top-bar",
+      "selector": "[class*=\"ApplicationMenuTopBar\"]",
+      "tier": "L2",
+      "scope": "all",
+      "required": false,
+      "fallback": [
+        "[class~=\"group/application-menu-top-bar\"]"
+      ],
+      "notes": "CDP 2026-08：Win electron application-menu 顶栏（文件/编辑…）。旧 class group/application-menu-top-bar 已不存在；现为 CSS Modules _ApplicationMenuTopBar_*。"
+    },
+    {
+      "key": "main-content-top-fade",
+      "selector": "main.main-surface [class*=\"MainContentTopFade\"]",
+      "tier": "L2",
+      "scope": "all",
+      "required": false,
+      "fallback": [
+        "[class*=\"_MainContentTopFade_\"]",
+        "main [class*=\"TopFade\"]"
+      ],
+      "notes": "CDP 2026-08：宿主在 header 底缘绝对定位的顶缘压暗渐变（linear-gradient 实色→透明，约 16px）。不是 box-shadow。沉浸式壁纸首页会看成品牌栏底部黑带；皮肤可 display:none / background:none。"
     },
     {
       "key": "home-icon",
@@ -90,10 +124,13 @@
     },
     {
       "key": "header-primary-button",
-      "selector": "header.app-header-tint button[class~=\"bg-token-foreground\"]",
+      "selector": "main.main-surface > header button[class~=\"bg-token-foreground\"]",
       "tier": "L2",
       "scope": "all",
       "required": false,
+      "fallback": [
+        "header.app-header-tint button[class~=\"bg-token-foreground\"]"
+      ],
       "notes": "已安排/插件等页右上角「创建」主按钮。浅色皮肤勿用 header * 深色字覆盖；应排除 bg-token-foreground 或单独给浅字+实心底。"
     },
     {
@@ -158,6 +195,18 @@
       "notes": "列表展开时的 section 面板。变量 --skins-suggest-list-panel-*（bg/border/radius/padding/shadow）。未定义=宿主原生。"
     },
     {
+      "key": "home-banners",
+      "selector": ".home-banners",
+      "tier": "L2",
+      "scope": "home",
+      "required": false,
+      "fallback": [
+        "[role=\"main\"]:has([data-testid=\"home-icon\"]) > :not([data-testid=\"home-icon\"])",
+        "[class*=\"home-main-content\"]:has([data-testid=\"home-icon\"]) > :not([data-testid=\"home-icon\"])"
+      ],
+      "notes": "Codex 26.721+ 新版首页槽位特判：home-route 首个子节点从 .home-banners 改成其兄弟节点（首个子节点通常为空的 banners 槽）。核心框架默认使用此 fallback 探针；皮肤 CSS 可覆盖或补充 .qingkong-home .home-banners { ... }。必须与 home-route 配合使用。"
+    },
+    {
       "key": "project-selector",
       "selector": ".group\\/project-selector",
       "tier": "L2",
@@ -171,6 +220,14 @@
       "scope": "thread",
       "required": false,
       "notes": "会话内容多节点，注意选择器性能。"
+    },
+    {
+      "key": "settings-panel",
+      "selector": "[data-settings-panel-slug=\"general-settings\"]",
+      "tier": "L2",
+      "scope": "settings",
+      "required": false,
+      "notes": "Codex 26.727 设置页稳定导航锚点；设置页可先落在 General，不再保证 appearance-theme 或 theme-preview 存在。"
     },
     {
       "key": "appearance-radio",

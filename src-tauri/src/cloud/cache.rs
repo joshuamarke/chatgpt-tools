@@ -2,7 +2,7 @@
 
 use crate::cdp;
 use crate::engine::EngineError;
-use serde_json::{json, Value};
+use serde_json::Value;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -11,10 +11,7 @@ pub fn cloud_root() -> PathBuf {
     cdp::native_state_root().join("cloud")
 }
 
-pub fn cache_skins_dir() -> PathBuf {
-    cdp::native_state_root().join("cache").join("skins")
-}
-
+/// Temp dir for in-flight package downloads (not a permanent skin install root).
 pub fn cache_tmp_dir() -> PathBuf {
     cdp::native_state_root().join("cache").join("tmp")
 }
@@ -22,13 +19,14 @@ pub fn cache_tmp_dir() -> PathBuf {
 pub fn ensure_cloud_layout() -> Result<(), EngineError> {
     for d in [
         cloud_root(),
-        cache_skins_dir(),
         cache_tmp_dir(),
-        // Catalog screenshot thumbnails (independent of full .skin package cache)
+        // Catalog screenshot thumbnails (independent of full .skin package install)
         cdp::native_state_root().join("cache").join("previews"),
         // Contact / about images (QR etc.) rewritten to data-URLs for CSP
         cdp::native_state_root().join("cache").join("about-images"),
         cloud_root().join("meta"),
+        // Skin packages live in the unified library
+        cdp::native_library_dir(),
     ] {
         fs::create_dir_all(&d)
             .map_err(|e| EngineError::msg(format!("create {}: {e}", d.display())))?;
@@ -135,112 +133,29 @@ pub fn write_etag(path: &Path, etag: &str) -> Result<(), EngineError> {
     write_text_atomic(path, &format!("{}\n", etag.trim()))
 }
 
-/// Read `.cache-meta.json` for a cached skin id.
-pub fn read_cache_meta(skin_id: &str) -> Option<Value> {
-    let id = cdp::native_safe_skin_id(skin_id);
-    if id.is_empty() {
-        return None;
-    }
-    read_json(&cache_skins_dir().join(&id).join(".cache-meta.json"))
-}
-
-/// List skins installed under cache/skins (source=cache).
+/// List cloud-origin skins in the unified library (legacy name kept for IPC).
 pub fn list_cached_skins() -> Vec<Value> {
-    let root = cache_skins_dir();
-    let Ok(entries) = fs::read_dir(&root) else {
-        return Vec::new();
-    };
-    let mut out = Vec::new();
-    for ent in entries.flatten() {
-        let path = ent.path();
-        if !path.is_dir() {
-            continue;
-        }
-        let manifest_path = path.join("skin.json");
-        if !manifest_path.is_file() {
-            continue;
-        }
-        let Ok(text) = fs::read_to_string(&manifest_path) else {
-            continue;
-        };
-        let Ok(mut manifest) = serde_json::from_str::<Value>(&text) else {
-            continue;
-        };
-        if manifest.get("id").and_then(|v| v.as_str()).is_none() {
-            if let Some(obj) = manifest.as_object_mut() {
-                obj.insert(
-                    "id".into(),
-                    json!(path
-                        .file_name()
-                        .map(|s| s.to_string_lossy().to_string())
-                        .unwrap_or_default()),
-                );
-            }
-        }
-        let meta = read_json(&path.join(".cache-meta.json"));
-        if let Some(obj) = manifest.as_object_mut() {
-            obj.insert("dir".into(), json!(path.to_string_lossy()));
-            obj.insert("source".into(), json!("cache"));
-            obj.insert("builtin".into(), json!(false));
-            obj.insert("installState".into(), json!("ready"));
-            if let Some(m) = meta {
-                if let Some(v) = m.get("version").cloned() {
-                    obj.insert("cacheVersion".into(), v);
-                }
-                if let Some(v) = m.get("sha256").cloned() {
-                    obj.insert("cacheSha256".into(), v);
-                }
-            }
-        }
-        out.push(manifest);
-    }
-    out
+    crate::cdp::library::list_cloud_installed_skins()
 }
 
-/// Remove one cached skin or all if `skin_id` is None.
+/// Remove one cloud-origin library skin, or all cloud-origin skins when `None`.
 pub fn clear_skin_cache(skin_id: Option<&str>) -> Result<Value, EngineError> {
     ensure_cloud_layout()?;
-    if let Some(id) = skin_id {
-        let safe = cdp::native_safe_skin_id(id);
-        if safe.is_empty() {
-            return Err(EngineError::msg("无效皮肤 id"));
-        }
-        let dir = cache_skins_dir().join(&safe);
-        if dir.is_dir() {
-            fs::remove_dir_all(&dir)
-                .map_err(|e| EngineError::msg(format!("删除缓存: {e}")))?;
-            return Ok(json!({ "ok": true, "removed": [safe] }));
-        }
-        return Ok(json!({ "ok": true, "removed": [] }));
-    }
-    let mut removed = Vec::new();
-    if let Ok(entries) = fs::read_dir(cache_skins_dir()) {
-        for ent in entries.flatten() {
-            let p = ent.path();
-            if p.is_dir() {
-                let name = p
-                    .file_name()
-                    .map(|s| s.to_string_lossy().to_string())
-                    .unwrap_or_default();
-                let _ = fs::remove_dir_all(&p);
-                removed.push(name);
-            }
-        }
-    }
-    // also wipe tmp leftovers
-    if let Ok(entries) = fs::read_dir(cache_tmp_dir()) {
-        for ent in entries.flatten() {
-            let p = ent.path();
-            if p.is_file() || p.is_dir() {
+    let result = crate::cdp::library::clear_cloud_skins(skin_id)?;
+    // Wipe download temp leftovers on full clear
+    if skin_id.is_none() {
+        if let Ok(entries) = fs::read_dir(cache_tmp_dir()) {
+            for ent in entries.flatten() {
+                let p = ent.path();
                 if p.is_dir() {
                     let _ = fs::remove_dir_all(&p);
-                } else {
+                } else if p.is_file() {
                     let _ = fs::remove_file(&p);
                 }
             }
         }
     }
-    Ok(json!({ "ok": true, "removed": removed }))
+    Ok(result)
 }
 
 pub fn now_unix_ms() -> u128 {

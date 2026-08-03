@@ -9,12 +9,11 @@
 - 资源根发现以 `engine/runtime/renderer-core.js` 为准。
 - Release 构建要求 Secret `CODEX_SKIN_CLOUD_URL`（例：`https://cdn.aiku.cc.cd/v1`）以嵌入默认云端 catalog。
 
-## 1.1.12 - 2026-07-29
+## 1.1.13 - 2026-08-03
 
 - 多功能桌面工具箱：皮肤引擎、会话管理、供应商 / 本地路由等模块，不修改客户端通过CDP注入实现。
-- 换肤热路径以纯 Rust CDP 为主（apply / status / restore 等），主题模式切换需要经过ChatGPT/Codex的配置文件切换，因此dark/light模式切换必须要重启客户端。
-- 新增 会话管理，支持ChatGPT/Codex和Grok Build。
-- 新增供应商管理，当开启本地路由功能之后可以实现多个第三方中转站热切换。
+- 移除Node回退，清理兼容Node冗余代码。
+- 适配 ChatGPT/Codex 272更新，修复皮肤因为Codex导致样式不正常。
 
 ## 如何写下一版
 

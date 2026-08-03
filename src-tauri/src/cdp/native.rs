@@ -57,10 +57,10 @@ pub fn state_root() -> PathBuf {
 
 pub fn ensure_state_dir() -> Result<(), EngineError> {
     let root = state_root();
-    fs::create_dir_all(root.join("skins"))
+    fs::create_dir_all(&root)
         .map_err(|e| EngineError::msg(format!("create state dir: {e}")))?;
-    fs::create_dir_all(root.join("runtime-skins"))
-        .map_err(|e| EngineError::msg(format!("create runtime-skins: {e}")))?;
+    // Single install root + migration/seed (see library.rs).
+    super::library::ensure_library()?;
     Ok(())
 }
 
@@ -205,245 +205,26 @@ pub fn set_paused(paused: bool) {
     }
 }
 
-pub(crate) fn safe_skin_id(id: &str) -> String {
-    let s: String = id
-        .trim()
-        .to_ascii_lowercase()
-        .chars()
-        .map(|c| {
-            if c.is_ascii_alphanumeric() || c == '_' || c == '-' {
-                c
-            } else {
-                '-'
-            }
-        })
-        .collect();
-    let trimmed = s.trim_matches('-');
-    trimmed.chars().take(64).collect()
-}
-
-/// Public alias for package module.
+/// Public alias for package / design modules.
 pub fn safe_skin_id_pub(id: &str) -> String {
-    safe_skin_id(id)
+    super::library::safe_skin_id(id)
 }
 
 fn bundled_skins_dir() -> PathBuf {
-    engine::project_root().join("skins")
-}
-
-pub(crate) fn user_skins_dir() -> PathBuf {
-    state_root().join("skins")
-}
-
-pub fn user_skins_dir_pub() -> PathBuf {
-    user_skins_dir()
-}
-
-fn read_skin_from_dir(dir: &Path, source: &str) -> Option<Value> {
-    let manifest_path = dir.join("skin.json");
-    if !manifest_path.is_file() {
-        return None;
-    }
-    let text = fs::read_to_string(manifest_path).ok()?;
-    let mut manifest: Value = serde_json::from_str(&text).ok()?;
-    if manifest.get("id").and_then(|v| v.as_str()).is_none() {
-        if let Some(obj) = manifest.as_object_mut() {
-            obj.insert(
-                "id".into(),
-                json!(dir.file_name().map(|s| s.to_string_lossy().to_string()).unwrap_or_default()),
-            );
-        }
-    }
-    if let Some(obj) = manifest.as_object_mut() {
-        obj.insert("dir".into(), json!(dir.to_string_lossy()));
-        obj.insert("source".into(), json!(source));
-        obj.insert("builtin".into(), json!(source == "bundled"));
-    }
-    Some(manifest)
+    super::library::bundled_skins_dir()
 }
 
 pub fn list_skins() -> Vec<Value> {
-    let _ = ensure_state_dir();
-    // Priority: user > cache > bundled (later insert overwrites earlier).
-    let mut map: std::collections::BTreeMap<String, Value> = std::collections::BTreeMap::new();
-    for (root, source) in [
-        (bundled_skins_dir(), "bundled"),
-        (state_root().join("cache").join("skins"), "cache"),
-        (user_skins_dir(), "user"),
-    ] {
-        let Ok(entries) = fs::read_dir(&root) else {
-            continue;
-        };
-        for ent in entries.flatten() {
-            let path = ent.path();
-            if !path.is_dir() {
-                continue;
-            }
-            // Skip staging / backup dirs used by cloud install
-            let name = path
-                .file_name()
-                .map(|s| s.to_string_lossy().to_string())
-                .unwrap_or_default();
-            if name.starts_with('.') || name.starts_with('_') {
-                // `_template` and other author scaffolding — not installable skins
-                continue;
-            }
-            if let Some(mut skin) = read_skin_from_dir(&path, source) {
-                if let Some(obj) = skin.as_object_mut() {
-                    if source == "cache" {
-                        obj.insert("installState".into(), json!("ready"));
-                        let meta_path = path.join(".cache-meta.json");
-                        if let Ok(t) = fs::read_to_string(meta_path) {
-                            if let Ok(meta) = serde_json::from_str::<Value>(&t) {
-                                if let Some(v) = meta.get("version").cloned() {
-                                    obj.insert("cacheVersion".into(), v);
-                                }
-                                if let Some(v) = meta.get("sha256").cloned() {
-                                    obj.insert("cacheSha256".into(), v);
-                                }
-                            }
-                        }
-                    } else if !obj.contains_key("installState") {
-                        obj.insert("installState".into(), json!("ready"));
-                    }
-                }
-                if let Some(id) = skin.get("id").and_then(|v| v.as_str()).map(|s| s.to_string()) {
-                    map.insert(id, skin);
-                }
-            }
-        }
-    }
-    let mut skins: Vec<_> = map.into_values().collect();
-    skins.sort_by(|a, b| {
-        let na = a.get("name").and_then(|v| v.as_str()).unwrap_or("");
-        let nb = b.get("name").and_then(|v| v.as_str()).unwrap_or("");
-        na.cmp(nb)
-    });
-    skins
+    super::library::list_skins()
 }
 
 pub fn get_skin(skin_id: &str) -> Result<Value, EngineError> {
-    list_skins()
-        .into_iter()
-        .find(|s| s.get("id").and_then(|v| v.as_str()) == Some(skin_id))
-        .ok_or_else(|| EngineError::msg(format!("Skin not found: {skin_id}")))
+    super::library::get_skin(skin_id)
 }
 
-fn copy_dir_recursive(src: &Path, dst: &Path) -> Result<(), EngineError> {
-    fs::create_dir_all(dst).map_err(|e| EngineError::msg(format!("mkdir {}: {e}", dst.display())))?;
-    for ent in fs::read_dir(src).map_err(|e| EngineError::msg(format!("read_dir: {e}")))? {
-        let ent = ent.map_err(|e| EngineError::msg(e.to_string()))?;
-        let from = ent.path();
-        let to = dst.join(ent.file_name());
-        if from.is_dir() {
-            copy_dir_recursive(&from, &to)?;
-        } else {
-            fs::copy(&from, &to)
-                .map_err(|e| EngineError::msg(format!("copy {}: {e}", from.display())))?;
-        }
-    }
-    Ok(())
-}
-
-fn skin_material_stamp(skin_dir: &Path) -> String {
-    let manifest_path = skin_dir.join("skin.json");
-    let mut parts = vec![
-        skin_dir
-            .canonicalize()
-            .unwrap_or_else(|_| skin_dir.to_path_buf())
-            .to_string_lossy()
-            .to_string(),
-        "v2".into(),
-    ];
-    let manifest: Value = fs::read_to_string(&manifest_path)
-        .ok()
-        .and_then(|t| serde_json::from_str(&t).ok())
-        .unwrap_or(json!({}));
-    let rels = [
-        Some("skin.json".to_string()),
-        manifest
-            .pointer("/assets/css")
-            .and_then(|v| v.as_str())
-            .map(|s| s.to_string()),
-        manifest
-            .pointer("/assets/art")
-            .and_then(|v| v.as_str())
-            .map(|s| s.to_string()),
-        manifest
-            .pointer("/assets/plugin")
-            .and_then(|v| v.as_str())
-            .map(|s| s.to_string()),
-    ];
-    for rel in rels.into_iter().flatten() {
-        let abs = skin_dir.join(&rel);
-        if let Ok(st) = fs::metadata(&abs) {
-            let mtime = st
-                .modified()
-                .ok()
-                .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
-                .map(|d| d.as_millis())
-                .unwrap_or(0);
-            parts.push(format!("{rel}:{}:{mtime}", st.len()));
-        } else {
-            parts.push(format!("{rel}:missing"));
-        }
-    }
-    parts.join("|")
-}
-
-/// Copy skin to writable runtime-skins (same as Node materializeSkin).
+/// Resolve skin dir for apply — in-place (no runtime-skins mirror).
 pub fn materialize_skin(skin: &Value) -> Result<Value, EngineError> {
-    let id = skin
-        .get("id")
-        .and_then(|v| v.as_str())
-        .ok_or_else(|| EngineError::msg("skin missing id"))?;
-    let dir = skin
-        .get("dir")
-        .and_then(|v| v.as_str())
-        .ok_or_else(|| EngineError::msg("skin missing dir"))?;
-    let src = PathBuf::from(dir);
-    ensure_state_dir()?;
-    let dest_root = state_root()
-        .join("runtime-skins")
-        .join(safe_skin_id(id));
-    let stamp_path = dest_root.join(".src");
-    let stamp = skin_material_stamp(&src);
-    let mut need_copy = true;
-    if dest_root.join("skin.json").is_file() && stamp_path.is_file() {
-        if let Ok(prev) = fs::read_to_string(&stamp_path) {
-            if prev.trim() == stamp {
-                need_copy = false;
-            }
-        }
-    }
-    if need_copy {
-        let _ = fs::remove_dir_all(&dest_root);
-        copy_dir_recursive(&src, &dest_root)?;
-        let _ = fs::write(&stamp_path, &stamp);
-    }
-    // Validate assets
-    let manifest: Value = fs::read_to_string(dest_root.join("skin.json"))
-        .ok()
-        .and_then(|t| serde_json::from_str(&t).ok())
-        .unwrap_or(json!({}));
-    for key in ["css", "art", "plugin"] {
-        let rel = manifest
-            .pointer(&format!("/assets/{key}"))
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
-        if rel.is_empty() || !dest_root.join(rel).is_file() {
-            // force recopy
-            let _ = fs::remove_dir_all(&dest_root);
-            copy_dir_recursive(&src, &dest_root)?;
-            let _ = fs::write(&stamp_path, &stamp);
-            break;
-        }
-    }
-    let mut out = skin.clone();
-    if let Some(obj) = out.as_object_mut() {
-        obj.insert("dir".into(), json!(dest_root.to_string_lossy()));
-    }
-    Ok(out)
+    super::library::materialize_skin(skin)
 }
 
 fn iso_now() -> String {
@@ -511,67 +292,9 @@ pub fn set_app_path_native(app_path: Option<&str>) -> Result<Value, EngineError>
     }))
 }
 
-fn rm_dir_recursive(path: &Path) -> Result<(), EngineError> {
-    if path.is_dir() {
-        fs::remove_dir_all(path)
-            .map_err(|e| EngineError::msg(format!("remove {}: {e}", path.display())))?;
-    }
-    Ok(())
-}
-
-/// Delete user skin, cache skin, or user override of bundled. No Node.
+/// Delete an installed library skin (workspace/seed builtins are protected).
 pub fn delete_skin_native(skin_id: &str) -> Result<Value, EngineError> {
-    let skin = get_skin(skin_id)?;
-    let source = skin
-        .get("source")
-        .and_then(|v| v.as_str())
-        .unwrap_or("");
-    let builtin = skin
-        .get("builtin")
-        .and_then(|v| v.as_bool())
-        .unwrap_or(source == "bundled");
-    let user_dir = user_skins_dir().join(skin_id);
-    let cache_dir = state_root().join("cache").join("skins").join(safe_skin_id(skin_id));
-
-    if source == "cache" {
-        if cache_dir.is_dir() {
-            rm_dir_recursive(&cache_dir)?;
-            return Ok(json!({
-                "ok": true,
-                "skinId": skin_id,
-                "removed": "cache",
-                "engine": "native-rust",
-            }));
-        }
-        return Err(EngineError::msg("未找到可删除的云端缓存皮肤"));
-    }
-
-    if builtin || source == "bundled" {
-        if user_dir.is_dir() {
-            rm_dir_recursive(&user_dir)?;
-            return Ok(json!({
-                "ok": true,
-                "skinId": skin_id,
-                "removed": "user-override",
-                "engine": "native-rust",
-            }));
-        }
-        return Err(EngineError::msg("内置皮肤不能删除，只能导出"));
-    }
-    if !user_dir.is_dir() {
-        // remote-only cards have no dir
-        if source == "remote" {
-            return Err(EngineError::msg("云端皮肤尚未下载，无需删除"));
-        }
-        return Err(EngineError::msg("未找到可删除的用户皮肤"));
-    }
-    rm_dir_recursive(&user_dir)?;
-    Ok(json!({
-        "ok": true,
-        "skinId": skin_id,
-        "removed": "user",
-        "engine": "native-rust",
-    }))
+    super::library::delete_skin(skin_id)
 }
 
 fn path_looks_like_exe(p: &str) -> bool {
@@ -2010,7 +1733,10 @@ pub fn engine_paths_native() -> Value {
         "root": engine::project_root().to_string_lossy(),
         "stateRoot": state_root().to_string_lossy(),
         "bundledSkins": bundled_skins_dir().to_string_lossy(),
-        "userSkins": user_skins_dir().to_string_lossy(),
+        "librarySkins": super::library::library_dir().to_string_lossy(),
+        // Alias for older tooling / docs
+        "userSkins": super::library::library_dir().to_string_lossy(),
+        "devWorkspace": super::library::is_dev_workspace(),
         "engine": "native-rust",
     })
 }

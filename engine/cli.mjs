@@ -110,7 +110,8 @@ async function dispatch(command, positional, kv) {
         root: manager.ROOT,
         stateRoot: manager.STATE_ROOT,
         bundledSkins: manager.BUNDLED_SKINS_DIR,
-        userSkins: manager.USER_SKINS_DIR,
+        librarySkins: manager.LIBRARY_DIR || manager.USER_SKINS_DIR,
+        userSkins: manager.LIBRARY_DIR || manager.USER_SKINS_DIR,
       };
     case "status":
       return await manager.getStatus();

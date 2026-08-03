@@ -1,9 +1,10 @@
 //! Native skin package import / export / inspect (parity with manager.js + adm-zip).
 
 use super::image::MAX_ART_BYTES;
+use super::library::{self, install_skin_tree};
 use super::native::{
-    ensure_state_dir, get_skin, list_skins, safe_skin_id_pub, state_root, user_skins_dir_pub,
-    ENGINE_PROTOCOL, ENGINE_VERSION,
+    ensure_state_dir, get_skin, list_skins, safe_skin_id_pub, state_root, ENGINE_PROTOCOL,
+    ENGINE_VERSION,
 };
 use crate::engine::EngineError;
 use serde_json::{json, Value};
@@ -30,22 +31,6 @@ fn sha256_file(path: &Path) -> Result<String, EngineError> {
     let mut h = Sha256::new();
     h.update(&bytes);
     Ok(hex::encode(h.finalize()))
-}
-
-fn copy_dir_recursive(src: &Path, dst: &Path) -> Result<(), EngineError> {
-    fs::create_dir_all(dst).map_err(|e| EngineError::msg(format!("mkdir {}: {e}", dst.display())))?;
-    for ent in fs::read_dir(src).map_err(|e| EngineError::msg(format!("read_dir: {e}")))? {
-        let ent = ent.map_err(|e| EngineError::msg(e.to_string()))?;
-        let from = ent.path();
-        let to = dst.join(ent.file_name());
-        if from.is_dir() {
-            copy_dir_recursive(&from, &to)?;
-        } else {
-            fs::copy(&from, &to)
-                .map_err(|e| EngineError::msg(format!("copy {}: {e}", from.display())))?;
-        }
-    }
-    Ok(())
 }
 
 fn rm_dir_recursive(path: &Path) {
@@ -499,12 +484,9 @@ pub fn import_skin_native(package_path: &str, overwrite: bool) -> Result<Value, 
         let leftover = skin_dir.join("assets").join("renderer-inject.js");
         let _ = fs::remove_file(&leftover);
 
-        let target_dir = user_skins_dir_pub().join(&id);
-        if target_dir.is_dir() {
-            if !overwrite {
-                return Err(EngineError::msg(format!("皮肤「{id}」已存在")));
-            }
-            rm_dir_recursive(&target_dir);
+        let lib_target = library::library_skin_dir(&id);
+        if lib_target.is_dir() && !overwrite {
+            return Err(EngineError::msg(format!("皮肤「{id}」已存在")));
         }
 
         fs::write(
@@ -513,25 +495,21 @@ pub fn import_skin_native(package_path: &str, overwrite: bool) -> Result<Value, 
         )
         .map_err(|e| EngineError::msg(format!("write skin.json: {e}")))?;
 
-        copy_dir_recursive(&skin_dir, &target_dir)?;
+        let meta = json!({
+            "importedAt": now_iso(),
+            "from": package.file_name().and_then(|s| s.to_str()).unwrap_or(""),
+            "pluginSha256": plugin_sha,
+            "engineProtocol": ENGINE_PROTOCOL,
+            "version": manifest.get("version").cloned().unwrap_or(json!("0")),
+            "warning": "decoration from plugin.json is injected into ChatGPT renderer",
+        });
+        let target_dir = install_skin_tree(&skin_dir, &id, "import", meta)?;
         let installed: Value = serde_json::from_str(
             &fs::read_to_string(target_dir.join("skin.json"))
                 .map_err(|e| EngineError::msg(e.to_string()))?,
         )
         .map_err(|e| EngineError::msg(e.to_string()))?;
         validate_skin_manifest(&installed, &target_dir)?;
-
-        let meta = json!({
-            "importedAt": now_iso(),
-            "from": package.file_name().and_then(|s| s.to_str()).unwrap_or(""),
-            "pluginSha256": plugin_sha,
-            "engineProtocol": ENGINE_PROTOCOL,
-            "warning": "decoration from plugin.json is injected into ChatGPT renderer",
-        });
-        let _ = fs::write(
-            target_dir.join(".import-meta.json"),
-            format!("{}\n", serde_json::to_string_pretty(&meta).unwrap_or_default()),
-        );
 
         // Touch list for diagnostics
         let _ = list_skins();

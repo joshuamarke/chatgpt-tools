@@ -155,15 +155,22 @@ html.skins-theme-dark {
  * header position/top/z-index so side-panel close keeps working.
  * ========================================================================== */
 
-html:is(.skins-art-wide, .skins-art-standard) main.main-surface > header.app-header-tint {
+/*
+ * Host header anchor (selectors.json · header-tint):
+ *   main.main-surface > header
+ *   (+ data-app-shell-application-menu-bar; legacy .app-header-tint if present)
+ * Engine only: ink + clickability. Never set position/top/z-index/transform.
+ * Appearance (bg / shadow / border / text-shadow) belongs in each skin CSS.
+ */
+html:is(.skins-art-wide, .skins-art-standard) main.main-surface > header {
   /* position / top / z-index not set here — leave native fixed header geometry */
   color: var(--cg-text) !important;
 }
 
-html:is(.skins-art-wide, .skins-art-standard) main.main-surface > header.app-header-tint button,
-html:is(.skins-art-wide, .skins-art-standard) main.main-surface > header.app-header-tint a,
-html:is(.skins-art-wide, .skins-art-standard) main.main-surface > header.app-header-tint [role="button"],
-html:is(.skins-art-wide, .skins-art-standard) main.main-surface > header.app-header-tint [data-state] {
+html:is(.skins-art-wide, .skins-art-standard) main.main-surface > header button,
+html:is(.skins-art-wide, .skins-art-standard) main.main-surface > header a,
+html:is(.skins-art-wide, .skins-art-standard) main.main-surface > header [role="button"],
+html:is(.skins-art-wide, .skins-art-standard) main.main-surface > header [data-state] {
   pointer-events: auto !important;
 }
 
@@ -180,13 +187,18 @@ html:is(.skins-art-wide, .skins-art-standard) [id*="-skin-chrome"] {
   pointer-events: none !important;
 }
 
-/* Dark application menu bar (outside main-surface) */
+/*
+ * Dark application menu bar — host anchor (selectors.json · application-menu-top-bar):
+ *   [class*="ApplicationMenuTopBar"]  (+ legacy group/application-menu-top-bar)
+ * Engine only: readable ink + clickability on dark theme. Border/shadow/bg polish = skin.
+ */
+html.skins-theme-dark [class*="ApplicationMenuTopBar"],
 html.skins-theme-dark [class~="group/application-menu-top-bar"] {
   color: var(--cg-text) !important;
-  background: color-mix(in srgb, var(--skins-sidebar, #12141a) 90%, transparent) !important;
-  border-bottom: 1px solid var(--cg-immersive-line) !important;
 }
 
+html.skins-theme-dark [class*="ApplicationMenuTopBar"] button,
+html.skins-theme-dark [class*="ApplicationMenuTopBar"] [role="button"],
 html.skins-theme-dark [class~="group/application-menu-top-bar"] button,
 html.skins-theme-dark [class~="group/application-menu-top-bar"] [role="button"] {
   color: inherit !important;
@@ -313,7 +325,8 @@ html:is(.skins-art-wide, .skins-art-standard) .ProseMirror {
  * ========================================================================== */
 
 /* Any skin's *-home-shell, or task routes without home shell — one body wallpaper */
-html.skins-art-wide[data-skins-art-paint="body"]:has(main.main-surface[class*="home-shell"]) body,
+html.skins-art-wide[data-skins-art-paint="body"] body,
+html.skins-art-wide[data-skins-art-paint="body"] body,
 html.skins-art-wide[data-skins-art-paint="body"]:is(.skins-task-ambient, .skins-task-banner):has(
     main.main-surface:not([class*="home-shell"])
   )
@@ -333,7 +346,7 @@ html.skins-art-wide[data-skins-art-paint="body"] body::before {
   content: none !important;
 }
 
-html.skins-art-wide[data-skins-art-paint="body"]:has(main.main-surface[class*="home-shell"]) aside.app-shell-left-panel,
+html.skins-art-wide[data-skins-art-paint="body"] aside.app-shell-left-panel,
 html.skins-art-wide[data-skins-art-paint="body"]:is(.skins-task-ambient, .skins-task-banner):has(
     main.main-surface:not([class*="home-shell"])
   )
@@ -362,7 +375,7 @@ html.skins-art-wide[data-skins-art-paint="body"] aside.app-shell-left-panel::aft
 }
 
 /* Main paints scrim only — never a second full-bleed art crop (body owns wallpaper) */
-html.skins-art-wide[data-skins-art-paint="body"] main.main-surface[class*="home-shell"],
+html.skins-art-wide[data-skins-art-paint="body"] main.main-surface:has([data-testid="home-icon"]),
 html.skins-art-wide[data-skins-art-paint="body"]:is(.skins-task-ambient, .skins-task-banner)
   main.main-surface:not([class*="home-shell"]) {
   background: linear-gradient(
@@ -386,19 +399,52 @@ html.skins-art-wide[data-skins-art-paint="body"]:is(.skins-task-ambient, .skins-
   ) !important;
 }
 
-/* Transparent continuous top bar over full-window art */
-html.skins-art-wide main.main-surface > header.app-header-tint {
+/*
+ * Wide wallpaper: keep header geometrically native; only clear host tint so body art
+ * can show through. Further polish (text-shadow, icon filter, solid settings header)
+ * is skin-owned — do not bake brand look into the framework.
+ */
+/*
+ * Wide wallpaper: transparent header only on home / thread so art shows through.
+ * Settings and other solid routes keep host header tint — skins paint solid there.
+ * Never set position/top/z-index here (host fixed + MainContentFrame margin-top).
+ */
+html.skins-art-wide main.main-surface[class*="home-shell"] > header,
+html.skins-art-wide main.main-surface:has([data-testid="home-icon"]) > header,
+html.skins-art-wide main.main-surface:has(.thread-scroll-container) > header {
   background: transparent !important;
-  border-bottom: 0 !important;
-  box-shadow: none !important;
   backdrop-filter: none !important;
-  text-shadow:
-    0 1px 2px color-mix(in srgb, var(--skins-canvas, #f7f8fc) 86%, transparent),
-    0 0 8px color-mix(in srgb, var(--skins-canvas, #f7f8fc) 58%, transparent) !important;
+  -webkit-backdrop-filter: none !important;
 }
 
-html.skins-art-wide main.main-surface > header.app-header-tint svg {
-  filter: drop-shadow(0 1px 2px color-mix(in srgb, var(--skins-canvas, #f7f8fc) 72%, transparent));
+/*
+ * Host MainContentTopFade (CDP): absolute strip under header (~16px, z-20) with
+ * linear-gradient(solid → transparent). Not box-shadow. On immersive wallpaper it
+ * reads as a black band under the title/brand bar. Framework clears it for continuous
+ * art; individual skins may re-enable on solid settings routes if needed.
+ * Selector contract: selectors.json · main-content-top-fade
+ */
+html:is(.skins-art-wide, .skins-art-standard)
+  main.main-surface
+  [class*="MainContentTopFade"],
+html:is(.skins-art-wide, .skins-art-standard)
+  main.main-surface
+  [class*="_MainContentTopFade_"],
+html:is(.skins-art-wide, .skins-art-standard)
+  main.main-surface[class*="home-shell"]
+  [class*="TopFade"] {
+  display: none !important;
+  opacity: 0 !important;
+  visibility: hidden !important;
+  height: 0 !important;
+  min-height: 0 !important;
+  max-height: 0 !important;
+  background: none !important;
+  background-image: none !important;
+  background-color: transparent !important;
+  box-shadow: none !important;
+  border: 0 !important;
+  pointer-events: none !important;
 }
 
 html.skins-art-wide main.main-surface [role="main"] {
@@ -406,7 +452,7 @@ html.skins-art-wide main.main-surface [role="main"] {
 }
 
 /* Home hero: no second cropped wallpaper panel under any skin's *-home */
-html.skins-art-wide main.main-surface[class*="home-shell"]
+html.skins-art-wide main.main-surface:has([data-testid="home-icon"])
   [class$="-home"] > div:first-child > div:first-child > div:first-child {
   border: 0 !important;
   border-radius: 0 !important;
@@ -414,13 +460,13 @@ html.skins-art-wide main.main-surface[class*="home-shell"]
   box-shadow: none !important;
 }
 
-html.skins-art-wide main.main-surface[class*="home-shell"]
+html.skins-art-wide main.main-surface:has([data-testid="home-icon"])
   [class$="-home"] > div:first-child > div:first-child > div:first-child::before {
   content: none !important;
 }
 
 /* Hero title remains readable on wallpaper even if skin homeClass is mid-remount */
-html.skins-art-wide main.main-surface[class*="home-shell"] [data-feature="game-source"] {
+html.skins-art-wide main.main-surface:has([data-testid="home-icon"]) [data-feature="game-source"] {
   color: var(--cg-text, var(--skins-text, inherit)) !important;
 }
 
@@ -447,7 +493,7 @@ html.skins-art-wide
  */
 html:is(.skins-art-wide, .skins-art-standard)
   main.main-surface
-  > header.app-header-tint
+  > header
   button[class~="bg-token-foreground"] {
   color: var(--cg-primary-button-ink, #ffffff) !important;
   pointer-events: auto !important;
@@ -455,7 +501,7 @@ html:is(.skins-art-wide, .skins-art-standard)
 
 html:is(.skins-art-wide, .skins-art-standard)
   main.main-surface
-  > header.app-header-tint
+  > header
   button[class~="bg-token-foreground"]
   * {
   color: inherit !important;
@@ -463,7 +509,7 @@ html:is(.skins-art-wide, .skins-art-standard)
 
 html:is(.skins-art-wide, .skins-art-standard)
   main.main-surface
-  > header.app-header-tint
+  > header
   button[class~="bg-token-foreground"]
   svg {
   color: inherit !important;

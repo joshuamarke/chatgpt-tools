@@ -1192,14 +1192,21 @@ function renderSkins(status) {
 
 /** @param {any} skin */
 function skinSourceLabel(skin) {
+  const origin = skin.origin || "";
   const src = skin.source || (skin.builtin ? "bundled" : "user");
   if (src === "remote" || skin.installState === "remote") {
     return { label: "云端", cls: "tag-remote" };
   }
-  if (src === "cache") {
-    return { label: "已缓存", cls: "tag-cache" };
+  if (origin === "cloud" || src === "cache") {
+    return { label: "已安装", cls: "tag-cache" };
   }
-  if (src === "bundled" || skin.builtin) {
+  if (origin === "design") {
+    return { label: "自定义", cls: "" };
+  }
+  if (origin === "workspace") {
+    return { label: "工作区", cls: "" };
+  }
+  if (src === "bundled" || skin.builtin || origin === "seed") {
     return { label: "内置", cls: "" };
   }
   return { label: "已导入", cls: "" };

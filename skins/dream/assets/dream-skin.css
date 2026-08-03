@@ -8,7 +8,7 @@
   --skins-suggest-list-radius: 12px;
   --skins-suggest-list-border: 0;
   --skins-suggest-list-shadow: none;
-  --skins-suggest-list-panel-bg: color-mix(in srgb, var(--skins-surface-raised, #fff) 78%, transparent);
+  --skins-suggest-list-panel-bg: color-mix(in srgb, var(--skins-surface-raised, #bbb6b6) 78%, transparent);
   --skins-suggest-list-panel-border: 1px solid color-mix(in srgb, var(--skins-line, #c8cad4) 70%, transparent);
   --skins-suggest-list-panel-radius: 14px;
   --skins-suggest-list-panel-padding: 8px 10px 10px;
@@ -55,38 +55,13 @@ html.codex-dream-skin body::before {
 
 html.codex-dream-skin aside.app-shell-left-panel {
   background:
-    linear-gradient(180deg, rgba(255, 250, 253, 0.377), rgba(255, 239, 248, 0.103)) !important;
+    linear-gradient(180deg, rgba(115, 42, 128, 0.28), rgba(85, 28, 110, 0.12)) !important;
   border: 0 !important;
   border-left: 0 !important;
   border-radius: 0 !important;
   box-shadow: 10px 0 32px rgba(142, 55, 147, .10) !important;
   backdrop-filter: none !important;
   color: var(--dream-ink) !important;
-}
-
-/*
- * 侧栏右缘常驻细线（替代宿主 hover 才出现的分隔条）。
- * 宿主锚点：aside.app-shell-left-panel（overflow-visible / relative flex）。
- * 标准构图直接画 border-right 即可。
- */
-html.codex-dream-skin.skins-art-standard aside.app-shell-left-panel {
-  border-right: 1px solid rgba(94, 89, 97, 0.308) !important;
-}
-
-/*
- * 宽图构图：immersive 基线对 paint=body 会 border:0 + box-shadow:none，
- * 选择器带 :has(...) 优先级更高，这里对齐基线路径再写回右缘。
- * dream.jpg ≈ 1.75 会落在 skins-art-wide。
- */
-html.codex-dream-skin.skins-art-wide aside.app-shell-left-panel,
-html.codex-dream-skin.skins-art-wide[data-skins-art-paint="body"] aside.app-shell-left-panel,
-html.codex-dream-skin.skins-art-wide[data-skins-art-paint="body"]:has(main.main-surface[class*="home-shell"])
-  aside.app-shell-left-panel,
-html.codex-dream-skin.skins-art-wide[data-skins-art-paint="body"]:is(.skins-task-ambient, .skins-task-banner):has(
-    main.main-surface:not([class*="home-shell"])
-  )
-  aside.app-shell-left-panel {
-  border-right: 1px solid rgba(94, 89, 97, 0.308) !important;
 }
 
 html.codex-dream-skin aside.app-shell-left-panel nav {
@@ -156,17 +131,37 @@ html.codex-dream-skin.skins-art-wide[data-skins-art-paint="body"]:has(main.main-
 }
 
 /* 原 dream-brand 文案区：去掉顶栏粉紫渐变色块，保持轻描边即可 */
-html.codex-dream-skin main.main-surface > header.app-header-tint {
+html.codex-dream-skin main.main-surface > header {
   background: transparent !important;
-  border-bottom: 1px solid rgba(229,151,198,.22) !important;
+  border-bottom: 1px solid rgba(229, 151, 198, 0.22) !important;
   backdrop-filter: none !important;
   box-shadow: none !important;
 }
 
 /* 首页顶栏彻底干净，避免 brand 位置残留色带 */
-html.codex-dream-skin main.main-surface.dream-home-shell > header.app-header-tint {
+html.codex-dream-skin main.main-surface.dream-home-shell > header {
   background: transparent !important;
   border-bottom: 0 !important;
+}
+
+html.codex-dream-skin main.main-surface [class*="MainContentTopFade"],
+html.codex-dream-skin main.main-surface [class*="_MainContentTopFade_"],
+html.codex-dream-skin main.main-surface.dream-home-shell [class*="TopFade"],
+html.codex-dream-skin.skins-art-wide main.main-surface [class*="MainContentTopFade"],
+html.codex-dream-skin.skins-art-wide main.main-surface [class*="TopFade"] {
+  display: none !important;
+  opacity: 0 !important;
+  visibility: hidden !important;
+  height: 0 !important;
+  min-height: 0 !important;
+  max-height: 0 !important;
+  background: none !important;
+  background-image: none !important;
+  background-color: transparent !important;
+  box-shadow: none !important;
+  border: 0 !important;
+  pointer-events: none !important;
+  content: none !important;
 }
 
 #codex-dream-skin-chrome {

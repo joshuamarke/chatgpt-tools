@@ -2,7 +2,7 @@
  * Production bundle: only ship the default skin(s) inside the installer.
  * Other skins can be imported locally; installers only ship the default set.
  *
- * Dev (`tauri dev`) still uses the full repo `skins/` tree â€?this script
+ * Dev (`tauri dev`) still uses the full repo `skins/` tree ï¿½?this script
  * only runs as `beforeBuildCommand`.
  *
  * Override:
@@ -85,5 +85,5 @@ fs.writeFileSync(
 );
 
 console.log(
-  `[stage-bundle-skins] staged ${staged.length} skin(s) â†?bundle-resources/skins: ${staged.join(", ")}`
+  `[stage-bundle-skins] staged ${staged.length} skin(s) ï¿½?bundle-resources/skins: ${staged.join(", ")}`
 );

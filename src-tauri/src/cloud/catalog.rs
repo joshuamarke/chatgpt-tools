@@ -132,7 +132,7 @@ fn local_version_of(skin: &Value) -> String {
 }
 
 /// Merge remote catalog entries into status skins array (mutates status).
-/// Priority already applied in list_skins: user > cache > bundled.
+/// Local skins already come from the unified library (or dev workspace).
 /// Adds remote-only cards and flags updateAvailable.
 pub fn merge_remote_into_status(status: &mut Value, catalog: Option<&Value>, cfg: &CloudConfig) {
     let Some(catalog) = catalog else {

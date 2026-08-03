@@ -1,5 +1,5 @@
 {
-  "version": "2.3.14",
-  "chromeHtml": "<div class=\"jiuyi-brand\"><span class=\"jiuyi-seal\"> ᐝ久·憶ᐝ </span><span><b>烟雨客 · 限定版</b><small> · 一蓑烟雨任平生</small></span></div>\n<div class=\"jiuyi-rain\"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>\n<div class=\"jiuyi-lanterns\"><i></i><i></i><i></i></div>",
+  "version": "2.3.25",
+  "chromeHtml": "<div class=\"jiuyi-brand\" aria-hidden=\"true\"><span class=\"jiuyi-seal\">ᐝ久憶</span><span class=\"jiuyi-brand-text\"><b>烟雨客 · 限定版</b><small>一蓑烟雨任平生</small></span></div><div class=\"jiuyi-rain\" aria-hidden=\"true\"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div><div class=\"jiuyi-lanterns\" aria-hidden=\"true\"><i></i><i></i><i></i></div>",
   "skipAnalysis": false
 }

@@ -1,9 +1,6 @@
 //! Secure skin package download: catalog-only, host allowlist, sha256, validate.
 
-use super::cache::{
-    cache_skins_dir, cache_tmp_dir, ensure_cloud_layout, list_cached_skins, now_unix_ms,
-    read_cache_meta, write_text_atomic,
-};
+use super::cache::{cache_tmp_dir, ensure_cloud_layout, list_cached_skins, now_unix_ms};
 use super::catalog::{load_catalog_disk, refresh_catalog, version_cmp};
 use super::config::{validate_download_url, CloudConfig, MAX_PACKAGE_BYTES};
 use super::http::get_bytes_allowlisted;
@@ -12,7 +9,6 @@ use crate::engine::EngineError;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::fs;
-use std::path::Path;
 
 /// Download skin by id using **catalog package metadata only** (never arbitrary URL from UI).
 pub fn download_skin(cfg: &CloudConfig, skin_id: &str) -> Result<Value, EngineError> {
@@ -112,15 +108,15 @@ pub fn download_skin(cfg: &CloudConfig, skin_id: &str) -> Result<Value, EngineEr
         .unwrap_or("0")
         .to_string();
 
-    // Cache hit: same id + version + sha256
-    if let Some(meta) = read_cache_meta(&safe_id) {
+    // Library hit: same id + version + sha256 (cloud origin)
+    if let Some(meta) = cdp::read_library_cloud_meta(&safe_id) {
         let same_ver = meta.get("version").and_then(|v| v.as_str()) == Some(version.as_str());
         let same_hash = meta
             .get("sha256")
             .and_then(|v| v.as_str())
             .map(|s| s.eq_ignore_ascii_case(&sha256_expected))
             .unwrap_or(false);
-        let dir = cache_skins_dir().join(&safe_id);
+        let dir = cdp::library_skin_path(&safe_id);
         if same_ver && same_hash && dir.join("skin.json").is_file() {
             return Ok(json!({
                 "ok": true,
@@ -129,7 +125,7 @@ pub fn download_skin(cfg: &CloudConfig, skin_id: &str) -> Result<Value, EngineEr
                 "version": version,
                 "sha256": sha256_expected,
                 "dir": dir.to_string_lossy(),
-                "message": "已使用本地缓存，跳过下载",
+                "message": "已使用本地安装，跳过下载",
             }));
         }
     }
@@ -238,13 +234,8 @@ pub fn download_skin(cfg: &CloudConfig, skin_id: &str) -> Result<Value, EngineEr
             let _ = fs::remove_file(&leftover);
         }
 
-        let target = cache_skins_dir().join(&id);
-        // Atomic replace: write to staging then rename
-        let staging = cache_skins_dir().join(format!(".staging-{id}-{}", now_unix_ms()));
-        let _ = fs::remove_dir_all(&staging);
-        copy_dir_recursive(&skin_dir, &staging)?;
         fs::write(
-            staging.join("skin.json"),
+            skin_dir.join("skin.json"),
             format!(
                 "{}\n",
                 serde_json::to_string_pretty(&manifest).unwrap_or_default()
@@ -252,14 +243,10 @@ pub fn download_skin(cfg: &CloudConfig, skin_id: &str) -> Result<Value, EngineEr
         )
         .map_err(|e| EngineError::msg(format!("write skin.json: {e}")))?;
 
-        let installed: Value = serde_json::from_str(
-            &fs::read_to_string(staging.join("skin.json"))
-                .map_err(|e| EngineError::msg(e.to_string()))?,
-        )
-        .map_err(|e| EngineError::msg(e.to_string()))?;
-        cdp::validate_skin_manifest_pub(&installed, &staging)?;
+        cdp::validate_skin_manifest_pub(&manifest, &skin_dir)?;
 
         let meta = json!({
+            "origin": "cloud",
             "version": version,
             "sha256": sha256_expected,
             "downloadedAt": now_unix_ms().to_string(),
@@ -268,27 +255,12 @@ pub fn download_skin(cfg: &CloudConfig, skin_id: &str) -> Result<Value, EngineEr
             "channel": cfg.channel,
             "catalogId": skin_id,
         });
-        write_text_atomic(
-            &staging.join(".cache-meta.json"),
-            &format!(
-                "{}\n",
-                serde_json::to_string_pretty(&meta).unwrap_or_default()
-            ),
-        )?;
-
-        if target.is_dir() {
-            let bak = cache_skins_dir().join(format!(".bak-{id}-{}", now_unix_ms()));
-            let _ = fs::rename(&target, &bak);
-            if let Err(e) = fs::rename(&staging, &target) {
-                let _ = fs::rename(&bak, &target);
-                let _ = fs::remove_dir_all(&staging);
-                return Err(EngineError::msg(format!("安装缓存失败: {e}")));
-            }
-            let _ = fs::remove_dir_all(&bak);
-        } else if let Err(e) = fs::rename(&staging, &target) {
-            let _ = fs::remove_dir_all(&staging);
-            return Err(EngineError::msg(format!("安装缓存失败: {e}")));
-        }
+        let target = cdp::install_skin_to_library(&skin_dir, &id, "cloud", meta)?;
+        let installed: Value = serde_json::from_str(
+            &fs::read_to_string(target.join("skin.json"))
+                .map_err(|e| EngineError::msg(e.to_string()))?,
+        )
+        .map_err(|e| EngineError::msg(e.to_string()))?;
 
         Ok(json!({
             "ok": true,
@@ -300,7 +272,7 @@ pub fn download_skin(cfg: &CloudConfig, skin_id: &str) -> Result<Value, EngineEr
             "dir": target.to_string_lossy(),
             "size": bytes.len(),
             "sourceUrl": used_url,
-            "message": "已下载并缓存",
+            "message": "已下载并安装到皮肤库",
         }))
     })();
 
@@ -323,19 +295,4 @@ fn shorten_url(u: &str) -> String {
     } else {
         format!("{}…", &u[..61])
     }
-}
-
-fn copy_dir_recursive(src: &Path, dst: &Path) -> Result<(), EngineError> {
-    fs::create_dir_all(dst).map_err(|e| EngineError::msg(format!("mkdir: {e}")))?;
-    for ent in fs::read_dir(src).map_err(|e| EngineError::msg(e.to_string()))? {
-        let ent = ent.map_err(|e| EngineError::msg(e.to_string()))?;
-        let from = ent.path();
-        let to = dst.join(ent.file_name());
-        if from.is_dir() {
-            copy_dir_recursive(&from, &to)?;
-        } else {
-            fs::copy(&from, &to).map_err(|e| EngineError::msg(format!("copy: {e}")))?;
-        }
-    }
-    Ok(())
 }

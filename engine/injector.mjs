@@ -361,14 +361,23 @@ async function waitForTargets(port, timeoutMs, expectedBrowserId = null) {
 
 async function probeSession(session) {
   return session.evaluate(`(() => {
-    const shell = Boolean(document.querySelector('main.main-surface') || document.querySelector('main') || document.querySelector('[role="main"]'));
+    const shell = Boolean(
+      document.querySelector('main:is(.main-surface, [data-app-shell-main-surface], [class*="_MainContentSurface_"])') ||
+      document.querySelector('main') ||
+      document.querySelector('[role="main"]')
+    );
     const sidebar = Boolean(document.querySelector('aside.app-shell-left-panel'));
     const composer = Boolean(document.querySelector('.composer-surface-chrome'));
     const main = Boolean(document.querySelector('[role="main"]'));
+    const settings = Boolean(
+      document.querySelector('[data-settings-panel-slug="general-settings"]') ||
+      document.querySelector('input[name="appearance-theme"]') ||
+      document.querySelector('[data-testid="theme-preview"]')
+    );
     return {
-      markers: { shell, sidebar, composer, main },
+      markers: { shell, sidebar, composer, main, settings },
       // Sidebar is optional (collapsed rail). Pets/blank windows have no shell.
-      codex: location.protocol === 'app:' && shell && (composer || main || sidebar),
+      codex: location.protocol === 'app:' && ((shell && (composer || main || sidebar)) || settings),
     };
   })()`);
 }
@@ -625,7 +634,14 @@ async function verifySession(session, markers, soft = false) {
     const style = document.getElementById(markers.styleId);
     const chrome = document.getElementById(markers.chromeId);
     const home = document.querySelector('.' + markers.homeClass);
-    const shellMain = document.querySelector('main.main-surface') || document.querySelector('main') || document.querySelector('[role="main"]');
+    const shellMain =
+      document.querySelector('main:is(.main-surface, [data-app-shell-main-surface], [class*="_MainContentSurface_"])') ||
+      document.querySelector('main') ||
+      document.querySelector('[role="main"]');
+    const settingsPanel =
+      document.querySelector('[data-settings-panel-slug="general-settings"]') ||
+      document.querySelector('input[name="appearance-theme"]') ||
+      document.querySelector('[data-testid="theme-preview"]');
     const suggestions = home?.querySelector('.group\\\\/home-suggestions') ?? null;
     const cards = suggestions ? [...suggestions.querySelectorAll('button')].map(box) : [];
     const composer = document.querySelector('.composer-surface-chrome');
@@ -640,6 +656,7 @@ async function verifySession(session, markers, soft = false) {
       homePresent: Boolean(home),
       suggestionsPresent: Boolean(suggestions),
       shellPresent: Boolean(shellMain),
+      settingsPresent: Boolean(settingsPanel),
       cards,
       composer: box(composer),
       sidebar: box(sidebar),
@@ -655,9 +672,9 @@ async function verifySession(session, markers, soft = false) {
     } else {
       const homeOk = !result.homePresent || !result.suggestionsPresent ||
         (result.cards.length >= 2 && result.cards.length <= 4);
-      result.pass = result.installed && result.stylePresent && result.shellPresent &&
+      result.pass = result.installed && result.stylePresent && (result.shellPresent || result.settingsPresent) &&
         (!result.chromePresent || result.chromePointerEvents === 'none') &&
-        (Boolean(result.composer) || result.shellPresent) &&
+        (Boolean(result.composer) || result.shellPresent || result.settingsPresent) &&
         homeOk;
     }
     return result;
@@ -714,10 +731,13 @@ export function earlyPayloadFor(shellPayload, revision, markers) {
       if (window[generationKey] !== generation) { stop(); return true; }
       const root = document.documentElement;
       if (!root || !document.body) return false;
-      const shell = document.querySelector('main.main-surface') ||
+      const shell = document.querySelector('main:is(.main-surface, [data-app-shell-main-surface], [class*="_MainContentSurface_"])') ||
         document.querySelector('main') ||
         document.querySelector('[role="main"]');
-      if (!shell) return false;
+      const settings = document.querySelector('[data-settings-panel-slug="general-settings"]') ||
+        document.querySelector('input[name="appearance-theme"]') ||
+        document.querySelector('[data-testid="theme-preview"]');
+      if (!shell && !settings) return false;
       stop();
       ${shellPayload};
       window[appliedKey] = generation;

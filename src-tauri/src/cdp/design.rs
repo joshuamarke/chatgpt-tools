@@ -2,7 +2,8 @@
 //! Pure filesystem — no CDP, no Node.
 
 use super::image::MAX_ART_BYTES;
-use super::native::{ensure_state_dir, get_skin, safe_skin_id_pub, user_skins_dir_pub};
+use super::library::{self, install_skin_tree};
+use super::native::{ensure_state_dir, get_skin, safe_skin_id_pub};
 use super::package::validate_skin_manifest;
 use crate::engine::EngineError;
 use serde_json::{json, Value};
@@ -179,8 +180,8 @@ pub fn design_wallpaper_native(payload: &Value) -> Result<Value, EngineError> {
         );
     }
 
-    let user_root = user_skins_dir_pub();
-    let target_dir = user_root.join(&id);
+    let lib_dir = library::library_dir();
+    let target_dir = lib_dir.join(&id);
     if target_dir.exists() {
         return Err(EngineError::msg(format!(
             "皮肤「{safe_name}」已存在，请换一个名称"
@@ -250,7 +251,7 @@ pub fn design_wallpaper_native(payload: &Value) -> Result<Value, EngineError> {
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_millis())
         .unwrap_or(0);
-    let tmp = user_root.join(format!(".wallpaper-{}-{}", std::process::id(), stamp));
+    let tmp = lib_dir.join(format!(".wallpaper-{}-{}", std::process::id(), stamp));
 
     let result = (|| -> Result<Value, EngineError> {
         if tmp.exists() {
@@ -583,15 +584,14 @@ html.{root} a, html.{root} [data-state="active"], html.{root} [aria-current="pag
 
         validate_skin_manifest(&manifest, &tmp)?;
 
-        if target_dir.exists() {
-            rm_dir_recursive(&target_dir);
-        }
-        // Prefer atomic rename; fall back to copy when volumes differ.
-        if fs::rename(&tmp, &target_dir).is_err() {
-            copy_dir_recursive(&tmp, &target_dir)
-                .map_err(|e| EngineError::msg(format!("安装自定义皮肤失败: {e}")))?;
-            rm_dir_recursive(&tmp);
-        }
+        let meta = json!({
+            "origin": "design",
+            "baseSkinId": base_id,
+            "version": manifest.get("version").cloned().unwrap_or(json!("1.0.0")),
+        });
+        let installed_dir = install_skin_tree(&tmp, &id, "design", meta)
+            .map_err(|e| EngineError::msg(format!("安装自定义皮肤失败: {e}")))?;
+        rm_dir_recursive(&tmp);
 
         let art = manifest.get("art").cloned().unwrap_or(json!({}));
         Ok(json!({
@@ -599,7 +599,7 @@ html.{root} a, html.{root} [data-state="active"], html.{root} [aria-current="pag
             "skinId": id,
             "name": safe_name,
             "baseSkinId": base_id,
-            "dir": target_dir.to_string_lossy(),
+            "dir": installed_dir.to_string_lossy(),
             "appearance": appearance_choice,
             "art": art,
             "nativeEngine": true,

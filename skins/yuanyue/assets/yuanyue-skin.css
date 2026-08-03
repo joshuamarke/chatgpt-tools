@@ -1,4 +1,4 @@
-﻿/**
+/**
  * yuanyue — 圆月 · 海棠
  * 实现方式对齐 shiguang / dream：
  *   · artVar=--yuanyue-art，默认 wallpaper/body 全窗壁纸
@@ -113,7 +113,7 @@ html.codex-yuanyue-skin aside.app-shell-left-panel button[aria-label^="切换模
 }
 
 html.codex-yuanyue-skin aside.app-shell-left-panel button[aria-label^="切换模式"]::after {
-  content: "◇";
+  content: "🌕";
   margin-left: 2px;
   color: #f5e8c0;
 }
@@ -154,14 +154,14 @@ html.codex-yuanyue-skin.skins-art-wide[data-skins-art-paint="body"]:has(main.mai
   box-shadow: none !important;
 }
 
-html.codex-yuanyue-skin main.main-surface > header.app-header-tint {
+html.codex-yuanyue-skin main.main-surface > header {
   background: transparent !important;
   border-bottom: 1px solid rgba(245, 232, 192, 0.18) !important;
   backdrop-filter: none !important;
   box-shadow: none !important;
 }
 
-html.codex-yuanyue-skin main.main-surface.yuanyue-home-shell > header.app-header-tint {
+html.codex-yuanyue-skin main.main-surface.yuanyue-home-shell > header {
   background: transparent !important;
   border-bottom: 0 !important;
 }
@@ -580,3 +580,26 @@ html.codex-yuanyue-skin [data-message-author-role] {
   .yuanyue-sparkles i { animation: none !important; }
 }
 
+/*
+ * 宿主 MainContentTopFade（CDP）：header 底缘压暗渐变（非 box-shadow）。
+ * 沉浸式壁纸下会在顶栏/品牌下形成黑带；关掉以保持连续立绘。
+ * 契约 key: main-content-top-fade（engine/runtime/selectors.json）
+ */
+html.codex-yuanyue-skin main.main-surface [class*="MainContentTopFade"],
+html.codex-yuanyue-skin main.main-surface [class*="_MainContentTopFade_"],
+html.codex-yuanyue-skin main.main-surface.yuanyue-home-shell [class*="TopFade"],
+html.codex-yuanyue-skin.skins-art-wide main.main-surface [class*="MainContentTopFade"],
+html.codex-yuanyue-skin.skins-art-wide main.main-surface [class*="TopFade"] {
+  display: none !important;
+  opacity: 0 !important;
+  visibility: hidden !important;
+  height: 0 !important;
+  min-height: 0 !important;
+  max-height: 0 !important;
+  background: none !important;
+  background-image: none !important;
+  background-color: transparent !important;
+  box-shadow: none !important;
+  border: 0 !important;
+  pointer-events: none !important;
+}

@@ -149,8 +149,10 @@ function resolveStateRoot() {
 }
 
 const STATE_ROOT = resolveStateRoot();
-// 用户导入的皮肤放可写目录（打包后 app 目录可能只读）
-const USER_SKINS_DIR = path.join(STATE_ROOT, "skins");
+// Unified install root (Scheme B) — import / design / legacy migrates here.
+// Product GUI uses Rust `cdp/library.rs`; this path keeps optional Node CLI aligned.
+const LIBRARY_DIR = path.join(STATE_ROOT, "library");
+const USER_SKINS_DIR = LIBRARY_DIR;
 const STATE_PATH = path.join(STATE_ROOT, "state.json");
 const SETTINGS_PATH = path.join(STATE_ROOT, "settings.json");
 const LOCK_PATH = path.join(STATE_ROOT, ".engine.lock");
@@ -208,11 +210,11 @@ function pathLooksLikeExe(p) {
 
 function ensureStateDir() {
   fs.mkdirSync(STATE_ROOT, { recursive: true });
-  fs.mkdirSync(USER_SKINS_DIR, { recursive: true });
+  fs.mkdirSync(LIBRARY_DIR, { recursive: true });
 }
 
 function skinDirs() {
-  return [BUNDLED_SKINS_DIR, USER_SKINS_DIR];
+  return [BUNDLED_SKINS_DIR, LIBRARY_DIR];
 }
 
 function safeSkinId(id) {
@@ -309,18 +311,29 @@ function readSkinFromDir(dir, source) {
 function listSkins() {
   ensureStateDir();
   const map = new Map();
-  // 内置先加载，用户皮肤同 id 可覆盖
-  for (const [dirRoot, source] of [
-    [BUNDLED_SKINS_DIR, "bundled"],
-    [USER_SKINS_DIR, "user"],
-  ]) {
-    if (!fs.existsSync(dirRoot)) continue;
-    for (const d of fs.readdirSync(dirRoot, { withFileTypes: true })) {
+  // Workspace (repo skins) first — never shadowed (matches Rust dev library mode).
+  if (fs.existsSync(BUNDLED_SKINS_DIR)) {
+    for (const d of fs.readdirSync(BUNDLED_SKINS_DIR, { withFileTypes: true })) {
       if (!d.isDirectory()) continue;
-      // `_template` and other author scaffolding — not installable skins
       if (d.name.startsWith(".") || d.name.startsWith("_")) continue;
-      const skin = readSkinFromDir(path.join(dirRoot, d.name), source);
-      if (skin?.id) map.set(skin.id, skin);
+      const skin = readSkinFromDir(path.join(BUNDLED_SKINS_DIR, d.name), "bundled");
+      if (skin?.id) {
+        skin.origin = "workspace";
+        map.set(skin.id, skin);
+      }
+    }
+  }
+  // Library extras only (import/design) — skip ids already in workspace.
+  if (fs.existsSync(LIBRARY_DIR)) {
+    for (const d of fs.readdirSync(LIBRARY_DIR, { withFileTypes: true })) {
+      if (!d.isDirectory()) continue;
+      if (d.name.startsWith(".") || d.name.startsWith("_")) continue;
+      if (map.has(d.name)) continue;
+      const skin = readSkinFromDir(path.join(LIBRARY_DIR, d.name), "user");
+      if (skin?.id && !map.has(skin.id)) {
+        skin.origin = "import";
+        map.set(skin.id, skin);
+      }
     }
   }
   return [...map.values()].sort((a, b) => a.name.localeCompare(b.name, "zh"));
@@ -869,11 +882,12 @@ function importSkin(packagePath, { overwrite = true } = {}) {
     );
 
     // 记录导入摘要，便于用户核对
-    const metaPath = path.join(targetDir, ".import-meta.json");
+    const metaPath = path.join(targetDir, ".install-meta.json");
     fs.writeFileSync(
       metaPath,
       JSON.stringify(
         {
+          origin: "import",
           importedAt: new Date().toISOString(),
           from: path.basename(packagePath),
           pluginSha256,
@@ -1433,72 +1447,25 @@ Get-CimInstance Win32_Process | Where-Object {
   }
 }
 
-/** Content stamp so runtime-skins refresh when CSS/plugin/art/skin.json change. */
-function skinMaterialStamp(skinDir) {
-  try {
-    const manifestPath = path.join(skinDir, "skin.json");
-    const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
-    const parts = [path.resolve(skinDir), "v2"];
-    for (const rel of [
-      "skin.json",
-      manifest.assets?.css,
-      manifest.assets?.art,
-      manifest.assets?.plugin,
-    ].filter(Boolean)) {
-      const abs = path.join(skinDir, rel);
-      if (!fs.existsSync(abs)) {
-        parts.push(`${rel}:missing`);
-        continue;
-      }
-      const st = fs.statSync(abs);
-      parts.push(`${rel}:${st.size}:${Math.trunc(st.mtimeMs)}`);
-    }
-    return parts.join("|");
-  } catch (e) {
-    return `${path.resolve(skinDir)}|error|${Date.now()}`;
-  }
-}
-
-/** 把皮肤拷到可写真实目录，避免安装版 asar/权限导致读不到立绘 */
+/** Apply uses resolved dir in place (no runtime-skins mirror; matches Rust library). */
 function materializeSkin(skin) {
   if (!skin?.dir || !skin?.id) return skin;
-  ensureStateDir();
-  const destRoot = path.join(STATE_ROOT, "runtime-skins", safeSkinId(skin.id));
-  const stampPath = path.join(destRoot, ".src");
-  const stamp = skinMaterialStamp(skin.dir);
-  let needCopy = true;
-  try {
-    if (fs.existsSync(path.join(destRoot, "skin.json")) && fs.existsSync(stampPath)) {
-      const prev = fs.readFileSync(stampPath, "utf8").trim();
-      if (prev === stamp) needCopy = false;
-    }
-  } catch {}
-  if (needCopy) {
-    try {
-      fs.rmSync(destRoot, { recursive: true, force: true });
-    } catch {}
-    copyDirRecursive(skin.dir, destRoot);
-    try {
-      fs.writeFileSync(stampPath, stamp);
-    } catch {}
+  const dir = skin.dir;
+  if (!fs.existsSync(path.join(dir, "skin.json"))) {
+    throw new Error(`皮肤目录无效: ${dir}`);
   }
-  // 校验关键资源（v2: css + art + plugin）
   try {
-    const manifest = JSON.parse(fs.readFileSync(path.join(destRoot, "skin.json"), "utf8"));
-    for (const rel of [manifest.assets?.css, manifest.assets?.art, manifest.assets?.plugin]) {
-      if (!rel || !fs.existsSync(path.join(destRoot, rel))) {
-        throw new Error(`皮肤资源缺失: ${rel || "?"}`);
+    const manifest = JSON.parse(fs.readFileSync(path.join(dir, "skin.json"), "utf8"));
+    for (const key of ["css", "plugin"]) {
+      const rel = manifest.assets?.[key];
+      if (!rel || !fs.existsSync(path.join(dir, rel))) {
+        throw new Error(`皮肤资源缺失: assets.${key}`);
       }
     }
   } catch (e) {
-    // 强制再拷一次
-    try {
-      fs.rmSync(destRoot, { recursive: true, force: true });
-    } catch {}
-    copyDirRecursive(skin.dir, destRoot);
-    fs.writeFileSync(stampPath, stamp);
+    throw e;
   }
-  return { ...skin, dir: destRoot };
+  return skin;
 }
 
 function rotateLogIfNeeded(filePath, maxBytes) {
@@ -3293,6 +3260,7 @@ module.exports = {
   setPaused,
   isPaused,
   USER_SKINS_DIR,
+  LIBRARY_DIR,
   BUNDLED_SKINS_DIR,
   STATE_ROOT,
   ROOT,

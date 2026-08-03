@@ -1,6 +1,6 @@
 {
   "name": "chatgpt-tools",
-  "version": "1.1.12",
+  "version": "1.1.13",
   "description": "ChatGPT Tools — 轻量 ChatGPT / Codex 桌面换肤工具箱（Tauri 2）",
   "private": true,
   "type": "module",

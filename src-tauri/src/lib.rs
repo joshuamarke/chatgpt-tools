@@ -67,7 +67,13 @@ pub fn run() {
             }
         })
         .setup(move |app| {
-            // Prefer resource_dir in production bundles
+            // Production only: rebind to the packaged resource dir (engine + staged skins).
+            //
+            // Do **not** do this in `tauri dev`: resource_dir still exists and often
+            // contains `bundle-resources/skins` (default install set, e.g. only
+            // qingkong). Overwriting the repo root made the GUI list a single
+            // "内置" skin and hide the full `skins/` workspace.
+            #[cfg(not(debug_assertions))]
             if let Ok(resource_dir) = app.path().resource_dir() {
                 let candidates = [
                     resource_dir.clone(),

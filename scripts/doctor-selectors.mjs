@@ -53,6 +53,15 @@ const must = ["shell-main", "header-tint", "home-icon", "home-route-css"];
 for (const k of must) {
   if (!keys.has(k)) errors.push(`missing required key in contract: ${k}`);
 }
+if (!keys.has("settings-panel")) {
+  errors.push("missing settings-panel selector for Codex 26.727 settings route");
+}
+if (
+  keys.has("settings-panel") &&
+  selectorByKey.get("settings-panel") !== '[data-settings-panel-slug="general-settings"]'
+) {
+  errors.push("settings-panel must use data-settings-panel-slug=\"general-settings\"");
+}
 
 // home-route-css must stay free of :has() so CSS can nest route gates safely.
 const homeRouteCss = selectorByKey.get("home-route-css") || "";
@@ -87,10 +96,17 @@ const core = fs.readFileSync(
   path.join(root, "engine", "runtime", "renderer-core.js"),
   "utf8"
 );
-for (const anchor of ["main.main-surface", "app-header-tint", "home-icon"]) {
+for (const anchor of ["main.main-surface", "home-icon"]) {
   if (!immersive.includes(anchor.split(".").pop()) && !core.includes(anchor)) {
     warnings.push(`runtime may not reference anchor fragment: ${anchor}`);
   }
+}
+// header-tint contract: host uses main > header (not legacy app-header-tint alone)
+if (
+  !immersive.includes("main.main-surface > header") &&
+  !core.includes("main.main-surface > header")
+) {
+  warnings.push("runtime may not reference header-tint anchor: main.main-surface > header");
 }
 if (!core.includes("main.main-surface") && !core.includes("main-surface")) {
   errors.push("renderer-core.js missing shell-main style probe");

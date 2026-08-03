@@ -228,20 +228,41 @@ html.codex-qingkong-skin.skins-art-wide body {
 /* ── 侧栏：浅蓝毛玻璃，透出背景云层 ── */
 html.codex-qingkong-skin aside.app-shell-left-panel,
 html.codex-qingkong-skin aside {
-  background: linear-gradient(
-    180deg,
-    rgba(220, 238, 250, 0.52),
-    rgba(200, 228, 245, 0.48)
-  ) !important;
-  border: 1px solid rgba(255, 255, 255, 0.35) !important;
+  background: rgba(255, 255, 255, 0.12) !important; /* 极致透明 + 轻微玻璃雾感 */
+  border: 1px solid rgba(255, 255, 255, 0.18) !important;
   border-left: 0 !important;
   border-radius: 0 !important;
-  box-shadow:
-    8px 0 28px rgba(30, 80, 130, 0.08),
-    inset -1px 0 rgba(255, 255, 255, 0.45) !important;
-  backdrop-filter: blur(18px) saturate(1.15) !important;
-  -webkit-backdrop-filter: blur(18px) saturate(1.15) !important;
+  box-shadow: none !important;
+  backdrop-filter: blur(14px) saturate(1.2) !important;
+  -webkit-backdrop-filter: blur(14px) saturate(1.2) !important;
   color: var(--qingkong-ink) !important;
+  /* 首页时完全透明，立绘背景图片完整可见；非首页保留轻微毛玻璃 */
+}
+
+/* 首页 main：完全透出 body 立绘，不二次铺图/不铺毛玻璃（否则挡建议卡与输入区） */
+html.codex-qingkong-skin main.main-surface.qingkong-home-shell,
+html.codex-qingkong-skin main.main-surface:has([data-testid="home-icon"]),
+html.codex-qingkong-skin main.main-surface:has(.home-banners) {
+  background: transparent !important;
+  background-color: transparent !important;
+  background-image: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+}
+
+/* home-shell 标记只用于路由；禁止 [class*="home-shell"] 全局铺底（会命中 chrome 整层遮罩首页组件） */
+#codex-qingkong-skin-chrome,
+#codex-qingkong-skin-chrome.qingkong-home-shell,
+html.codex-qingkong-skin #codex-qingkong-skin-chrome[class*="home-shell"] {
+  background: transparent !important;
+  background-image: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  box-shadow: none !important;
+  border: 0 !important;
 }
 
 html.codex-qingkong-skin.skins-art-wide:has(main.main-surface.qingkong-home-shell)
@@ -327,19 +348,21 @@ html.codex-qingkong-skin main.main-surface {
 }
 
 /* 首页 / 非对话 ambient：轻 scrim，透立绘 */
+/* 宽图首页：无额外 scrim，立绘完整可见 */
 html.codex-qingkong-skin.skins-art-wide main.main-surface.qingkong-home-shell,
-html.codex-qingkong-skin.skins-art-wide:is(.skins-task-ambient, .skins-task-banner)
-  main.main-surface:not(.qingkong-home-shell):not(:has(.thread-scroll-container)) {
-  background: linear-gradient(
-    90deg,
-    rgba(200, 230, 250, 0.22),
-    rgba(180, 220, 245, 0.1) 50%,
-    rgba(160, 210, 240, 0.02)
-  ) !important;
+html.codex-qingkong-skin.skins-art-wide main.main-surface:has([data-testid="home-icon"]) {
+  background: transparent !important;
+  background-image: none !important;
   border: 0 !important;
   border-radius: 0 !important;
   box-shadow: none !important;
 }
+
+/*
+ * 注意：设置页也是 not(home) + not(thread)。不要在这里铺 ambient 雾面，
+ * 否则会盖过下方设置实底 #e8f4fc，顶栏/内容错位观感更重。
+ * 设置实底见后文「设置等非 home」块。
+ */
 
 /*
  * 对话外层蒙版（不加消息气泡底）：左重右轻浅雾，托住正文、右透立绘。
@@ -362,15 +385,22 @@ html.codex-qingkong-skin main.main-surface:has(.thread-scroll-container) {
   box-shadow: none !important;
 }
 
-/* 禁止改 header position，仅抬升内容层 */
-html.codex-qingkong-skin main.main-surface > *:not(header.app-header-tint) {
+/*
+ * 仅首页/对话抬升内容层（伪元素 scrim 需要）。
+ * 设置页禁止 main > * { position:relative }：会扰动宿主 flex +
+ * MainContentFrame margin-top:var(--height-toolbar) 的固定顶栏几何，造成顶栏/正文错位。
+ * 且永远 :not(header)，勿写 app-header-tint（类名已消失）。
+ */
+html.codex-qingkong-skin main.main-surface.qingkong-home-shell > *:not(header),
+html.codex-qingkong-skin main.main-surface:has([data-testid="home-icon"]) > *:not(header),
+html.codex-qingkong-skin main.main-surface:has(.thread-scroll-container) > *:not(header) {
   position: relative;
   z-index: 1;
 }
 
 /* 顶栏字色 */
-html.codex-qingkong-skin main.main-surface > header.app-header-tint,
-html.codex-qingkong-skin main.main-surface > header.app-header-tint * {
+html.codex-qingkong-skin main.main-surface > header,
+html.codex-qingkong-skin main.main-surface > header * {
   --text-primary: #1e3a5f !important;
   --text-secondary: #4a6a8a !important;
   --icon-primary: #2a4a6f !important;
@@ -378,37 +408,37 @@ html.codex-qingkong-skin main.main-surface > header.app-header-tint * {
 }
 
 /* 顶栏次要控件：深蓝字。勿盖住 bg-token-foreground 主按钮（已安排/插件「创建」） */
-html.codex-qingkong-skin main.main-surface > header.app-header-tint button:not([class~="bg-token-foreground"]),
-html.codex-qingkong-skin main.main-surface > header.app-header-tint a:not([class~="bg-token-foreground"]),
-html.codex-qingkong-skin main.main-surface > header.app-header-tint [role="button"]:not([class~="bg-token-foreground"]),
-html.codex-qingkong-skin main.main-surface > header.app-header-tint [data-state]:not([class~="bg-token-foreground"]) {
+html.codex-qingkong-skin main.main-surface > header button:not([class~="bg-token-foreground"]),
+html.codex-qingkong-skin main.main-surface > header a:not([class~="bg-token-foreground"]),
+html.codex-qingkong-skin main.main-surface > header [role="button"]:not([class~="bg-token-foreground"]),
+html.codex-qingkong-skin main.main-surface > header [data-state]:not([class~="bg-token-foreground"]) {
   color: #1e3a5f !important;
   pointer-events: auto !important;
 }
 
-html.codex-qingkong-skin main.main-surface > header.app-header-tint svg {
+html.codex-qingkong-skin main.main-surface > header svg {
   color: #2a4a6f !important;
   opacity: 1 !important;
 }
 
 /* 主按钮在顶栏保持浅色字 + 实心底 */
-html.codex-qingkong-skin main.main-surface > header.app-header-tint button[class~="bg-token-foreground"],
-html.codex-qingkong-skin main.main-surface > header.app-header-tint button[class~="bg-token-foreground"] * {
+html.codex-qingkong-skin main.main-surface > header button[class~="bg-token-foreground"],
+html.codex-qingkong-skin main.main-surface > header button[class~="bg-token-foreground"] * {
   color: #f5f9fc !important;
   --text-primary: #f5f9fc !important;
   --text-secondary: #f5f9fc !important;
   --icon-primary: #f5f9fc !important;
 }
 
-html.codex-qingkong-skin main.main-surface > header.app-header-tint button[class~="bg-token-foreground"] svg {
+html.codex-qingkong-skin main.main-surface > header button[class~="bg-token-foreground"] svg {
   color: #f5f9fc !important;
   opacity: 1 !important;
 }
 
 /* 首页 / 对话：顶栏透明 */
-html.codex-qingkong-skin main.main-surface.qingkong-home-shell > header.app-header-tint,
-html.codex-qingkong-skin.skins-art-wide main.main-surface.qingkong-home-shell > header.app-header-tint,
-html.codex-qingkong-skin.skins-art-wide main.main-surface:has(.thread-scroll-container) > header.app-header-tint {
+html.codex-qingkong-skin main.main-surface.qingkong-home-shell > header,
+html.codex-qingkong-skin.skins-art-wide main.main-surface.qingkong-home-shell > header,
+html.codex-qingkong-skin.skins-art-wide main.main-surface:has(.thread-scroll-container) > header {
   background: transparent !important;
   background-image: none !important;
   border-bottom: 0 !important;
@@ -421,23 +451,42 @@ html.codex-qingkong-skin.skins-art-wide main.main-surface:has(.thread-scroll-con
     0 0 8px rgba(255, 255, 255, 0.35) !important;
 }
 
-/* 设置等非 home：关掉 body 立绘透出，实底可读 */
-html.codex-qingkong-skin main.main-surface:not(.qingkong-home-shell):not(:has(.thread-scroll-container)) {
+/*
+ * 设置等非 home / 非 thread：实底 canvas + 实底顶栏。
+ * 特异性需压过 skins-art-wide + task-ambient 的任何雾面；
+ * 顶栏只改色，禁止 position/top/z-index（宿主 fixed + MainContentFrame mt 依赖）。
+ */
+html.codex-qingkong-skin main.main-surface:not(.qingkong-home-shell):not(:has(.thread-scroll-container)):not(
+    :has([data-testid="home-icon"])
+  ),
+html.codex-qingkong-skin.skins-art-wide main.main-surface:not(.qingkong-home-shell):not(
+    :has(.thread-scroll-container)
+  ):not(:has([data-testid="home-icon"])),
+html.codex-qingkong-skin.skins-art-wide:is(.skins-task-ambient, .skins-task-banner, .skins-task-off)
+  main.main-surface:not(.qingkong-home-shell):not(:has(.thread-scroll-container)):not(
+    :has([data-testid="home-icon"])
+  ) {
   background-color: #e8f4fc !important;
   background-image: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
 }
 
+html.codex-qingkong-skin main.main-surface:not(.qingkong-home-shell):not(:has(.thread-scroll-container)):not(
+    :has([data-testid="home-icon"])
+  )
+  > header,
 html.codex-qingkong-skin.skins-art-wide
-  main.main-surface:not(.qingkong-home-shell):not(:has(.thread-scroll-container)) {
-  background-color: #e8f4fc !important;
-  background-image: none !important;
-}
-
-html.codex-qingkong-skin main.main-surface:not(.qingkong-home-shell):not(:has(.thread-scroll-container))
-  > header.app-header-tint,
-html.codex-qingkong-skin.skins-art-wide
-  main.main-surface:not(.qingkong-home-shell):not(:has(.thread-scroll-container))
-  > header.app-header-tint {
+  main.main-surface:not(.qingkong-home-shell):not(:has(.thread-scroll-container)):not(
+    :has([data-testid="home-icon"])
+  )
+  > header,
+html.codex-qingkong-skin.skins-art-wide:is(.skins-task-ambient, .skins-task-banner, .skins-task-off)
+  main.main-surface:not(.qingkong-home-shell):not(:has(.thread-scroll-container)):not(
+    :has([data-testid="home-icon"])
+  )
+  > header {
+  /* 仅色与分割线；几何交给宿主 ._Header_* { position:fixed; top:toolbar-sm; z-index:30 } */
   background: #e8f4fc !important;
   background-image: none !important;
   border-bottom: 1px solid rgba(90, 140, 190, 0.14) !important;
@@ -1153,10 +1202,11 @@ html.codex-qingkong-skin.skins-art-wide
   background-color: transparent !important;
 }
 
-/* 对话区主表面打穿 */
-html.codex-qingkong-skin main.main-surface:not(.qingkong-home-shell) [class*="bg-token-main-surface"],
-html.codex-qingkong-skin main.main-surface:not(.qingkong-home-shell) form,
-html.codex-qingkong-skin main.main-surface:not(.qingkong-home-shell) section {
+/*
+ * 仅对话线程打穿主表面（透立绘）。
+ * 切勿对设置页 form/section 全局 transparent —— 会让设置分组卡「没底」并放大顶栏错位感。
+ */
+html.codex-qingkong-skin main.main-surface:has(.thread-scroll-container) [class*="bg-token-main-surface"] {
   background-color: transparent !important;
 }
 
@@ -1208,4 +1258,28 @@ html.codex-qingkong-skin.skins-art-wide main.main-surface .app-shell-main-conten
   .qingkong-home [data-feature="game-source"]::after {
     font-size: 13px;
   }
+}
+
+/*
+ * 宿主 MainContentTopFade（CDP）：header 底缘压暗渐变（非 box-shadow）。
+ * 沉浸式壁纸下会在顶栏/品牌下形成黑带；关掉以保持连续立绘。
+ * 契约 key: main-content-top-fade（engine/runtime/selectors.json）
+ */
+html.codex-qingkong-skin main.main-surface [class*="MainContentTopFade"],
+html.codex-qingkong-skin main.main-surface [class*="_MainContentTopFade_"],
+html.codex-qingkong-skin main.main-surface.qingkong-home-shell [class*="TopFade"],
+html.codex-qingkong-skin.skins-art-wide main.main-surface [class*="MainContentTopFade"],
+html.codex-qingkong-skin.skins-art-wide main.main-surface [class*="TopFade"] {
+  display: none !important;
+  opacity: 0 !important;
+  visibility: hidden !important;
+  height: 0 !important;
+  min-height: 0 !important;
+  max-height: 0 !important;
+  background: none !important;
+  background-image: none !important;
+  background-color: transparent !important;
+  box-shadow: none !important;
+  border: 0 !important;
+  pointer-events: none !important;
 }

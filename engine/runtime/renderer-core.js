@@ -47,6 +47,8 @@
   let ART_VAR = markers.artVar || "--skin-art";
   let VERSION = plugin.version || theme.version || "2.0.0";
   let REVISION = payloadRevision || VERSION;
+  const SHELL_MAIN_CLASS = "main-surface";
+  const SHELL_MAIN_ALIAS_ATTR = "data-chatgpt-tools-main-surface-alias";
   const ANALYSIS_CACHE_KEY = "__CHATGPT_TOOLS_SKIN_ANALYSIS_CACHE__";
   const REGISTRY_KEY = "__CHATGPT_TOOLS_SKIN_REGISTRY__";
   const HOST_KEY = "__CHATGPT_TOOLS_SKIN_HOST__";
@@ -793,6 +795,10 @@
     const root = document.documentElement;
     root?.classList.remove(ROOT_CLASS, ...ROOT_THEME_CLASSES);
     for (const property of rootCssProperties()) root?.style.removeProperty(property);
+    document.querySelectorAll(`[${SHELL_MAIN_ALIAS_ATTR}="1"]`).forEach((node) => {
+      node.classList.remove(SHELL_MAIN_CLASS);
+      node.removeAttribute(SHELL_MAIN_ALIAS_ATTR);
+    });
     document
       .querySelectorAll(`.${HOME_CLASS}`)
       .forEach((node) => node.classList.remove(HOME_CLASS));
@@ -1018,9 +1024,35 @@
    * Prefer testids / stable classes; never lock CSS-module full hashes.
    */
   const queryShellMain = () =>
-    document.querySelector("main.main-surface") ||
+    document.querySelector(
+      'main:is(.main-surface, [data-app-shell-main-surface], [class*="_MainContentSurface_"])'
+    ) ||
     document.querySelector("main") ||
     document.querySelector('[role="main"]');
+
+  const querySettingsAnchor = () =>
+    document.querySelector('[data-settings-panel-slug="general-settings"]') ||
+    document.querySelector('input[name="appearance-theme"]') ||
+    document.querySelector('[data-testid="theme-preview"]') ||
+    null;
+
+  const removeShellMainAlias = (node) => {
+    if (!node?.classList || node.getAttribute?.(SHELL_MAIN_ALIAS_ATTR) !== "1") return;
+    node.classList.remove(SHELL_MAIN_CLASS);
+    node.removeAttribute(SHELL_MAIN_ALIAS_ATTR);
+  };
+
+  const ensureShellMainAlias = (node) => {
+    if (!node?.classList || node.tagName !== "MAIN") return;
+    if (node.classList.contains(SHELL_MAIN_CLASS)) {
+      if (node.getAttribute(SHELL_MAIN_ALIAS_ATTR) !== "1") {
+        node.removeAttribute(SHELL_MAIN_ALIAS_ATTR);
+      }
+      return;
+    }
+    node.classList.add(SHELL_MAIN_CLASS);
+    node.setAttribute(SHELL_MAIN_ALIAS_ATTR, "1");
+  };
 
   const queryHomeAnchor = () =>
     document.querySelector('[data-testid="home-icon"]') ||
@@ -1038,6 +1070,14 @@
         null;
       if (fromAnchor) return fromAnchor;
     }
+    // Codex 26.721+ home-banners 槽位特判（新版首页内容列从 home-route 首个子节点的后代改成兄弟节点，首个子节点通常为空 banners 槽）
+    // 框架默认 fallback；皮肤 CSS/插件可独立覆写或补充 .qingkong-home .home-banners 等规则（核心不混用皮肤具体表现）
+    const banners = document.querySelector('.home-banners') ||
+      document.querySelector('[role="main"]:has([data-testid="home-icon"]) > :not([data-testid="home-icon"])') ||
+      document.querySelector('[class*="home-main-content"]:has([data-testid="home-icon"]) > :not([data-testid="home-icon"])') ||
+      null;
+    if (banners) return banners;
+
     return (
       document.querySelector('[role="main"]:has([data-testid="home-icon"])') ||
       document.querySelector('[role="main"]:has([data-feature="game-source"])') ||
@@ -1078,10 +1118,25 @@
     // Auxiliary windows (pets, blank targets): clear residual skin.
     // Left rail is optional — Codex may remove aside while collapsing.
     if (!shellMain || !document.body) {
+      if (document.body && querySettingsAnchor()) {
+        for (const candidate of document.querySelectorAll(`.${HOME_CLASS}`)) {
+          candidate.classList.remove(HOME_CLASS);
+        }
+        for (const candidate of document.querySelectorAll(`.${HOME_SHELL_CLASS}`)) {
+          candidate.classList.remove(HOME_SHELL_CLASS);
+        }
+        for (const candidate of document.querySelectorAll(`.${HOME_UTILITY_CLASS}`)) {
+          candidate.classList.remove(HOME_UTILITY_CLASS);
+        }
+        document.getElementById(CHROME_ID)?.remove();
+        lastLayoutBox = null;
+        return;
+      }
       clearSkinDom();
       lastLayoutBox = null;
       return;
     }
+    ensureShellMainAlias(shellMain);
 
     // Home markers vary by host mode: Codex often exposes home-icon; Worker / CDOEX
     // may only keep game-source, home-suggestions, or home-main-content container.
@@ -1103,6 +1158,7 @@
     for (const candidate of utilityBars) candidate.classList.add(HOME_UTILITY_CLASS);
 
     if (observedShellMain !== shellMain) {
+      removeShellMainAlias(observedShellMain);
       resizeObserver?.disconnect();
       try {
         resizeObserver?.observe(shellMain);
@@ -1137,9 +1193,20 @@
       created = true;
     }
 
-    // Geometry only on real layout signals (resize / first paint / chrome create).
-    // Route-only ensures must not force layout thrash during chat streaming.
-    if (layout || created) {
+    // Geometry on layout / chrome create, or when chrome is collapsed (0×0 / missing
+    // inline size). SPA races can mount chrome against a 0-box shell, or later clear
+    // inline left/top/width/height while lastLayoutBox still matches shell — brand /
+    // rain / lanterns then sit in a 0×0 clipped overlay and never reappear.
+    // Force-write when collapsed even if lastLayoutBox equals shell.
+    const chromeRect = chrome.getBoundingClientRect();
+    const chromeCollapsed =
+      chromeRect.width < 2 ||
+      chromeRect.height < 2 ||
+      !chrome.style.width ||
+      parseFloat(chrome.style.width) === 0 ||
+      !chrome.style.height ||
+      parseFloat(chrome.style.height) === 0;
+    if (layout || created || chromeCollapsed) {
       metrics.layoutReads += 1;
       const shellBox = shellMain.getBoundingClientRect();
       const nextBox = {
@@ -1148,18 +1215,24 @@
         width: Math.round(shellBox.width),
         height: Math.round(shellBox.height),
       };
-      const same =
-        lastLayoutBox &&
-        lastLayoutBox.left === nextBox.left &&
-        lastLayoutBox.top === nextBox.top &&
-        lastLayoutBox.width === nextBox.width &&
-        lastLayoutBox.height === nextBox.height;
-      if (!same) {
-        chrome.style.left = `${nextBox.left}px`;
-        chrome.style.top = `${nextBox.top}px`;
-        chrome.style.width = `${nextBox.width}px`;
-        chrome.style.height = `${nextBox.height}px`;
-        lastLayoutBox = nextBox;
+      // Never lock lastLayoutBox to a zero shell — next ensure must retry.
+      if (nextBox.width <= 0 || nextBox.height <= 0) {
+        lastLayoutBox = null;
+      } else {
+        const same =
+          !chromeCollapsed &&
+          lastLayoutBox &&
+          lastLayoutBox.left === nextBox.left &&
+          lastLayoutBox.top === nextBox.top &&
+          lastLayoutBox.width === nextBox.width &&
+          lastLayoutBox.height === nextBox.height;
+        if (!same) {
+          chrome.style.left = `${nextBox.left}px`;
+          chrome.style.top = `${nextBox.top}px`;
+          chrome.style.width = `${nextBox.width}px`;
+          chrome.style.height = `${nextBox.height}px`;
+          lastLayoutBox = nextBox;
+        }
       }
     }
     chrome.classList.toggle(HOME_SHELL_CLASS, Boolean(home));

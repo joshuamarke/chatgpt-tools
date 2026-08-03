@@ -16,8 +16,8 @@ use crate::engine::EngineError;
 /// Protocol version this client speaks (must match CDN `protocol: 1`).
 pub const CLOUD_PROTOCOL: u32 = 1;
 
-/// Local CDN preview when no package-time cloud URL was embedded.
-pub const DEFAULT_DEV_BASE_URL: &str = "http://127.0.0.1:8788/v1";
+/// Local CDN preview (or local-only mode) when no package-time cloud URL was embedded.
+pub const DEFAULT_DEV_BASE_URL: &str = "";  // empty = local-only mode (no cloud URL)
 
 /// Default production-style channel.
 pub const DEFAULT_CHANNEL: &str = "stable";
@@ -72,7 +72,7 @@ fn default_base_url() -> String {
     if !embedded.is_empty() {
         return normalize_base_url(&embedded);
     }
-    DEFAULT_DEV_BASE_URL.to_string()
+    "".to_string()  // empty = local-only: no cloud catalog (skin list still from library / workspace)
 }
 
 impl Default for CloudConfig {
@@ -235,6 +235,12 @@ pub fn load_cloud_config() -> CloudConfig {
     }
 
     cfg.base_url = normalize_base_url(&cfg.base_url);
+
+    // Local-only mode: no cloud URL provided at startup → treat as dev mode, disable cloud catalog for skin list
+    if cfg.base_url.is_empty() || cfg.base_url == DEFAULT_DEV_BASE_URL {
+        cfg.enabled = false;
+    }
+
     cfg
 }
 
