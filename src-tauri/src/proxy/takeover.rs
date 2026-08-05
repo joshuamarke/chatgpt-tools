@@ -107,7 +107,7 @@ pub fn apply_takeover_live(kind: AppKind, provider: &Provider, cfg: &GlobalProxy
             })?;
             warnings.push("已开启 Codex 本地路由。".into());
             if provider.is_official() {
-                let _ = crate::providers::model_unlock::on_official_activated();
+                crate::providers::model_unlock::schedule_official_activated();
             } else {
                 push_codex_catalog_warnings(&mut warnings, &home, &provider);
             }
@@ -155,7 +155,7 @@ pub fn hot_switch_live(
             })?;
             warnings.push(format!("已切换到「{}」。", provider.name));
             if provider.is_official() {
-                let _ = crate::providers::model_unlock::on_official_activated();
+                crate::providers::model_unlock::schedule_official_activated();
             } else {
                 push_codex_catalog_warnings(&mut warnings, &home, &provider);
             }
@@ -178,12 +178,12 @@ pub fn hot_switch_live(
 }
 
 fn push_codex_catalog_warnings(warnings: &mut Vec<String>, home: &std::path::Path, provider: &Provider) {
-    // Silent unlock / clear — never surface inject engineering text in GUI toasts.
+    // Silent unlock / clear off-thread — never block hot-switch on CDP.
     if provider.is_official() {
-        let _ = crate::providers::model_unlock::on_official_activated();
+        crate::providers::model_unlock::schedule_official_activated();
     } else {
-        let _ = crate::providers::model_unlock::try_inject_desktop_unlock(Some(
-            &provider.settings_config,
+        crate::providers::model_unlock::schedule_desktop_unlock(Some(
+            provider.settings_config.clone(),
         ));
     }
     let projected = crate::providers::catalog::model_slugs_from_catalog_file(home);
@@ -233,8 +233,14 @@ fn hot_switch_codex_model_and_catalog(
             .map_err(|e| format!("Invalid Codex config: {e}"))?
     };
 
-    // Prefer archive default model; otherwise leave live model alone.
-    if let Some(model) = codex::extract_model(archive) {
+    if provider.is_official() {
+        // Official archive is comment-only (no model). Always restore the Codex
+        // built-in default so third-party slugs (grok / deepseek / …) do not stick.
+        codex::apply_official_default_model(&mut doc);
+        // Drop third-party catalog pointer if a previous hot path left it.
+        doc.as_table_mut().remove("model_catalog_json");
+    } else if let Some(model) = codex::extract_model(archive) {
+        // Prefer archive default model; otherwise leave live model alone.
         doc["model"] = toml_edit::value(model);
     }
 
@@ -346,7 +352,7 @@ fn apply_codex_official_proxy_route(live: &str, proxy_base: &str) -> Result<Stri
     let base = if live.trim().is_empty() {
         codex::official_config_toml()
     } else {
-        // Keep MCP etc., strip third-party routing first.
+        // Keep MCP etc., strip third-party routing + reset default model first.
         codex::strip_to_official_routing(live).unwrap_or_else(|_| live.to_string())
     };
     let mut doc = base
@@ -354,6 +360,8 @@ fn apply_codex_official_proxy_route(live: &str, proxy_base: &str) -> Result<Stri
         .map_err(|e| format!("Invalid Codex config: {e}"))?;
     strip_proxy_placeholders(&mut doc);
     doc.as_table_mut().remove("experimental_bearer_token");
+    // Empty live / seed path may still lack model — always pin official default.
+    codex::apply_official_default_model(&mut doc);
     doc["model_provider"] = toml_edit::value(CODEX_OFFICIAL_PROXY_PROVIDER_ID);
     {
         let root = doc.as_table_mut();

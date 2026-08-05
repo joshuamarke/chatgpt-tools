@@ -1119,7 +1119,7 @@ pub fn reapply_current_provider(app_handle: AppHandle, app: String) -> Result<Sw
             let models = catalog::model_slugs_from_catalog_file(&codex::codex_home_dir());
             // Silent unlock / clear — do not toast inject diagnostics.
             if provider.is_official() {
-                let _ = super::model_unlock::on_official_activated();
+                super::model_unlock::schedule_official_activated();
             } else {
                 let _ = super::model_unlock::notify_provider_or_catalog_changed();
             }

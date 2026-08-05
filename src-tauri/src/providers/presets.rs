@@ -85,9 +85,9 @@ fn all_presets() -> Vec<ProviderPreset> {
             base_url: "https://api.deepseek.com/v1".into(),
             model: "deepseek-chat".into(),
             models: vec!["deepseek-chat".into(), "deepseek-reasoner".into()],
-            wire_api: "chat".into(),
+            wire_api: "responses".into(),
             notes: Some(
-                "DeepSeek 官方 API（Chat Completions）。启用后建议开本地路由；映射含 chat + reasoner。"
+                "DeepSeek 官方 API（默认 responses 协议）。启用后建议开本地路由；映射含 chat + reasoner。"
                     .into(),
             ),
             category: Some("third_party".into()),

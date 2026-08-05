@@ -28,11 +28,17 @@
       </div>
 
       <div class="titlebar-actions" data-no-drag>
-        <button type="button" id="btnPause" class="chip-btn" data-mode="idle" title="暂停皮肤（即时卸下，会话可恢复）">
-          <span class="chip-ico" aria-hidden="true">
+        <button type="button" id="btnHost" class="chip-btn chip-primary" data-mode="start" title="启动 ChatGPT 客户端">
+          <span class="chip-ico" id="btnHostIco" aria-hidden="true">
+            <svg viewBox="0 0 24 24"><path d="M8 5.5v13l11-6.5z"/></svg>
+          </span>
+          <span class="chip-label" id="btnHostLabel">启动 ChatGPT</span>
+        </button>
+        <button type="button" id="btnSkinPause" class="chip-btn" data-mode="hidden" hidden title="暂停皮肤（即时卸下，会话可恢复）">
+          <span class="chip-ico" id="btnSkinPauseIco" aria-hidden="true">
             <svg viewBox="0 0 24 24"><rect x="6" y="5" width="4" height="14" rx="1"/><rect x="14" y="5" width="4" height="14" rx="1"/></svg>
           </span>
-          <span class="chip-label" id="btnPauseLabel">暂停皮肤</span>
+          <span class="chip-label" id="btnSkinPauseLabel">暂停皮肤</span>
         </button>
         <div class="win-controls">
           <button type="button" id="btnWinMin" class="win-btn" title="最小化" aria-label="最小化">
@@ -75,7 +81,17 @@
             </span>
             <span class="nav-label">供应商管理</span>
           </button>
-          <!-- Skin filters are rendered from skin-categories.json by app.js -->
+          <!-- Skin filters (全部皮肤) are rendered from skin-categories.json by app.js, inserted before 设置 -->
+          <button type="button" class="nav-item" data-category="toolbox" data-view="toolbox">
+            <span class="nav-ico" aria-hidden="true">
+              <!-- 设置：标准齿轮（中心孔 + 六齿，侧栏 stroke 风格） -->
+              <svg viewBox="0 0 24 24">
+                <circle cx="12" cy="12" r="3"/>
+                <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+              </svg>
+            </span>
+            <span class="nav-label">设置</span>
+          </button>
           <button type="button" class="nav-item" data-category="about" data-view="about">
             <span class="nav-ico" aria-hidden="true">
               <svg viewBox="0 0 24 24"><path d="M12 3.5a8.5 8.5 0 1 1 0 17 8.5 8.5 0 0 1 0-17z"/><path d="M12 11v5"/><path d="M12 7.8v.2"/></svg>
@@ -489,6 +505,49 @@
           </p>
         </section>
 
+        <section class="toolbox-view" id="toolboxView" hidden aria-label="设置">
+          <div class="view-header sessions-header">
+            <div>
+              <h1 class="view-title sessions-title">设置</h1>
+              <p class="view-lead sessions-lead">Codex 相关增强选项。修改设置后重启Codex生效。</p>
+            </div>
+          </div>
+
+          <div class="prov-form-section" aria-label="Codex 选项">
+            <div class="prov-form-section-title">Codex 选项</div>
+            <div class="toolbox-switch-grid" id="toolboxToggles" role="group" aria-label="Codex 开关">
+              <button type="button" class="prov-route-switch" id="swToolboxForceChinese" role="switch" aria-checked="false" title="第三方下强制 Codex 使用中文界面">
+                <span class="prov-route-label">设置 Codex 中文界面</span>
+                <span class="prov-route-knob" aria-hidden="true"></span>
+              </button>
+              <button type="button" class="prov-route-switch" id="swToolboxFastStartup" role="switch" aria-checked="false" title="加速启动（需重启 Codex）">
+                <span class="prov-route-label">快速启动</span>
+                <span class="prov-route-knob" aria-hidden="true"></span>
+              </button>
+              <button type="button" class="prov-route-switch" id="swToolboxComputerUseGuard" role="switch" aria-checked="false" title="Windows 下维护 Computer Use 相关配置">
+                <span class="prov-route-label">Windows Computer Use Guard</span>
+                <span class="prov-route-knob" aria-hidden="true"></span>
+              </button>
+              <button type="button" class="prov-route-switch" id="swToolboxPluginUnlock" role="switch" aria-checked="false" title="第三方下增强插件列表">
+                <span class="prov-route-label">插件市场解锁</span>
+                <span class="prov-route-knob" aria-hidden="true"></span>
+              </button>
+            </div>
+          </div>
+
+          <div class="prov-form-section" aria-label="插件市场">
+            <div class="prov-form-section-title">插件市场</div>
+            <div class="confirm-actions is-end" style="margin-top:0;gap:8px;flex-wrap:wrap">
+              <button type="button" class="ghost sm" id="btnToolboxPluginStatus" title="刷新本机插件市场状态">刷新状态</button>
+              <button type="button" class="chip-btn chip-primary chip-sm" id="btnToolboxRepairPlugins" title="从 GitHub 下载 openai/plugins（需可访问 GitHub）">
+                <span class="chip-label">修复插件市场</span>
+              </button>
+            </div>
+            <p class="sessions-hint" id="toolboxPluginStatus" style="margin-top:8px">插件市场：进入本页后自动检测。</p>
+            <p class="sessions-hint" id="toolboxPluginNetHint" style="margin-top:4px">修复需可访问 GitHub（openai/plugins）。</p>
+          </div>
+        </section>
+
         <section class="about-view" id="aboutView" hidden aria-label="关于">
           <div class="about-hero">
             <div class="about-hero-main">
@@ -498,7 +557,7 @@
               <div class="about-hero-text">
                 <div class="about-title-row">
                   <h1 class="about-title">ChatGPT 皮肤管理</h1>
-                  <span class="about-ver-badge" id="aboutVersionBadge">v1.1.12</span>
+                  <span class="about-ver-badge" id="aboutVersionBadge">…</span>
                 </div>
                 <p class="about-tagline">个性化你的 ChatGPT 体验</p>
                 <p class="about-desc">
@@ -539,16 +598,16 @@
               <dl class="about-meta-list">
                 <div class="about-meta-row">
                   <dt>当前版本</dt>
-                  <dd id="aboutVersionText">v1.1.12</dd>
+                  <dd id="aboutVersionText">…</dd>
                 </div>
                 <div class="about-meta-row">
-                  <dt>发布日期</dt>
-                  <dd id="aboutReleaseDate">2026-07-23</dd>
+                  <dt>更新渠道</dt>
+                  <dd>GitHub Releases</dd>
                 </div>
                 <div class="about-meta-row about-meta-update">
                   <dt>检查更新</dt>
                   <dd>
-                    <button type="button" class="about-btn-check" id="btnCheckUpdate">检查更新</button>
+                    <button type="button" class="chip-btn chip-sm chip-primary" id="btnCheckUpdate">检查更新</button>
                   </dd>
                 </div>
               </dl>
@@ -583,87 +642,86 @@
                 <li>点击「使用皮肤」自动切换皮肤。</li>
                 <li>供应商开启本地路由后支持热切不重启客户端</li>
               </ol>
-              <button type="button" class="about-pill-btn" id="btnAboutHelp">
+              <button type="button" class="about-help-btn" id="btnAboutHelp">
                 <span>查看详细使用说明</span>
-                <svg class="about-pill-ico" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
+                <svg class="about-help-btn-ico" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
                   <path d="M6 3.5 10.5 8 6 12.5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
                 </svg>
               </button>
             </article>
 
-            <article class="about-card" id="aboutContactCard">
-              <header class="about-card-head">
-                <span class="about-card-ico ico-mail" aria-hidden="true">
-                  <svg viewBox="0 0 24 24"><rect x="3.5" y="5.5" width="17" height="13" rx="2"/><path d="m4.5 7.5 7.5 6 7.5-6"/></svg>
-                </span>
-                <h2>联系我们</h2>
-              </header>
-              <!-- fields 模式：动态列表；html 模式：remote 宿主（互斥，有 html 时不显示预设） -->
-              <div class="about-contact-host" id="aboutContactHost">
-                <div class="about-contact-image-wrap" id="aboutContactImageWrap" hidden></div>
-                <div class="about-contact-fallback" id="aboutContactFallback">
-                  <p class="about-card-lead" id="aboutContactNote">如有问题或建议，欢迎与我们联系</p>
-                  <ul class="about-contact-list" id="aboutContactList">
-                    <li>
-                      <span class="about-contact-ico" aria-hidden="true">
-                        <svg viewBox="0 0 24 24"><rect x="3.5" y="5.5" width="17" height="13" rx="2"/><path d="m4.5 7.5 7.5 6 7.5-6"/></svg>
-                      </span>
-                      <span class="about-contact-label">邮箱：</span>
-                      <a class="about-contact-link" href="#" data-mailto="support@chatgpt-skins.com">support@chatgpt-skins.com</a>
-                    </li>
-                    <li>
-                      <span class="about-contact-ico" aria-hidden="true">
-                        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5" fill="none"/><path d="M3.5 12h17M12 3.5c2.4 2.6 3.6 5.4 3.6 8.5s-1.2 5.9-3.6 8.5M12 3.5C9.6 6.1 8.4 8.9 8.4 12s1.2 5.9 3.6 8.5"/></svg>
-                      </span>
-                      <span class="about-contact-label">网站：</span>
-                      <a class="about-contact-link" href="#" data-external="https://www.chatgpt-skins.com">www.chatgpt-skins.com</a>
-                    </li>
-                  </ul>
+          </div>
+          <div class="about-bottom">
+            <article class="about-card about-left-panel" id="aboutLeftPanel">
+              <div class="about-contact-section" id="aboutContactCard" hidden>
+                <div class="about-contact-host" id="aboutContactHost">
+                  <div class="about-contact-remote" id="aboutContactRemote" hidden>
+                    <div class="about-contact-remote-body" id="aboutContactRemoteBody"></div>
+                  </div>
+                  <div class="about-contact-fallback" id="aboutContactFallback" hidden>
+                    <div class="about-contact-media" id="aboutContactMedia" hidden>
+                      <div class="about-contact-qr-wrap" id="aboutContactImageWrap">
+                        <div class="about-contact-qr-placeholder" id="aboutContactQrPlaceholder" aria-hidden="true"></div>
+                        <img class="about-contact-qr-img" id="aboutContactQrImg" alt="" hidden loading="lazy" decoding="async" />
+                      </div>
+                    </div>
+                    <div class="about-contact-body">
+                      <div class="about-contact-title" id="aboutContactTitle" hidden></div>
+                      <p class="about-contact-intro" id="aboutContactNote" hidden></p>
+                      <ul class="about-contact-list" id="aboutContactList" hidden></ul>
+                      <button type="button" class="chip-btn chip-sm chip-primary" id="btnCopyContact" hidden>复制</button>
+                    </div>
+                  </div>
                 </div>
-                <div class="about-contact-remote" id="aboutContactRemote" hidden>
-                  <div class="about-contact-remote-body" id="aboutContactRemoteBody"></div>
+              </div>
+
+              <div class="about-left-divider" id="aboutLeftDivider" hidden></div>
+
+              <div class="about-github-row" id="aboutGithubCard">
+                <div class="about-github-brand">
+                  <span class="about-github-logo" aria-hidden="true">
+                    <svg viewBox="0 0 16 16" width="22" height="22">
+                      <path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z"/>
+                    </svg>
+                  </span>
+                  <div class="about-github-text">
+                    <h2 class="about-github-name">GitHub</h2>
+                    <p class="about-github-desc">开源项目，欢迎 Star 支持</p>
+                  </div>
                 </div>
+                <button type="button" class="chip-btn chip-sm" id="btnAboutGithub" hidden title="在 GitHub 上查看源码" aria-label="访问 GitHub 项目">
+                  <span class="chip-label">访问项目</span>
+                </button>
               </div>
             </article>
 
-            <article class="about-card">
+            <!-- 右侧粉盒：感谢支持 + 云端广告位 -->
+            <article class="about-card about-thanks-card" id="aboutThanksCard">
               <header class="about-card-head">
                 <span class="about-card-ico ico-heart" aria-hidden="true">
                   <svg viewBox="0 0 24 24"><path d="M12 20s-6.5-4.1-8.7-7.8C1.5 9.2 3 6.2 6.2 5.5 8 5.1 9.8 5.9 12 8c2.2-2.1 4-2.9 5.8-2.5 3.2.7 4.7 3.7 2.9 6.7C18.5 15.9 12 20 12 20z"/></svg>
                 </span>
                 <h2>感谢支持</h2>
               </header>
-              <div class="about-thanks">
-                <p>感谢所有用户的支持与喜爱，你的每一份反馈都是我们前进的动力！</p>
-                <span class="about-heart-deco" aria-hidden="true">
-                  <svg viewBox="0 0 24 24" width="56" height="56"><path d="M12 20s-6.5-4.1-8.7-7.8C1.5 9.2 3 6.2 6.2 5.5 8 5.1 9.8 5.9 12 8c2.2-2.1 4-2.9 5.8-2.5 3.2.7 4.7 3.7 2.9 6.7C18.5 15.9 12 20 12 20z"/></svg>
-                </span>
-              </div>
-            </article>
-
-            <article class="about-card">
-              <header class="about-card-head">
-                <span class="about-card-ico ico-code" aria-hidden="true">
-                  <svg viewBox="0 0 24 24"><path d="m8 8-4 4 4 4M16 8l4 4-4 4M13.5 6l-3 12"/></svg>
-                </span>
-                <h2>开源协议</h2>
-              </header>
-              <p class="about-card-lead">本项目遵循 MIT 开源协议发布</p>
-              <div class="about-pill-row">
-                <button type="button" class="about-pill-btn" id="btnAboutLicense" data-external="https://opensource.org/licenses/MIT">
-                  <span>查看开源协议</span>
-                  <svg class="about-pill-ico about-pill-ext" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
-                    <path d="M6.5 3.5H3.8A1.3 1.3 0 0 0 2.5 4.8v7.4c0 .7.6 1.3 1.3 1.3h7.4c.7 0 1.3-.6 1.3-1.3V9.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-                    <path d="M9.5 2.5h4v4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-                    <path d="m13.5 2.5-6 6" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
-                  </svg>
-                </button>
-                <button type="button" class="about-pill-btn about-github-btn" id="btnAboutGithub" hidden title="在 GitHub 上查看源码" aria-label="GitHub 仓库">
-                  <svg class="about-pill-ico about-github-ico" viewBox="0 0 16 16" width="15" height="15" aria-hidden="true">
-                    <path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z"/>
-                  </svg>
-                  <span>GitHub</span>
-                </button>
+              <p class="about-thanks-msg" id="aboutThanksMsg">感谢所有用户的支持与喜爱，推广位资源非本工具所有，请自行甄别！</p>
+              <div class="about-ad-slot" id="aboutAdSlot" aria-label="广告位" hidden>
+                <div class="about-ad-placeholder" id="aboutAdPlaceholder" hidden>
+                  <div class="about-ad-ico" aria-hidden="true">
+                    <svg viewBox="0 0 48 48" width="40" height="40">
+                      <rect x="6" y="10" width="36" height="24" rx="3" fill="none" stroke="currentColor" stroke-width="2"/>
+                      <path d="M16 40h16M24 34v6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                      <text x="24" y="26" text-anchor="middle" font-size="11" font-weight="700" fill="currentColor" font-family="system-ui,sans-serif">AD</text>
+                    </svg>
+                  </div>
+                  <div class="about-ad-title" id="aboutAdTitle"></div>
+                  <div class="about-ad-sub" id="aboutAdSub"></div>
+                </div>
+                <a class="about-ad-image-link" id="aboutAdImageLink" hidden href="#" rel="noopener">
+                  <img class="about-ad-image" id="aboutAdImage" alt="" loading="lazy" decoding="async" />
+                </a>
+                <div class="about-ad-remote" id="aboutAdRemote" hidden>
+                  <div class="about-ad-remote-body" id="aboutAdRemoteBody"></div>
+                </div>
               </div>
             </article>
           </div>
@@ -1085,7 +1143,7 @@
                   <option value="responses">responses（推荐）</option>
                   <option value="chat">chat（Chat Completions）</option>
                 </select>
-                <span class="prov-field-hint">多数中转站用 responses；DeepSeek / 部分兼容接口用 chat。</span>
+                <span class="prov-field-hint">默认 responses（推荐）；部分仅兼容 Chat Completions 的接口可选 chat。</span>
               </label>
               <label class="prov-field" id="provFormReasoningField">
                 <span class="prov-field-label">推理强度</span>
@@ -1238,6 +1296,8 @@
   <script src="features/sessions/sessions-view.js"></script>
   <script src="features/providers/providers-api.js"></script>
   <script src="features/providers/providers-view.js"></script>
+  <script src="features/toolbox/toolbox-api.js"></script>
+  <script src="features/toolbox/toolbox-view.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

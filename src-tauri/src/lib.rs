@@ -8,6 +8,7 @@ mod live_config;
 mod providers;
 mod proxy;
 mod sessions;
+mod toolbox;
 mod tray;
 /// GUI WebView inspect policy (debug allow / release block). See module docs.
 pub(crate) mod webview_guard;
@@ -22,9 +23,10 @@ pub fn run() {
     std::env::set_var("CODEX_SKIN_ROOT", &root);
     // 状态目录名：%LOCALAPPDATA%\ChatGPTTools
     std::env::set_var("CODEX_SKIN_STATE_NAME", "ChatGPTTools");
-    // Align cloud version filters with product version (GUI APP_VERSION).
+    // Align cloud version filters with the package version (Cargo / tauri.conf).
+    // Single source of truth — do not hardcode a second GUI version string.
     if std::env::var("CODEX_SKIN_APP_VERSION").is_err() {
-        std::env::set_var("CODEX_SKIN_APP_VERSION", "1.1.12");
+        std::env::set_var("CODEX_SKIN_APP_VERSION", env!("CARGO_PKG_VERSION"));
     }
 
     // Rebind (not `mut`) so debug builds — which skip the release-only plugins
@@ -105,6 +107,8 @@ pub fn run() {
 
             // Warm UI settings cache (CloseRequested uses the atomic fast path).
             let _ = app_settings::get_settings();
+            // Toolbox enhancements (force Chinese / fast startup / Computer Use Guard).
+            toolbox::warm_settings();
 
             // System tray: hide-to-tray keeps local routing alive.
             if let Err(e) = tray::setup_tray(app.handle()) {
@@ -131,6 +135,7 @@ pub fn run() {
             commands::pause,
             commands::resume,
             commands::start_host,
+            commands::restart_host,
             commands::export_skin,
             commands::import_skin,
             commands::delete_skin,
@@ -215,6 +220,11 @@ pub fn run() {
             proxy::set_proxy_log_retention_days,
             app_settings::get_app_ui_settings,
             app_settings::set_minimize_to_tray_on_close_cmd,
+            toolbox::get_toolbox_settings,
+            toolbox::update_toolbox_settings,
+            toolbox::apply_computer_use_guard_now,
+            toolbox::plugin_marketplace_status,
+            toolbox::repair_plugin_marketplace,
         ])
         .build(tauri::generate_context!())
         .expect("error while building ChatGPT Tools")

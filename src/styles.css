@@ -261,6 +261,11 @@ body {
   fill: currentColor;
   stroke: none;
 }
+/* Play triangle on host start button — solid fill reads clearer at 18px */
+.chip-btn.chip-primary .chip-ico svg path[d^="M8 5.5"] {
+  fill: currentColor;
+  stroke: none;
+}
 .chip-label {
   line-height: 1.2;
 }
@@ -418,6 +423,19 @@ body {
 /* 关于：i 图标圆点实心 */
 .nav-item[data-category="about"] .nav-ico svg path:last-child {
   stroke-width: 2.4;
+}
+/* 设置：齿轮中心圆空心（覆盖全局 circle 实心规则），外齿描边 */
+.nav-item[data-category="toolbox"] .nav-ico svg circle {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.75;
+}
+.nav-item[data-category="toolbox"] .nav-ico svg path {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.55;
+  stroke-linejoin: round;
+  stroke-linecap: round;
 }
 .nav-label {
   min-width: 0;
@@ -1352,9 +1370,47 @@ button.sm {
 .skins-view[hidden],
 .sessions-view[hidden],
 .providers-view[hidden],
+.toolbox-view[hidden],
 .about-view[hidden],
 .overview-view[hidden] {
   display: none !important;
+}
+
+/* ========== 设置（原工具盒子） ========== */
+.toolbox-view {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  flex: 1;
+  min-height: 0;
+  animation: aboutIn .22s ease;
+  overflow: auto;
+  padding-bottom: 8px;
+}
+.toolbox-view .prov-form-section {
+  margin-top: 0;
+}
+/* 复用 .prov-route-switch 外观；一行两个 */
+.toolbox-switch-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+.toolbox-switch-grid .prov-route-switch {
+  width: 100%;
+  justify-content: space-between;
+  min-height: 36px;
+  box-sizing: border-box;
+}
+.toolbox-switch-grid .prov-route-label {
+  text-align: left;
+  line-height: 1.3;
+  min-width: 0;
+}
+@media (max-width: 720px) {
+  .toolbox-switch-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 /* ========== 环境概览 ========== */
@@ -2356,7 +2412,8 @@ button.sm {
   line-height: 1.5;
 }
 .main:has(.sessions-view:not([hidden])),
-.main:has(.providers-view:not([hidden])) {
+.main:has(.providers-view:not([hidden])),
+.main:has(.toolbox-view:not([hidden])) {
   overflow: auto;
 }
 @media (max-width: 900px) {
@@ -4040,28 +4097,10 @@ button.sm {
 .about-meta-update dd {
   font-weight: 400;
 }
-.about-btn-check {
+/* 检查更新复用 chip-btn chip-primary（见 index.html） */
+.about-meta-update .chip-btn {
   height: 28px;
-  padding: 0 12px;
-  border: 0;
-  border-radius: 8px;
-  font: inherit;
   font-size: 12px;
-  font-weight: 600;
-  color: #fff;
-  cursor: pointer;
-  background: linear-gradient(145deg, #9b8cff, #6d5efc);
-  box-shadow: 0 6px 14px rgba(109, 94, 252, 0.22);
-  transition: transform .12s ease, box-shadow .12s ease, opacity .12s ease;
-}
-.about-btn-check:hover:not(:disabled) {
-  transform: translateY(-1px);
-  box-shadow: 0 8px 18px rgba(109, 94, 252, 0.28);
-}
-.about-btn-check:disabled {
-  opacity: 0.72;
-  cursor: default;
-  transform: none;
 }
 .about-update-status {
   margin: 0;
@@ -4226,16 +4265,16 @@ button.sm {
   line-height: 1.55;
   color: #4a5568;
 }
-/* 浅紫胶囊按钮：查看说明 / 开源协议 / GitHub（对齐参考稿） */
-.about-pill-row {
+/* 关于页卡片内 chip 操作（检查更新等）：贴底对齐 */
+.about-card > .chip-btn {
   margin-top: auto;
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
   align-self: flex-start;
 }
-.about-pill-btn {
+
+/* 使用说明 CTA：浅紫软按钮（about-cards 设计稿，勿用 chip 以免被全局 button 样式冲掉观感） */
+.about-help-btn {
+  margin-top: auto;
+  align-self: flex-start;
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -4252,93 +4291,160 @@ button.sm {
   box-shadow: none;
   transition: background .14s ease, color .14s ease, transform .12s ease, box-shadow .14s ease;
 }
-.about-pill-row .about-pill-btn {
-  margin-top: 0;
-  align-self: auto;
-}
-.about-card > .about-pill-btn {
-  margin-top: auto;
-  align-self: flex-start;
-}
-.about-pill-btn:hover {
+.about-help-btn:hover {
   background: rgba(123, 110, 246, 0.16);
   color: #5749d8;
   transform: translateY(-1px);
   box-shadow: 0 4px 12px rgba(109, 94, 252, 0.12);
 }
-.about-pill-btn:active {
+.about-help-btn:active {
   transform: none;
 }
-.about-github-btn {
-  color: #24292f;
-  background: rgba(36, 41, 47, 0.06);
-}
-.about-github-btn:hover {
-  color: #0d1117;
-  background: rgba(36, 41, 47, 0.11);
-  box-shadow: 0 4px 12px rgba(36, 41, 47, 0.10);
-}
-.about-pill-ico {
+.about-help-btn-ico {
   display: block;
   flex-shrink: 0;
   opacity: 0.92;
 }
-.about-github-ico {
-  opacity: 1;
+
+/*
+ * 关于页底部与 about-cards 同一套三列轨距：
+ * - 左盒（联系+GitHub）= 第 1 列，与上方第一个卡片等宽
+ * - 右盒（感谢+广告）  = 跨第 2–3 列，等于上方两个卡片宽度
+ */
+.about-bottom {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px; /* 与 .about-cards 一致 */
+  align-items: stretch;
 }
-.about-pill-ext {
-  /* 外链图标略细，更接近参考稿 ↗ 方框箭头 */
-  margin-left: 1px;
+.about-bottom > .about-left-panel {
+  grid-column: 1 / 2;
+  min-width: 0;
 }
-/* 兼容旧 class（若别处仍引用） */
-.about-link-btn {
-  margin-top: auto;
-  align-self: flex-start;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  border: 0;
-  background: transparent;
-  padding: 0;
-  font: inherit;
-  font-size: 12.5px;
-  font-weight: 600;
-  color: #6d5efc;
-  cursor: pointer;
+.about-bottom > .about-thanks-card {
+  grid-column: 2 / 4;
+  min-width: 0;
 }
 
-/* —— 联系我们：预设样式保持原样；云端 html 时切换 remote 宿主 —— */
-.about-contact-host {
-  flex: 1;
+/* 左侧：联系 + GitHub 同一白盒 */
+.about-left-panel {
+  min-height: 0;
+  padding: 18px 20px 16px;
+  gap: 0;
   display: flex;
   flex-direction: column;
+}
+.about-contact-section {
   min-width: 0;
-  gap: 12px;
+  flex: 1 1 auto;
 }
-.about-contact-image-wrap {
-  display: flex;
-  justify-content: center;
-  align-items: center;
-}
-.about-contact-image-wrap[hidden],
-.about-contact-fallback[hidden],
-.about-contact-remote[hidden] {
+.about-contact-section[hidden],
+.about-left-divider[hidden],
+.about-ad-slot[hidden] {
   display: none !important;
 }
-.about-contact-image {
-  max-width: 100%;
-  max-height: 140px;
-  width: auto;
-  height: auto;
-  object-fit: contain;
+.about-left-divider {
+  height: 1px;
+  margin: 16px 0 14px;
+  background: rgba(15, 23, 42, 0.07);
+  flex-shrink: 0;
+}
+/* 有联系内容时 GitHub 贴底；仅 GitHub 时垂直居中感 */
+.about-left-panel:not(:has(.about-contact-section:not([hidden]))) .about-github-row {
+  margin-top: auto;
+  margin-bottom: auto;
+}
+.about-left-panel:has(.about-contact-section:not([hidden])) .about-github-row {
+  margin-top: 0;
+}
+
+/* 联系宿主：html 与 fields 互斥 */
+.about-contact-host {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.about-contact-fallback[hidden],
+.about-contact-remote[hidden],
+.about-contact-media[hidden],
+.about-contact-list[hidden],
+.about-contact-title[hidden],
+.about-contact-intro[hidden],
+.about-contact-qr-img[hidden],
+.about-contact-qr-placeholder[hidden],
+#btnCopyContact[hidden],
+#btnAboutGithub[hidden] {
+  display: none !important;
+}
+
+/* fields 框架：左图 + 右文（内容全来自云端字段，非写死文案） */
+.about-contact-fallback {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  min-width: 0;
+}
+.about-contact-media {
+  flex-shrink: 0;
+}
+.about-contact-qr-wrap {
+  width: 112px;
+  height: 112px;
   border-radius: 10px;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  background: #fff;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  position: relative;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04);
+}
+.about-contact-qr-placeholder {
+  width: 100%;
+  height: 100%;
+  background:
+    linear-gradient(90deg, rgba(15, 23, 42, 0.05) 1px, transparent 1px) 0 0 / 9px 9px,
+    linear-gradient(rgba(15, 23, 42, 0.05) 1px, transparent 1px) 0 0 / 9px 9px,
+    #f8fafc;
+}
+.about-contact-qr-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.about-contact-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+}
+.about-contact-title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 700;
+  color: #1a2438;
+  letter-spacing: 0.01em;
+  line-height: 1.35;
+}
+.about-contact-intro {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: #667089;
+}
+.about-contact-body > .chip-btn {
+  margin-top: 4px;
 }
 .about-contact-list {
   margin: 0;
   padding: 0;
   list-style: none;
   display: grid;
-  gap: 10px;
+  gap: 8px;
+  width: 100%;
 }
 .about-contact-list li {
   display: flex;
@@ -4390,11 +4496,14 @@ button.sm {
   border-radius: 8px;
 }
 
-/* 云端 HTML 挂载点（仅有 contact.html 时显示，不改动预设） */
+/*
+ * 云端 HTML 宿主：只提供容器，不锁定布局。
+ * 运营在 about.contact.html/css 里自定义结构与样式。
+ */
 .about-contact-remote {
   position: relative;
-  flex: 1;
   min-width: 0;
+  width: 100%;
 }
 .about-contact-remote-body {
   min-width: 0;
@@ -4402,6 +4511,7 @@ button.sm {
   line-height: 1.55;
   color: #4a5568;
 }
+/* 基础可读性兜底；云端 CSS 可覆盖 */
 .about-contact-remote-body a {
   color: #6d5efc;
   text-decoration: none;
@@ -4421,32 +4531,198 @@ button.sm {
   height: auto;
   border-radius: 8px;
 }
-
-.about-thanks {
-  position: relative;
-  flex: 1;
-  display: flex;
-  align-items: flex-start;
-  gap: 8px;
+.about-left-panel.is-remote-contact .about-contact-remote-body {
+  /* HTML 模式占满联系区，由云端决定内部排版 */
+  width: 100%;
 }
-.about-thanks p {
+
+/* GitHub 行（同盒底部，非独立卡片） */
+.about-github-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+  flex-shrink: 0;
+  padding-top: 2px;
+}
+.about-github-brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+.about-github-logo {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  color: #24292f;
+  background: rgba(36, 41, 47, 0.06);
+  flex-shrink: 0;
+}
+.about-github-text {
+  min-width: 0;
+}
+.about-github-name {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 700;
+  color: #182033;
+  line-height: 1.3;
+}
+.about-github-desc {
+  margin: 2px 0 0;
+  font-size: 12px;
+  color: #667089;
+  line-height: 1.4;
+}
+.about-github-row > .chip-btn {
+  flex-shrink: 0;
+}
+
+/* 右侧：感谢支持 + 广告位 */
+.about-thanks-card {
+  min-height: 0;
+  position: relative;
+  overflow: hidden;
+  padding: 18px 20px 16px;
+  gap: 10px;
+  background:
+    radial-gradient(ellipse 80% 60% at 100% 100%, rgba(255, 200, 220, 0.28) 0%, transparent 55%),
+    linear-gradient(165deg, #fff6fa 0%, #fffcfe 42%, #fff 100%);
+  border-color: rgba(232, 106, 154, 0.16);
+}
+.about-thanks-card::after {
+  content: "";
+  position: absolute;
+  right: -8px;
+  bottom: -12px;
+  width: 120px;
+  height: 120px;
+  pointer-events: none;
+  opacity: 0.12;
+  background:
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='%23e86a9a' d='M12 20s-6.5-4.1-8.7-7.8C1.5 9.2 3 6.2 6.2 5.5 8 5.1 9.8 5.9 12 8c2.2-2.1 4-2.9 5.8-2.5 3.2.7 4.7 3.7 2.9 6.7C18.5 15.9 12 20 12 20z'/%3E%3C/svg%3E")
+    center / contain no-repeat;
+}
+.about-thanks-msg {
   margin: 0;
   font-size: 12.5px;
   line-height: 1.65;
-  color: #4a5568;
-  max-width: 18em;
+  color: #7a6570;
+  position: relative;
+  z-index: 1;
 }
-.about-heart-deco {
-  position: absolute;
-  right: 0;
-  bottom: 0;
+.about-ad-slot {
+  flex: 1;
+  min-height: 128px;
+  display: flex;
+  flex-direction: column;
+  margin-top: 6px;
+  position: relative;
+  z-index: 1;
+}
+.about-ad-placeholder {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 22px 16px;
+  border-radius: 12px;
+  border: 1.5px dashed rgba(232, 106, 154, 0.38);
+  background: rgba(255, 255, 255, 0.55);
+  text-align: center;
+  min-height: 128px;
+}
+.about-ad-placeholder[hidden],
+.about-ad-image-link[hidden],
+.about-ad-remote[hidden] {
+  display: none !important;
+}
+.about-ad-ico {
   color: #f0a0bc;
-  opacity: 0.35;
+  opacity: 0.9;
+  line-height: 0;
+  margin-bottom: 4px;
+}
+.about-ad-title {
+  font-size: 13.5px;
+  font-weight: 650;
+  color: #e86a9a;
+}
+.about-ad-sub {
+  font-size: 12px;
+  line-height: 1.45;
+  color: #c48aa0;
+  max-width: 16em;
+}
+.about-ad-image-link {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 12px;
+  overflow: hidden;
+  border: 1px solid rgba(232, 106, 154, 0.18);
+  background: rgba(255, 255, 255, 0.7);
+  min-height: 128px;
+  text-decoration: none;
+  cursor: pointer;
+  transition: box-shadow .14s ease, transform .12s ease;
+}
+.about-ad-image-link:hover {
+  box-shadow: 0 8px 20px rgba(232, 106, 154, 0.12);
+  transform: translateY(-1px);
+}
+.about-ad-image-link.is-static {
+  cursor: default;
   pointer-events: none;
 }
-.about-heart-deco svg path {
-  fill: currentColor;
-  stroke: none;
+.about-ad-image {
+  display: block;
+  width: 100%;
+  height: 100%;
+  max-height: 180px;
+  object-fit: contain;
+  background: #fff;
+}
+.about-ad-remote {
+  flex: 1;
+  min-width: 0;
+  border-radius: 12px;
+  border: 1px solid rgba(232, 106, 154, 0.18);
+  background: rgba(255, 255, 255, 0.7);
+  padding: 12px;
+  overflow: auto;
+}
+.about-ad-remote-body {
+  min-width: 0;
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: #4a5568;
+}
+.about-ad-remote-body a {
+  color: #e86a9a;
+  text-decoration: none;
+  font-weight: 550;
+}
+.about-ad-remote-body a:hover {
+  text-decoration: underline;
+}
+.about-ad-remote-body img {
+  max-width: 100%;
+  height: auto;
+  border-radius: 8px;
+}
+.about-ad-remote-body p {
+  margin: 0 0 8px;
+}
+.about-ad-remote-body p:last-child {
+  margin-bottom: 0;
 }
 
 .about-footer {
@@ -4477,7 +4753,22 @@ button.sm {
     grid-template-columns: minmax(160px, 200px) 1fr auto;
   }
   .about-cards { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  /* 中等宽度：底部改两列，不再与三列 top 对齐 */
+  .about-bottom {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+  .about-bottom > .about-left-panel,
+  .about-bottom > .about-thanks-card {
+    grid-column: auto;
+  }
   .about-hero-art { width: 160px; }
+}
+/* 联系 fields 窄屏时仍横排优先；过窄再折行 */
+@media (max-width: 520px) {
+  .about-contact-fallback {
+    flex-direction: column;
+    align-items: flex-start;
+  }
 }
 @media (max-width: 900px) {
   :root { --sidebar-w: 168px; }
@@ -4504,6 +4795,11 @@ button.sm {
     order: 3;
   }
   .about-cards { grid-template-columns: 1fr; }
+  .about-bottom { grid-template-columns: 1fr; }
+  .about-bottom > .about-left-panel,
+  .about-bottom > .about-thanks-card {
+    grid-column: auto;
+  }
   .about-hero {
     padding: 22px 20px;
     min-height: 0;

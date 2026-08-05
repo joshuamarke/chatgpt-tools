@@ -24,8 +24,8 @@ pub use design::design_wallpaper_native;
 pub use native::{
     apply_skin_native_opts, delete_skin_native, detect_native, engine_paths_native,
     engine_version_native, get_host_status_native, get_status_native, pause_skin_native,
-    resolve_asset_native, restore_skin_native, resume_skin_native, set_app_path_native,
-    start_host_native,
+    resolve_asset_native, restart_host_native, restore_skin_native, resume_skin_native,
+    set_app_path_native, start_host_native,
 };
 pub use package::{export_skin_native, import_skin_native, inspect_skin_native};
 

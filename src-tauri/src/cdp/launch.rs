@@ -166,8 +166,7 @@ fn macos_bundle_root(exe: &str) -> Option<PathBuf> {
 /// Prefer launching via `open -n -a <App.app> --args --remote-debugging-port=…`
 /// so LaunchServices does not drop Chromium flags as easily as bare exec.
 fn launch_macos_app(exe: &str, port: u16) -> Result<u32, EngineError> {
-    let arg = format!("--remote-debugging-port={port}");
-    let addr = "--remote-debugging-address=127.0.0.1";
+    let launch_args = host_launch_arg_list(port);
     if let Some(bundle) = macos_bundle_root(exe) {
         if bundle.is_dir() {
             append_diag(&format!(
@@ -175,14 +174,13 @@ fn launch_macos_app(exe: &str, port: u16) -> Result<u32, EngineError> {
                 bundle.display()
             ));
             let mut cmd = Command::new("open");
-            cmd.args([
-                "-n",
-                "-a",
-                &bundle.to_string_lossy(),
-                "--args",
-                &arg,
-                addr,
-            ]);
+            cmd.arg("-n");
+            cmd.arg("-a");
+            cmd.arg(bundle.as_os_str());
+            cmd.arg("--args");
+            for a in &launch_args {
+                cmd.arg(a);
+            }
             cmd.stdin(std::process::Stdio::null());
             cmd.stdout(std::process::Stdio::null());
             cmd.stderr(std::process::Stdio::null());
@@ -404,17 +402,31 @@ pub fn store_package_still_registered(full_name: &str, family_name: &str) -> boo
     }
 }
 
+/// Extra Chromium flags for toolbox fast-startup (Statsig host fast-fail).
+fn toolbox_extra_launch_args() -> Vec<String> {
+    crate::toolbox::enhance_inject::extra_launch_args()
+}
+
+fn host_launch_arg_list(port: u16) -> Vec<String> {
+    let mut args = vec![
+        format!("--remote-debugging-port={port}"),
+        "--remote-debugging-address=127.0.0.1".to_string(),
+    ];
+    args.extend(toolbox_extra_launch_args());
+    args
+}
+
 fn launch_windows_store_app(port: u16, aumid_pref: Option<&str>) -> Result<u32, EngineError> {
     let aumid = aumid_pref
         .map(|s| s.to_string())
         .or_else(resolve_windows_store_aumid)
         .ok_or_else(|| EngineError::msg("未找到 Microsoft Store 版 ChatGPT/Codex AUMID"))?;
-    // Pass both port + loopback address so production runtimes that honor flags stay local.
-    let args = format!(
-        "--remote-debugging-port={port} --remote-debugging-address=127.0.0.1"
-    );
+    // Pass port + loopback + optional fast-startup host-resolver rules.
+    let args = host_launch_arg_list(port).join(" ");
     #[cfg(windows)]
     {
+        // Computer Use Guard before package activation so config is ready.
+        let _ = crate::toolbox::ensure_computer_use_guard_if_enabled();
         return super::win_native::activate_packaged_app_blocking(&aumid, &args);
     }
     #[cfg(not(windows))]
@@ -425,13 +437,17 @@ fn launch_windows_store_app(port: u16, aumid_pref: Option<&str>) -> Result<u32, 
 }
 
 fn spawn_with_debug_port(exe: &str, port: u16) -> Result<u32, EngineError> {
-    let arg = format!("--remote-debugging-port={port}");
-    // Loopback-only when the host supports the Chromium flag (macOS Codex / ChatGPT).
-    let addr = "--remote-debugging-address=127.0.0.1";
-    append_diag(&format!("spawn_with_debug_port exe={exe}"));
+    let launch_args = host_launch_arg_list(port);
+    append_diag(&format!(
+        "spawn_with_debug_port exe={exe} extraArgs={}",
+        launch_args.len().saturating_sub(2)
+    ));
+    // Computer Use Guard before process spawn (config + marketplace).
+    let _ = crate::toolbox::ensure_computer_use_guard_if_enabled();
     let mut cmd = Command::new(exe);
-    cmd.arg(&arg);
-    cmd.arg(addr);
+    for a in &launch_args {
+        cmd.arg(a);
+    }
     cmd.stdin(std::process::Stdio::null());
     cmd.stdout(std::process::Stdio::null());
     cmd.stderr(std::process::Stdio::null());
@@ -448,13 +464,17 @@ fn spawn_with_debug_port(exe: &str, port: u16) -> Result<u32, EngineError> {
             let pid = child.id();
             // Intentionally leak/detach: do not wait on ChatGPT.
             std::mem::forget(child);
+            // Post-launch Computer Use Guard retries (Windows).
+            crate::toolbox::start_computer_use_guard_watchdog_if_enabled();
             Ok(pid)
         }
         Err(e) => {
             if cfg!(windows) {
                 // Shell fallback for paths with spaces
                 let mut shell = Command::new("cmd");
-                shell.args(["/C", "start", "", exe, &arg, addr]);
+                let mut shell_args = vec!["/C".to_string(), "start".to_string(), "".to_string(), exe.to_string()];
+                shell_args.extend(launch_args.clone());
+                shell.args(&shell_args);
                 shell.stdin(std::process::Stdio::null());
                 shell.stdout(std::process::Stdio::null());
                 shell.stderr(std::process::Stdio::null());
@@ -469,6 +489,7 @@ fn spawn_with_debug_port(exe: &str, port: u16) -> Result<u32, EngineError> {
                     .map(|c| {
                         let pid = c.id();
                         std::mem::forget(c);
+                        crate::toolbox::start_computer_use_guard_watchdog_if_enabled();
                         pid
                     })
                     .map_err(|e2| {

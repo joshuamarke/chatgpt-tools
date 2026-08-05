@@ -828,6 +828,23 @@ pub fn inject_once_with_staged(
                     }
                 }
             }
+
+            // Phase 1c: toolbox enhancements (force Chinese + fast startup).
+            // Independent of official/third-party; runs on every successful shell.
+            match crate::toolbox::enhance_inject::try_inject_into_session(&session) {
+                Ok(v) => {
+                    if let Some(obj) = verified.as_object_mut() {
+                        obj.insert("toolboxEnhanceOk".into(), json!(true));
+                        obj.insert("toolboxEnhanceResult".into(), v);
+                    }
+                }
+                Err(e) => {
+                    if let Some(obj) = verified.as_object_mut() {
+                        obj.insert("toolboxEnhanceOk".into(), json!(false));
+                        obj.insert("toolboxEnhanceError".into(), json!(e));
+                    }
+                }
+            }
         }
 
         // Phase 2 (optional): art on same session (caller owns page OpUI).

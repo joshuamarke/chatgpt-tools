@@ -1223,6 +1223,8 @@ pub fn apply_skin_native_opts(skin_id: &str, restart: bool) -> Result<Value, Eng
     // Ensure third-party model unlock is queued/applied after host is up
     // (shell inject may have already tried; this covers launch-only + retries).
     crate::providers::model_unlock::on_host_ready();
+    // Toolbox: force Chinese / fast startup inject + Computer Use Guard.
+    crate::toolbox::on_host_ready();
 
     Ok(json!({
         "ok": true,
@@ -1363,18 +1365,20 @@ pub fn resume_skin_native(restart: bool) -> Result<Value, EngineError> {
     apply_skin_native_opts(&skin_id, restart)
 }
 
+fn last_session_skin_id() -> Option<String> {
+    read_state()
+        .as_ref()
+        .and_then(|s| s.get("skinId").and_then(|v| v.as_str()))
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string())
+}
+
 /// GUI「启动 ChatGPT」: launch host with debug port.
 /// If last session has a skinId → apply that skin (cold path).
 /// Otherwise only bring the client up so later apply can hot-inject.
 pub fn start_host_native() -> Result<Value, EngineError> {
     let port = shared_port();
-    let last_skin = read_state()
-        .as_ref()
-        .and_then(|s| s.get("skinId").and_then(|v| v.as_str()))
-        .filter(|s| !s.is_empty())
-        .map(|s| s.to_string());
-
-    if let Some(skin_id) = last_skin {
+    if let Some(skin_id) = last_session_skin_id() {
         // Clear pause so apply re-enables keep-alive after inject.
         set_paused(false);
         append_diag(&format!(
@@ -1396,9 +1400,52 @@ pub fn start_host_native() -> Result<Value, EngineError> {
     // Third-party model whitelist: inject once host debug port is up (or queue
     // via keep thread if the renderer is still booting).
     crate::providers::model_unlock::on_host_ready();
+    // Toolbox enhancements + optional Computer Use Guard on cold launch.
+    crate::toolbox::on_host_ready();
     Ok(json!({
         "ok": true,
         "started": true,
+        "mode": "launch-only",
+        "port": port,
+        "lifecycle": life.lifecycle,
+        "debugPortOpen": life.debug_port_open,
+        "rendererReady": life.renderer_ready,
+        "canHotApply": life.can_hot_apply,
+        "engine": "native-rust",
+        "native": true,
+    }))
+}
+
+/// GUI「重启 ChatGPT」: hard stop + relaunch with debug port.
+/// Re-applies last session skin when present (same as start, but force restart).
+pub fn restart_host_native() -> Result<Value, EngineError> {
+    let port = shared_port();
+    if let Some(skin_id) = last_session_skin_id() {
+        set_paused(false);
+        append_diag(&format!(
+            "restart_host_native: apply last skin id={skin_id} (forced restart)"
+        ));
+        let mut result = apply_skin_native_opts(&skin_id, true)?;
+        if let Some(obj) = result.as_object_mut() {
+            obj.insert("started".into(), json!(true));
+            obj.insert("restarted".into(), json!(true));
+            obj.insert("mode".into(), json!("apply-last-skin"));
+            obj.insert("skinId".into(), json!(skin_id));
+        }
+        return Ok(result);
+    }
+
+    append_diag("restart_host_native: hard relaunch without skin session");
+    stop_keep();
+    ensure_debug_port(port, true)?;
+    invalidate_host_probe_cache();
+    let life = probe_host_lifecycle_force(port);
+    crate::providers::model_unlock::on_host_ready();
+    crate::toolbox::on_host_ready();
+    Ok(json!({
+        "ok": true,
+        "started": true,
+        "restarted": true,
         "mode": "launch-only",
         "port": port,
         "lifecycle": life.lifecycle,

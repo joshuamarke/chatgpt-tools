@@ -214,6 +214,12 @@ pub async fn start_host() -> Result<Value, String> {
     run_engine_async(vec!["start-host".into()]).await
 }
 
+/// Hard restart ChatGPT/Codex; re-apply last session skin when available.
+#[tauri::command]
+pub async fn restart_host() -> Result<Value, String> {
+    run_engine_async(vec!["restart-host".into()]).await
+}
+
 #[tauri::command]
 pub async fn export_skin(app: AppHandle, skin_id: String) -> Result<Value, String> {
     let default_name = format!("{skin_id}.skin");

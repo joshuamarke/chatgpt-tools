@@ -28,9 +28,12 @@ pub const OFFICIAL_API_BASE_URL: &str = "https://api.openai.com/v1";
 pub const OFFICIAL_MODEL_PROVIDER: &str = "openai";
 /// Default wire API for official OpenAI Responses path.
 pub const OFFICIAL_WIRE_API: &str = "responses";
-/// Display / seed default model label (Codex ships multiple gpt-5.x variants;
-/// leaving model unset lets the client pick its built-in default).
-pub const OFFICIAL_MODEL_HINT: &str = "gpt-5.5";
+/// Codex built-in default model restored when enabling OpenAI Official.
+/// Third-party profiles often leave `model = "grok-4.5"` (etc.); that must not
+/// survive a switch back to official routing.
+pub const OFFICIAL_DEFAULT_MODEL: &str = "gpt-5.6-terra";
+/// Display / seed default model label for official provider summaries.
+pub const OFFICIAL_MODEL_HINT: &str = OFFICIAL_DEFAULT_MODEL;
 /// Canonical `model_providers.*.name` for Codex (UI label; not the supplier archive title).
 /// Always write this — never the ChatGPT Tools provider display name.
 pub const PROVIDER_UI_NAME: &str = "OpenAI";
@@ -155,8 +158,30 @@ pub fn is_official_base_url(url: &str) -> bool {
         || u.starts_with("https://chat.openai.com/backend-api")
 }
 
+/// Write the Codex OpenAI Official default model into a live document.
+pub fn apply_official_default_model(doc: &mut DocumentMut) {
+    doc["model"] = toml_edit::value(OFFICIAL_DEFAULT_MODEL);
+}
+
+/// Ensure top-level `model = OFFICIAL_DEFAULT_MODEL` in a config.toml string.
+pub fn ensure_official_default_model_in_config(config_text: &str) -> Result<String, String> {
+    let mut doc = if config_text.trim().is_empty() {
+        DocumentMut::new()
+    } else {
+        config_text
+            .parse::<DocumentMut>()
+            .map_err(|e| format!("Invalid Codex config.toml: {e}"))?
+    };
+    apply_official_default_model(&mut doc);
+    Ok(doc.to_string())
+}
+
 /// Strip third-party routing from an existing live config while preserving
 /// MCP / plugins / projects / desktop / memories / etc.
+///
+/// Also resets top-level `model` to [`OFFICIAL_DEFAULT_MODEL`]: third-party
+/// enables leave values like `grok-4.5` / `deepseek-chat` which are invalid
+/// once routing is back on ChatGPT / Platform API.
 pub fn strip_to_official_routing(config_text: &str) -> Result<String, String> {
     if config_text.trim().is_empty() {
         return Ok(official_config_toml());
@@ -182,6 +207,9 @@ pub fn strip_to_official_routing(config_text: &str) -> Result<String, String> {
     doc.as_table_mut().remove("experimental_bearer_token");
     // Third-party model catalog projection
     doc.as_table_mut().remove("model_catalog_json");
+
+    // Always restore official default model (do not keep third-party slugs).
+    apply_official_default_model(&mut doc);
 
     // If only comments / whitespace remain useful keys, keep the rest intact.
     let out = doc.to_string();
@@ -778,7 +806,7 @@ pub fn write_live_with_options(
         let _ = backup_live_files();
         let cleaned = strip_to_official_routing(&live_existing)?;
         // Prefer cleaned live over stored seed comments when live had real content.
-        let final_config = if live_existing.trim().is_empty() {
+        let mut final_config = if live_existing.trim().is_empty() {
             if config_text.trim().is_empty() {
                 official_config_toml()
             } else {
@@ -787,6 +815,9 @@ pub fn write_live_with_options(
         } else {
             cleaned
         };
+        // Pin Codex official default model even when live/seed had no `model` key
+        // (or still carried a third-party slug from a partial prior state).
+        final_config = ensure_official_default_model_in_config(&final_config)?;
         validate_config_toml(&final_config)?;
 
         if auth_has_login_material(&auth) && !is_api_key_only_auth(&auth) {
@@ -805,8 +836,9 @@ pub fn write_live_with_options(
                 warnings.push("已切换为 OpenAI 官方（保留现有登录态）。".into());
             }
         }
-        // Official never needs third-party model whitelist; silent clear.
-        let _ = super::model_unlock::on_official_activated();
+        // Official never needs third-party model whitelist; clear CDP hooks off-thread
+        // so switch/save returns immediately (CDP open/evaluate can take seconds).
+        super::model_unlock::schedule_official_activated();
         return Ok(warnings);
     }
 
@@ -884,8 +916,8 @@ pub fn write_live_with_options(
         );
     }
 
-    // Desktop whitelist unlock — silent (no GUI toast). Best-effort.
-    let _ = super::model_unlock::try_inject_desktop_unlock(Some(&settings_for_catalog));
+    // Desktop whitelist unlock — off-thread so GUI switch/save is not blocked by CDP.
+    super::model_unlock::schedule_desktop_unlock(Some(settings_for_catalog));
 
     Ok(warnings)
 }
@@ -1358,6 +1390,34 @@ trust_level = "trusted"
         assert!(!cleaned.contains("experimental_bearer_token"));
         assert!(cleaned.contains("mcp_servers") || cleaned.contains("node_repl"));
         assert!(cleaned.contains("projects") || cleaned.contains("trust_level"));
+        assert!(
+            cleaned.contains(OFFICIAL_DEFAULT_MODEL),
+            "official default model must replace third-party model: {cleaned}"
+        );
+        assert!(!cleaned.contains("gpt-5.6-sol"));
+        assert!(is_official_live_config(&cleaned));
+    }
+
+    #[test]
+    fn strip_to_official_resets_third_party_default_model() {
+        let live = r#"
+model = "grok-4.5"
+model_provider = "custom"
+model_catalog_json = "chatgpt-tools-model-catalog.json"
+
+[model_providers.custom]
+name = "OpenAI"
+base_url = "https://api.deepseek.com/v1"
+wire_api = "responses"
+"#;
+        let cleaned = strip_to_official_routing(live).expect("strip");
+        assert_eq!(
+            extract_model(&cleaned).as_deref(),
+            Some(OFFICIAL_DEFAULT_MODEL)
+        );
+        assert!(!cleaned.contains("grok-4.5"));
+        assert!(!cleaned.contains("model_catalog_json"));
+        assert!(!cleaned.contains("api.deepseek.com"));
         assert!(is_official_live_config(&cleaned));
     }
 

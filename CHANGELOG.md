@@ -12,8 +12,9 @@
 ## 1.1.13 - 2026-08-03
 
 - 多功能桌面工具箱：皮肤引擎、会话管理、供应商 / 本地路由等模块，不修改客户端通过CDP注入实现。
-- 移除Node回退，清理兼容Node冗余代码。
-- 适配 ChatGPT/Codex 272更新，修复皮肤因为Codex导致样式不正常。
+- 新增 使用第三方接口的时候设置Codex中文界面、解锁Codex插件功能。
+- 修改 预设供应商DeepSeek的协议(wire_api)默认选中responses，原生的deepseek v4 pro目前仍是Chat Completions在codex中要responses。
+- 优化 供应商设置在写配置文件时候原子替换避免误伤。
 
 ## 如何写下一版
 

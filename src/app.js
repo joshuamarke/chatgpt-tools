@@ -11,13 +11,17 @@ const categoryNav = document.getElementById("categoryNav");
 const skinsView = document.getElementById("skinsView");
 const sessionsView = document.getElementById("sessionsView");
 const providersView = document.getElementById("providersView");
+const toolboxView = document.getElementById("toolboxView");
 const aboutView = document.getElementById("aboutView");
 const overviewView = document.getElementById("overviewView");
 const overviewGrid = document.getElementById("overviewGrid");
 
-/** 关于页展示版本（与 package.json 对齐；版本检查走云端 catalog） */
-const APP_VERSION = "1.1.12";
-const APP_RELEASE_DATE = "2026-07-23";
+/**
+ * Runtime product version from the Tauri package (Cargo / tauri.conf / package.json).
+ * Never hardcode — about UI + update compare fall back only when Tauri is unavailable.
+ * App updates / release notes use GitHub via tauri-plugin-updater (`checkAppUpdate`).
+ */
+let APP_VERSION = "";
 
 /** @type {{ skins: any[], codexRunning?: boolean, debugReady?: boolean } | null} */
 let latestStatus = null;
@@ -31,7 +35,7 @@ let promoTimer = null;
 /** @type {any[]} */
 let promoItems = [];
 let activeCategory = "all";
-/** 当前主区域视图：overview | skins | sessions | providers | about */
+/** 当前主区域视图：overview | skins | sessions | providers | toolbox | about */
 let activeView = "overview";
 /** @type {any | null} last env_check payload */
 let latestEnv = null;
@@ -222,6 +226,7 @@ function isPinnedNavItem(el) {
     cat === "about" ||
     cat === "sessions" ||
     cat === "providers" ||
+    cat === "toolbox" ||
     cat === "overview"
   );
 }
@@ -263,9 +268,14 @@ function renderCategoryNav() {
   group.appendChild(parentBtn);
   group.appendChild(sub);
 
-  // Order: 概览 → 会话管理 → 皮肤分组 → 关于
-  if (aboutBtn) {
-    categoryNav.insertBefore(group, aboutBtn);
+  // Order: 概览 → 会话 → 供应商 → 全部皮肤 → 设置 → 关于
+  // Insert skins group just before 设置 (fallback: 关于 / end).
+  const toolboxBtn = categoryNav.querySelector(
+    '[data-category="toolbox"], [data-view="toolbox"]'
+  );
+  const insertBefore = toolboxBtn || aboutBtn;
+  if (insertBefore) {
+    categoryNav.insertBefore(group, insertBefore);
   } else {
     categoryNav.appendChild(group);
   }
@@ -303,13 +313,24 @@ function syncCategoryNavActive() {
       el.classList.remove("is-branch");
       return;
     }
+    if (activeView === "toolbox") {
+      el.classList.toggle("active", cat === "toolbox");
+      el.classList.remove("is-branch");
+      return;
+    }
     if (activeView === "overview") {
       el.classList.toggle("active", cat === "overview");
       el.classList.remove("is-branch");
       return;
     }
     // skins view: highlight category filters; top-level feature menus inactive
-    if (cat === "sessions" || cat === "providers" || cat === "about" || cat === "overview") {
+    if (
+      cat === "sessions" ||
+      cat === "providers" ||
+      cat === "toolbox" ||
+      cat === "about" ||
+      cat === "overview"
+    ) {
       el.classList.remove("active", "is-branch");
       return;
     }
@@ -326,6 +347,7 @@ function syncCategoryNavActive() {
           activeCategory !== "about" &&
           activeCategory !== "sessions" &&
           activeCategory !== "providers" &&
+          activeCategory !== "toolbox" &&
           activeCategory !== "overview"
       );
     } else {
@@ -358,6 +380,11 @@ function bindCategoryNav() {
     if (cat === "providers" || btn.getAttribute("data-view") === "providers") {
       skinsNavExpanded = false;
       setMainView("providers");
+      return;
+    }
+    if (cat === "toolbox" || btn.getAttribute("data-view") === "toolbox") {
+      skinsNavExpanded = false;
+      setMainView("toolbox");
       return;
     }
     if (cat === "overview" || btn.getAttribute("data-view") === "overview") {
@@ -862,7 +889,7 @@ function updateHostPill(host) {
     pillCodex.className = mapped.cls;
     pillCodex.title = mapped.title;
     latestHost = { ...(latestHost || {}), ...host };
-    syncPauseButton(latestStatus || host);
+    syncTitlebarHostActions(latestStatus || host);
     return;
   }
   const mapped = mapHostPill(host);
@@ -871,7 +898,7 @@ function updateHostPill(host) {
   pillCodex.title = mapped.title;
   latestHost = { ...(latestHost || {}), ...host };
   if (latestStatus) mergeHostFields(latestStatus, host);
-  syncPauseButton(latestStatus || host);
+  syncTitlebarHostActions(latestStatus || host);
 }
 
 function updateActivePill(status) {
@@ -918,55 +945,177 @@ function updateActivePill(status) {
   pillActive.title = [stateName || "无活动皮肤", modeHint, artHint, storeHint]
     .filter(Boolean)
     .join(" · ");
-  syncPauseButton(status);
+  syncTitlebarHostActions(status);
 }
 
-/**
- * Titlebar action modes for #btnPause:
- * - start: host offline → launch ChatGPT (+ last skin if any)
- * - resume: paused session → continue skin
- * - pause: host running with session → pause skin
- * - idle: host running, no session → disabled pause label
- */
-function pauseButtonMode(status) {
+/** Host offline (no process / debug / renderer). */
+function isHostOffline(status) {
   const host = latestHost || status || {};
   const lifecycle = host.lifecycle || status?.lifecycle || "offline";
-  const offline =
+  return (
     lifecycle === "offline" &&
     !host.processRunning &&
     !host.debugPortOpen &&
     !host.rendererReady &&
-    !status?.codexRunning;
-  if (offline) return "start";
-  const paused = Boolean(status?.paused);
-  if (paused) return "resume";
-  const hasSession = Boolean(status?.state?.skinId || status?.skins?.some((s) => s.active));
-  if (hasSession) return "pause";
-  return "idle";
+    !status?.codexRunning &&
+    !host.codexRunning
+  );
 }
 
-function syncPauseButton(status) {
-  const btn = document.getElementById("btnPause");
-  const label = document.getElementById("btnPauseLabel");
+/**
+ * Host client is running (process up and/or debug/renderer path alive).
+ * Distinct from "starting but not yet injectable".
+ */
+function isHostClientRunning(status) {
+  if (isHostOffline(status)) return false;
+  const host = latestHost || status || {};
+  const lifecycle = host.lifecycle || status?.lifecycle || "offline";
+  return (
+    lifecycle === "ready" ||
+    lifecycle === "starting" ||
+    host.processRunning === true ||
+    host.codexRunning === true ||
+    status?.codexRunning === true ||
+    host.debugPortOpen === true ||
+    host.rendererReady === true ||
+    host.canHotApply === true
+  );
+}
+
+/**
+ * Inject path is healthy: host ready for live pause/resume (not merely process up).
+ * Mid-start without renderer does not count as「皮肤启用正常」.
+ */
+function isSkinInjectionHealthy(status) {
+  const host = latestHost || status || {};
+  const lifecycle = host.lifecycle || status?.lifecycle || "offline";
+  if (lifecycle === "ready") return true;
+  if (host.canHotApply === true && (host.rendererReady === true || host.debugPortOpen === true)) {
+    return true;
+  }
+  if (host.rendererReady === true) return true;
+  return false;
+}
+
+/** Active skin card or session skinId (including paused). */
+function hasSkinSession(status) {
+  return Boolean(
+    status?.state?.skinId ||
+      status?.paused ||
+      (status?.skins || []).some((s) => s.active)
+  );
+}
+
+/**
+ * Skin is engaged on a running host: active badge, or keep-alive holding inject,
+ * or paused session that can be resumed.
+ */
+function isSkinEnabledOnHost(status) {
+  if (!hasSkinSession(status)) return false;
+  if (status?.paused) return Boolean(status?.state?.skinId);
+  if ((status?.skins || []).some((s) => s.active)) return true;
+  const host = latestHost || status || {};
+  // Session + keep-alive means inject loop is holding the skin live.
+  if (status?.state?.skinId && (status?.keepAlive || host.keepAlive)) return true;
+  return false;
+}
+
+/**
+ * Titlebar host button (#btnHost): start when offline, restart when running.
+ * @returns {"start"|"restart"}
+ */
+function hostButtonMode(status) {
+  return isHostOffline(status) ? "start" : "restart";
+}
+
+/**
+ * Titlebar skin control (#btnSkinPause).
+ * Visible only when:
+ *   1) host client is running, and
+ *   2) skin injection is healthy, and
+ *   3) a skin is enabled (active / keep-alive) or paused on that host.
+ * - pause: live skin engaged
+ * - resume: session paused on a still-running host
+ * - hidden: otherwise
+ * @returns {"pause"|"resume"|"hidden"}
+ */
+function skinControlMode(status) {
+  // Gate 1+2: running host + healthy inject path
+  if (!isHostClientRunning(status) || !isSkinInjectionHealthy(status)) {
+    return "hidden";
+  }
+  // Gate 3: skin actually enabled (or paused with restorable session)
+  if (!isSkinEnabledOnHost(status)) return "hidden";
+
+  if (status?.paused) return "resume";
+  return "pause";
+}
+
+const HOST_ICO_START =
+  '<svg viewBox="0 0 24 24"><path d="M8 5.5v13l11-6.5z"/></svg>';
+const HOST_ICO_RESTART =
+  '<svg viewBox="0 0 24 24"><path d="M4.5 12a7.5 7.5 0 0 1 12.7-5.4"/><path d="M17.5 4.5v3.2h-3.2"/><path d="M19.5 12a7.5 7.5 0 0 1-12.7 5.4"/><path d="M6.5 19.5v-3.2h3.2"/></svg>';
+const SKIN_ICO_PAUSE =
+  '<svg viewBox="0 0 24 24"><rect x="6" y="5" width="4" height="14" rx="1"/><rect x="14" y="5" width="4" height="14" rx="1"/></svg>';
+const SKIN_ICO_RESUME =
+  '<svg viewBox="0 0 24 24"><path d="M8 5.5v13l11-6.5z"/></svg>';
+
+function syncHostButton(status) {
+  const btn = document.getElementById("btnHost");
+  const label = document.getElementById("btnHostLabel");
+  const ico = document.getElementById("btnHostIco");
   if (!btn || !label) return;
-  const mode = pauseButtonMode(status);
+  const mode = hostButtonMode(status);
   btn.dataset.mode = mode;
-  btn.disabled = mode === "idle";
-  btn.classList.toggle("chip-warn", mode === "resume");
-  btn.classList.toggle("chip-primary", mode === "start");
+  btn.disabled = false;
+  btn.classList.add("chip-primary");
+  btn.classList.remove("chip-warn");
   if (mode === "start") {
     label.textContent = "启动 ChatGPT";
     btn.title = "启动 ChatGPT 客户端；若有上次使用的皮肤将自动应用";
-  } else if (mode === "resume") {
+    if (ico) ico.innerHTML = HOST_ICO_START;
+  } else {
+    label.textContent = "重启 ChatGPT";
+    btn.title = "强制重启 ChatGPT 客户端；若有上次皮肤将在重启后重新应用";
+    if (ico) ico.innerHTML = HOST_ICO_RESTART;
+  }
+}
+
+function syncSkinPauseButton(status) {
+  const btn = document.getElementById("btnSkinPause");
+  const label = document.getElementById("btnSkinPauseLabel");
+  const ico = document.getElementById("btnSkinPauseIco");
+  if (!btn || !label) return;
+  const mode = skinControlMode(status);
+  btn.dataset.mode = mode;
+  if (mode === "hidden") {
+    btn.hidden = true;
+    btn.disabled = true;
+    return;
+  }
+  btn.hidden = false;
+  btn.disabled = false;
+  btn.classList.toggle("chip-warn", mode === "resume");
+  if (mode === "resume") {
     label.textContent = "继续显示";
     btn.title = "清除暂停并重新应用当前皮肤";
-  } else if (mode === "pause") {
-    label.textContent = "暂停皮肤";
-    btn.title = "写入暂停标记并即时从 ChatGPT 窗口卸下皮肤（会话可恢复）";
+    if (ico) ico.innerHTML = SKIN_ICO_RESUME;
   } else {
     label.textContent = "暂停皮肤";
-    btn.title = "当前没有可暂停的皮肤会话";
+    btn.title = "写入暂停标记并即时从 ChatGPT 窗口卸下皮肤（会话可恢复）";
+    if (ico) ico.innerHTML = SKIN_ICO_PAUSE;
   }
+}
+
+/** Keep titlebar host + skin actions in sync with status / host polls. */
+function syncTitlebarHostActions(status) {
+  syncHostButton(status);
+  syncSkinPauseButton(status);
+}
+
+/** @deprecated use syncTitlebarHostActions */
+function syncPauseButton(status) {
+  syncTitlebarHostActions(status);
 }
 
 function skinsSignature(skins) {
@@ -1767,15 +1916,18 @@ function setMainView(view, opts = {}) {
         ? "sessions"
         : view === "providers"
           ? "providers"
-          : view === "overview"
-            ? "overview"
-            : "skins";
+          : view === "toolbox"
+            ? "toolbox"
+            : view === "overview"
+              ? "overview"
+              : "skins";
   const prev = activeView;
   activeView = next;
   if (overviewView) overviewView.hidden = activeView !== "overview";
   if (skinsView) skinsView.hidden = activeView !== "skins";
   if (sessionsView) sessionsView.hidden = activeView !== "sessions";
   if (providersView) providersView.hidden = activeView !== "providers";
+  if (toolboxView) toolboxView.hidden = activeView !== "toolbox";
   if (aboutView) aboutView.hidden = activeView !== "about";
   if (searchInput) {
     const disableSearch = activeView !== "skins";
@@ -1786,6 +1938,7 @@ function setMainView(view, opts = {}) {
     activeView === "about" ||
     activeView === "sessions" ||
     activeView === "providers" ||
+    activeView === "toolbox" ||
     activeView === "overview"
   ) {
     // 离开皮肤主分支：收起主题子菜单
@@ -1817,6 +1970,19 @@ function setMainView(view, opts = {}) {
   } else if (prev === "providers" && activeView !== "providers") {
     try {
       window.providersView?.leave?.();
+    } catch {
+      /* ignore */
+    }
+  }
+  if (activeView === "toolbox" && prev !== "toolbox") {
+    try {
+      window.toolboxView?.enter?.();
+    } catch (err) {
+      console.warn("toolboxView.enter failed", err);
+    }
+  } else if (prev === "toolbox" && activeView !== "toolbox") {
+    try {
+      window.toolboxView?.leave?.();
     } catch {
       /* ignore */
     }
@@ -2579,14 +2745,44 @@ document.getElementById("btnEnvRefresh")?.addEventListener("click", () => {
   triggerOverviewRefresh(document.getElementById("btnEnvRefresh"));
 });
 
+function formatAboutVersion(ver) {
+  const v = String(ver || "").trim().replace(/^v/i, "");
+  return v ? `v${v}` : "…";
+}
+
 function syncAboutVersionUi() {
   const badge = document.getElementById("aboutVersionBadge");
   const text = document.getElementById("aboutVersionText");
-  const dateEl = document.getElementById("aboutReleaseDate");
-  const ver = `v${APP_VERSION}`;
+  const ver = formatAboutVersion(APP_VERSION);
   if (badge) badge.textContent = ver;
   if (text) text.textContent = ver;
-  if (dateEl) dateEl.textContent = APP_RELEASE_DATE;
+}
+
+/**
+ * Resolve installed app version from Tauri package metadata (single source of truth).
+ * Release notes / newer versions come from GitHub `latest.json` on check-update.
+ */
+async function loadAppVersionFromPackage() {
+  try {
+    let ver = "";
+    if (typeof window.skinAPI?.getAppVersion === "function") {
+      ver = await window.skinAPI.getAppVersion();
+    } else {
+      const getVersion = window.__TAURI__?.app?.getVersion;
+      if (typeof getVersion === "function") {
+        ver = await getVersion();
+      }
+    }
+    const normalized = String(ver || "")
+      .trim()
+      .replace(/^v/i, "");
+    if (normalized) {
+      APP_VERSION = normalized;
+      syncAboutVersionUi();
+    }
+  } catch (err) {
+    console.warn("loadAppVersionFromPackage failed", err);
+  }
 }
 
 /** @type {boolean} */
@@ -3074,10 +3270,31 @@ aboutView?.addEventListener("click", (e) => {
     e.preventDefault();
     const addr = mail.getAttribute("data-mailto");
     if (addr) openExternalUrl(`mailto:${addr}`);
+    return;
+  }
+  // Cloud HTML may ship copy buttons: data-copy="556251300"
+  const copyEl = t.closest("[data-copy]");
+  if (copyEl && copyEl.id !== "btnCopyContact") {
+    e.preventDefault();
+    const text = String(copyEl.getAttribute("data-copy") || "").trim();
+    if (!text) return;
+    (async () => {
+      try {
+        if (navigator.clipboard?.writeText) {
+          await navigator.clipboard.writeText(text);
+          showToast(`已复制：${text}`, "ok");
+        } else {
+          showToast("复制失败，请手动复制", "error");
+        }
+      } catch {
+        showToast("复制失败，请手动复制", "error");
+      }
+    })();
   }
 });
 
 syncAboutVersionUi();
+loadAppVersionFromPackage();
 
 /**
  * Wire About → GitHub button from src/repo-meta.json
@@ -3109,29 +3326,10 @@ async function applyRepoMetaUi() {
 }
 applyRepoMetaUi();
 
-/** Built-in local preset when cloud about is unavailable (static HTML in index). */
-const DEFAULT_ABOUT_CONTACT = {
-  mode: "fields",
-  intro: "如有问题或建议，欢迎与我们联系",
-  fields: [
-    {
-      id: "email",
-      label: "邮箱",
-      value: "support@chatgpt-skins.com",
-      type: "email",
-      href: "mailto:support@chatgpt-skins.com",
-    },
-    {
-      id: "website",
-      label: "网站",
-      value: "www.chatgpt-skins.com",
-      type: "link",
-      href: "https://www.chatgpt-skins.com",
-    },
-  ],
-  html: "",
-  css: "",
-};
+/**
+ * Contact + ad are cloud-only (`/v1/about.json`).
+ * Never invent QQ / email / ad copy in the client — empty → hide the block.
+ */
 
 function sanitizeAboutContactHtml(html) {
   return String(html || "")
@@ -3158,7 +3356,69 @@ function escapeAboutText(s) {
 }
 
 /**
- * Mount remote HTML mode into host (hides local preset).
+ * Show/hide contact block inside the left panel (GitHub stays in the same box).
+ * Also toggles the divider between contact and GitHub.
+ */
+function setAboutContactSectionVisible(visible) {
+  const section = document.getElementById("aboutContactCard");
+  const divider = document.getElementById("aboutLeftDivider");
+  const panel = document.getElementById("aboutLeftPanel");
+  if (section) section.hidden = !visible;
+  if (divider) divider.hidden = !visible;
+  panel?.classList.toggle("has-contact", !!visible);
+}
+
+/** Show/hide the ad slot shell (content only from cloud). */
+function setAboutAdSlotVisible(visible) {
+  const slot = document.getElementById("aboutAdSlot");
+  if (slot) slot.hidden = !visible;
+}
+
+/**
+ * Clear contact UI only (GitHub row in the same left panel is untouched).
+ */
+function clearAboutContactUi() {
+  const remote = document.getElementById("aboutContactRemote");
+  const body = document.getElementById("aboutContactRemoteBody");
+  const fallback = document.getElementById("aboutContactFallback");
+  const media = document.getElementById("aboutContactMedia");
+  const list = document.getElementById("aboutContactList");
+  const titleEl = document.getElementById("aboutContactTitle");
+  const noteEl = document.getElementById("aboutContactNote");
+  const copyBtn = document.getElementById("btnCopyContact");
+  const panel = document.getElementById("aboutLeftPanel");
+
+  if (remote) {
+    remote.hidden = true;
+    remote.querySelector("style[data-about-contact-css]")?.remove();
+  }
+  if (body) body.innerHTML = "";
+  if (fallback) fallback.hidden = true;
+  if (media) media.hidden = true;
+  if (list) {
+    list.hidden = true;
+    list.innerHTML = "";
+  }
+  if (titleEl) {
+    titleEl.textContent = "";
+    titleEl.hidden = true;
+  }
+  if (noteEl) {
+    noteEl.textContent = "";
+    noteEl.hidden = true;
+  }
+  if (copyBtn) {
+    copyBtn.hidden = true;
+    delete copyBtn.dataset.copy;
+  }
+  setAboutContactMedia("");
+  panel?.classList.remove("is-remote-contact");
+  setAboutContactSectionVisible(false);
+}
+
+/**
+ * Mount cloud HTML+CSS into the contact host (full layout freedom for ops).
+ * Fields fallback is hidden; GitHub remains below the divider in the same box.
  * @param {string} html
  * @param {string} css
  * @returns {boolean}
@@ -3167,17 +3427,12 @@ function mountAboutContactRemote(html, css) {
   const remote = document.getElementById("aboutContactRemote");
   const body = document.getElementById("aboutContactRemoteBody");
   const fallback = document.getElementById("aboutContactFallback");
-  const imageWrap = document.getElementById("aboutContactImageWrap");
-  const card = document.getElementById("aboutContactCard");
+  const panel = document.getElementById("aboutLeftPanel");
   if (!remote || !body) return false;
 
   const htmlTrim = String(html || "").trim();
   if (!htmlTrim) {
-    remote.hidden = true;
-    body.innerHTML = "";
-    remote.querySelector("style[data-about-contact-css]")?.remove();
-    if (fallback) fallback.hidden = false;
-    card?.classList.remove("is-remote");
+    clearAboutContactUi();
     return false;
   }
 
@@ -3187,27 +3442,56 @@ function mountAboutContactRemote(html, css) {
     styleEl.setAttribute("data-about-contact-css", "1");
     remote.insertBefore(styleEl, body);
   }
+  // Cloud CSS is injected as-is (sanitized); client does not lock contact layout.
   styleEl.textContent = sanitizeAboutContactCss(css || "");
   body.innerHTML = sanitizeAboutContactHtml(htmlTrim);
 
   remote.hidden = false;
   if (fallback) fallback.hidden = true;
-  if (imageWrap) imageWrap.hidden = true;
-  card?.classList.add("is-remote");
+  panel?.classList.add("is-remote-contact");
+  setAboutContactSectionVisible(true);
   return true;
 }
 
 /**
- * Render free-form fields into the local-style list (no fixed email/website keys).
+ * Set contact media image from a cloud image field (optional).
+ * @param {string} [src]
+ */
+function setAboutContactMedia(src) {
+  const media = document.getElementById("aboutContactMedia");
+  const img = document.getElementById("aboutContactQrImg");
+  const placeholder = document.getElementById("aboutContactQrPlaceholder");
+  const url = String(src || "").trim();
+  if (img && url) {
+    if (media) media.hidden = false;
+    img.src = url;
+    img.alt = "";
+    img.hidden = false;
+    if (placeholder) placeholder.hidden = true;
+  } else {
+    if (img) {
+      img.removeAttribute("src");
+      img.alt = "";
+      img.hidden = true;
+    }
+    if (placeholder) placeholder.hidden = false;
+    if (media) media.hidden = true;
+  }
+}
+
+/**
+ * Render cloud contact in fields mode (framework only; values all from cloud).
+ * Prefer compact media+title layout when one primary text + optional image.
  * @param {{ intro?: string, fields?: object[] }} contact
  */
 function renderAboutContactFields(contact) {
   const noteEl = document.getElementById("aboutContactNote");
+  const titleEl = document.getElementById("aboutContactTitle");
   const list = document.getElementById("aboutContactList");
+  const copyBtn = document.getElementById("btnCopyContact");
   const fallback = document.getElementById("aboutContactFallback");
   const remote = document.getElementById("aboutContactRemote");
-  const imageWrap = document.getElementById("aboutContactImageWrap");
-  const card = document.getElementById("aboutContactCard");
+  const panel = document.getElementById("aboutLeftPanel");
 
   if (remote) {
     remote.hidden = true;
@@ -3215,73 +3499,160 @@ function renderAboutContactFields(contact) {
     const body = document.getElementById("aboutContactRemoteBody");
     if (body) body.innerHTML = "";
   }
-  if (imageWrap) imageWrap.hidden = true;
-  if (fallback) fallback.hidden = false;
-  card?.classList.remove("is-remote");
+  panel?.classList.remove("is-remote-contact");
 
+  const fields = Array.isArray(contact?.fields) ? contact.fields.filter(Boolean) : [];
   const intro = String(contact?.intro || "").trim();
-  if (noteEl) {
-    noteEl.textContent = intro || DEFAULT_ABOUT_CONTACT.intro;
-    noteEl.hidden = !intro && !DEFAULT_ABOUT_CONTACT.intro;
+
+  if (!fields.length && !intro) {
+    clearAboutContactUi();
+    return;
   }
 
-  if (!list) return;
-  let fields = Array.isArray(contact?.fields) ? contact.fields.filter(Boolean) : [];
-  if (!fields.length) fields = DEFAULT_ABOUT_CONTACT.fields;
+  if (fallback) fallback.hidden = false;
+  setAboutContactSectionVisible(true);
 
-  list.innerHTML = fields
-    .map((f) => {
-      const label = escapeAboutText(f.label || "");
-      const value = escapeAboutText(f.value || "");
-      const type = String(f.type || "text").toLowerCase();
-      const href = String(f.href || "").trim();
+  const imageField = fields.find((f) => String(f.type || "").toLowerCase() === "image" && f.value);
+  const textFields = fields.filter((f) => String(f.type || "").toLowerCase() !== "image");
+  const primary =
+    textFields.find((f) => f.copyable === true || /qq|群/i.test(String(f.label || ""))) ||
+    textFields[0] ||
+    null;
 
-      if (type === "image" && f.value) {
-        return `<li class="about-contact-field about-contact-field-image">
+  // Compact card: optional image + primary line + intro + copy (matches design when cloud sends QQ-style fields)
+  const useCompact =
+    !!primary &&
+    textFields.length <= 2 &&
+    !textFields.some((f) => {
+      const t = String(f.type || "").toLowerCase();
+      return t === "email" || t === "link";
+    });
+
+  if (useCompact) {
+    if (list) {
+      list.hidden = true;
+      list.innerHTML = "";
+    }
+    setAboutContactMedia(imageField?.value || "");
+
+    const label = String(primary.label || "").trim();
+    const value = String(primary.value || "").trim();
+    const title =
+      label && value
+        ? /[:：]\s*$/.test(label)
+          ? `${label}${value}`
+          : `${label}: ${value}`
+        : value || label;
+    if (titleEl) {
+      titleEl.textContent = title;
+      titleEl.hidden = !title;
+    }
+    if (noteEl) {
+      if (intro) {
+        noteEl.hidden = false;
+        noteEl.innerHTML = escapeAboutText(intro).replace(/\n/g, "<br />");
+      } else {
+        noteEl.hidden = true;
+        noteEl.textContent = "";
+      }
+    }
+
+    const copyValue =
+      String(primary.copyValue || "").trim() ||
+      value ||
+      String(primary.href || "").replace(/^mailto:/i, "");
+    if (copyBtn) {
+      if (copyValue) {
+        copyBtn.hidden = false;
+        copyBtn.dataset.copy = copyValue;
+        const isQq = /qq|群/i.test(label) || /^\d{5,}$/.test(copyValue);
+        copyBtn.textContent = isQq ? "复制群号" : "复制";
+      } else {
+        copyBtn.hidden = true;
+        delete copyBtn.dataset.copy;
+      }
+    }
+    return;
+  }
+
+  // Generic multi-field list — still 100% cloud values; layout is a thin framework
+  setAboutContactMedia(imageField?.value || "");
+  if (copyBtn) {
+    copyBtn.hidden = true;
+    delete copyBtn.dataset.copy;
+  }
+  if (titleEl) {
+    titleEl.textContent = "";
+    titleEl.hidden = true;
+  }
+  if (noteEl) {
+    if (intro) {
+      noteEl.hidden = false;
+      noteEl.innerHTML = escapeAboutText(intro).replace(/\n/g, "<br />");
+    } else {
+      noteEl.hidden = true;
+      noteEl.textContent = "";
+    }
+  }
+  const listFields = imageField ? textFields : fields;
+  if (list) {
+    list.hidden = !listFields.length;
+    list.innerHTML = listFields
+      .map((f) => {
+        const label = escapeAboutText(f.label || "");
+        const value = escapeAboutText(f.value || "");
+        const type = String(f.type || "text").toLowerCase();
+        const href = String(f.href || "").trim();
+
+        if (type === "image" && f.value) {
+          return `<li class="about-contact-field about-contact-field-image">
+            ${label ? `<span class="about-contact-label">${label}：</span>` : ""}
+            <img class="about-contact-field-img" src="${escapeAboutText(f.value)}" alt="${label || ""}" loading="lazy" decoding="async" />
+          </li>`;
+        }
+
+        const icon =
+          type === "email"
+            ? `<svg viewBox="0 0 24 24"><rect x="3.5" y="5.5" width="17" height="13" rx="2"/><path d="m4.5 7.5 7.5 6 7.5-6"/></svg>`
+            : type === "link"
+              ? `<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5" fill="none"/><path d="M3.5 12h17M12 3.5c2.4 2.6 3.6 5.4 3.6 8.5s-1.2 5.9-3.6 8.5M12 3.5C9.6 6.1 8.4 8.9 8.4 12s1.2 5.9 3.6 8.5"/></svg>`
+              : `<svg viewBox="0 0 24 24"><path d="M5 12h14M12 5v14" fill="none"/></svg>`;
+
+        let actionAttr = "";
+        if (type === "email" || href.startsWith("mailto:")) {
+          const mail = href.replace(/^mailto:/i, "") || f.value || "";
+          if (mail) actionAttr = ` href="#" data-mailto="${escapeAboutText(mail)}"`;
+        } else if (href && /^https?:\/\//i.test(href)) {
+          actionAttr = ` href="#" data-external="${escapeAboutText(href)}"`;
+        } else if (type === "link" && f.value && /^https?:\/\//i.test(f.value)) {
+          actionAttr = ` href="#" data-external="${escapeAboutText(f.value)}"`;
+        }
+
+        const display = value || escapeAboutText(href) || label;
+        const content = actionAttr
+          ? `<a class="about-contact-link"${actionAttr}>${display}</a>`
+          : `<span class="about-contact-text">${display}</span>`;
+
+        return `<li class="about-contact-field">
+          <span class="about-contact-ico" aria-hidden="true">${icon}</span>
           ${label ? `<span class="about-contact-label">${label}：</span>` : ""}
-          <img class="about-contact-field-img" src="${escapeAboutText(f.value)}" alt="${label || "图片"}" loading="lazy" decoding="async" />
+          ${content}
         </li>`;
-      }
-
-      const icon =
-        type === "email"
-          ? `<svg viewBox="0 0 24 24"><rect x="3.5" y="5.5" width="17" height="13" rx="2"/><path d="m4.5 7.5 7.5 6 7.5-6"/></svg>`
-          : type === "link"
-            ? `<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5" fill="none"/><path d="M3.5 12h17M12 3.5c2.4 2.6 3.6 5.4 3.6 8.5s-1.2 5.9-3.6 8.5M12 3.5C9.6 6.1 8.4 8.9 8.4 12s1.2 5.9 3.6 8.5"/></svg>`
-            : `<svg viewBox="0 0 24 24"><path d="M5 12h14M12 5v14" fill="none"/></svg>`;
-
-      let actionAttr = "";
-      if (type === "email" || href.startsWith("mailto:")) {
-        const mail = href.replace(/^mailto:/i, "") || f.value || "";
-        if (mail) actionAttr = ` href="#" data-mailto="${escapeAboutText(mail)}"`;
-      } else if (href && /^https?:\/\//i.test(href)) {
-        actionAttr = ` href="#" data-external="${escapeAboutText(href)}"`;
-      } else if (type === "link" && f.value && /^https?:\/\//i.test(f.value)) {
-        actionAttr = ` href="#" data-external="${escapeAboutText(f.value)}"`;
-      }
-
-      const display = value || escapeAboutText(href) || label;
-      const content = actionAttr
-        ? `<a class="about-contact-link"${actionAttr}>${display}</a>`
-        : `<span class="about-contact-text">${display}</span>`;
-
-      return `<li class="about-contact-field">
-        <span class="about-contact-ico" aria-hidden="true">${icon}</span>
-        ${label ? `<span class="about-contact-label">${label}：</span>` : ""}
-        ${content}
-      </li>`;
-    })
-    .join("");
+      })
+      .join("");
+  }
 }
 
 /**
- * Apply cloud about.contact — mode html | fields (mutual exclusive).
+ * Apply cloud about.contact — mode html | fields.
+ * html: inject cloud HTML+CSS into host (not client-hardcoded layout).
+ * fields: thin framework render of cloud field values.
  * @param {object|null|undefined} contact
  */
 function applyAboutContact(contact) {
   const c = contact && typeof contact === "object" ? contact : null;
   if (!c) {
-    renderAboutContactFields(DEFAULT_ABOUT_CONTACT);
+    clearAboutContactUi();
     return;
   }
 
@@ -3291,16 +3662,26 @@ function applyAboutContact(contact) {
     mode = html ? "html" : "fields";
   }
 
-  // HTML mode: only remote structure, hide preset fields
-  if (mode === "html" && html) {
-    mountAboutContactRemote(html, c.css || "");
+  // HTML mode first: full structure/style from cloud
+  if (mode === "html") {
+    if (html) mountAboutContactRemote(html, c.css || "");
+    else clearAboutContactUi();
     return;
   }
 
-  // Fields mode: free-form custom fields (no fixed email/website attributes)
-  let fields = Array.isArray(c.fields) ? c.fields : [];
-  // Legacy migration if server still sent old keys
-  if (!fields.length && (c.email || c.website || c.imageUrl)) {
+  let fields = Array.isArray(c.fields) ? c.fields.slice() : [];
+  // Legacy cloud keys → fields (still cloud data, not local invent)
+  if (!fields.length && (c.email || c.website || c.imageUrl || c.qq || c.qqGroup)) {
+    if (c.qq || c.qqGroup) {
+      fields.push({
+        id: "legacy_qq",
+        label: "QQ群",
+        value: c.qq || c.qqGroup,
+        type: "text",
+        href: "",
+        copyable: true,
+      });
+    }
     if (c.email) {
       fields.push({
         id: "legacy_email",
@@ -3337,25 +3718,184 @@ function applyAboutContact(contact) {
 }
 
 /**
- * Load about/contact from cloud (disk cache or network).
+ * Clear ad slot UI (no cloud ad / disabled / empty).
+ */
+function clearAboutAdUi() {
+  const placeholder = document.getElementById("aboutAdPlaceholder");
+  const imageLink = document.getElementById("aboutAdImageLink");
+  const imageEl = document.getElementById("aboutAdImage");
+  const remote = document.getElementById("aboutAdRemote");
+  const remoteBody = document.getElementById("aboutAdRemoteBody");
+  const titleEl = document.getElementById("aboutAdTitle");
+  const subEl = document.getElementById("aboutAdSub");
+
+  if (placeholder) placeholder.hidden = true;
+  if (imageLink) {
+    imageLink.hidden = true;
+    imageLink.removeAttribute("data-external");
+    imageLink.removeAttribute("href");
+    imageLink.classList.add("is-static");
+  }
+  if (imageEl) {
+    imageEl.removeAttribute("src");
+    imageEl.alt = "";
+  }
+  if (remote) {
+    remote.hidden = true;
+    remote.querySelector("style[data-about-ad-css]")?.remove();
+  }
+  if (remoteBody) remoteBody.innerHTML = "";
+  if (titleEl) titleEl.textContent = "";
+  if (subEl) subEl.textContent = "";
+  setAboutAdSlotVisible(false);
+}
+
+/**
+ * Apply cloud about.ad. Modes: placeholder | image | html.
+ * Empty / missing / disabled → hide slot (never invent local ad copy).
+ * @param {object|null|undefined} ad
+ */
+function applyAboutAd(ad) {
+  const placeholder = document.getElementById("aboutAdPlaceholder");
+  const imageLink = document.getElementById("aboutAdImageLink");
+  const imageEl = document.getElementById("aboutAdImage");
+  const remote = document.getElementById("aboutAdRemote");
+  const remoteBody = document.getElementById("aboutAdRemoteBody");
+  const titleEl = document.getElementById("aboutAdTitle");
+  const subEl = document.getElementById("aboutAdSub");
+
+  const conf = ad && typeof ad === "object" ? ad : null;
+  if (!conf || conf.enabled === false) {
+    clearAboutAdUi();
+    return;
+  }
+
+  let mode = String(conf.mode || "").toLowerCase();
+  const html = String(conf.html || "").trim();
+  const imageUrl = String(conf.imageUrl || conf.image || "").trim();
+  const title = String(conf.title || "").trim();
+  const subtitle = String(conf.subtitle || conf.body || "").trim();
+  if (mode !== "html" && mode !== "image" && mode !== "placeholder") {
+    mode = html ? "html" : imageUrl ? "image" : "placeholder";
+  }
+
+  const hideLayers = () => {
+    if (placeholder) placeholder.hidden = true;
+    if (imageLink) imageLink.hidden = true;
+    if (remote) {
+      remote.hidden = true;
+      remote.querySelector("style[data-about-ad-css]")?.remove();
+      if (remoteBody) remoteBody.innerHTML = "";
+    }
+  };
+
+  if (mode === "html" && html && remote && remoteBody) {
+    hideLayers();
+    let styleEl = remote.querySelector("style[data-about-ad-css]");
+    if (!styleEl) {
+      styleEl = document.createElement("style");
+      styleEl.setAttribute("data-about-ad-css", "1");
+      remote.insertBefore(styleEl, remoteBody);
+    }
+    styleEl.textContent = sanitizeAboutContactCss(conf.css || "");
+    remoteBody.innerHTML = sanitizeAboutContactHtml(html);
+    remote.hidden = false;
+    setAboutAdSlotVisible(true);
+    return;
+  }
+
+  if (mode === "image" && imageUrl && imageLink && imageEl) {
+    hideLayers();
+    imageEl.src = imageUrl;
+    imageEl.alt = title || String(conf.alt || "").trim() || "广告";
+    const href = String(conf.href || conf.link || "").trim();
+    if (href && /^https?:\/\//i.test(href)) {
+      imageLink.href = "#";
+      imageLink.setAttribute("data-external", href);
+      imageLink.classList.remove("is-static");
+      imageLink.removeAttribute("aria-disabled");
+    } else {
+      imageLink.removeAttribute("data-external");
+      imageLink.removeAttribute("href");
+      imageLink.classList.add("is-static");
+      imageLink.setAttribute("aria-disabled", "true");
+    }
+    imageLink.hidden = false;
+    setAboutAdSlotVisible(true);
+    return;
+  }
+
+  // placeholder: only show when cloud actually provided title and/or subtitle
+  if (mode === "placeholder" && (title || subtitle) && placeholder) {
+    hideLayers();
+    if (titleEl) titleEl.textContent = title;
+    if (subEl) subEl.textContent = subtitle;
+    placeholder.hidden = false;
+    setAboutAdSlotVisible(true);
+    return;
+  }
+
+  clearAboutAdUi();
+}
+
+/**
+ * Load about/contact/ad from cloud (disk cache or network). No local content invent.
  * @param {{ refresh?: boolean }} [opts]
  */
 async function loadAboutContactFromCloud(opts = {}) {
-  if (typeof window.skinAPI?.cloudAbout !== "function") return;
+  if (typeof window.skinAPI?.cloudAbout !== "function") {
+    clearAboutContactUi();
+    clearAboutAdUi();
+    return;
+  }
   try {
     const res = await window.skinAPI.cloudAbout({ refresh: opts.refresh === true });
-    const contact = res?.contact;
-    if (contact && typeof contact === "object") {
-      applyAboutContact(contact);
-    } else if (res?.ok === false) {
-      /* keep defaults */
+    if (res?.contact && typeof res.contact === "object") {
+      applyAboutContact(res.contact);
+    } else {
+      clearAboutContactUi();
+    }
+    if (res && Object.prototype.hasOwnProperty.call(res, "ad")) {
+      applyAboutAd(res.ad);
+    } else {
+      clearAboutAdUi();
     }
   } catch {
-    /* offline: keep built-in defaults */
+    /* offline without cache: leave empty (already cleared on first paint) */
   }
 }
 
-// Initial paint uses HTML defaults; refresh from disk/cloud when ready
+/** Copy cloud-provided contact value (e.g. QQ group number). */
+document.getElementById("btnCopyContact")?.addEventListener("click", async () => {
+  const btn = document.getElementById("btnCopyContact");
+  const text = String(btn?.dataset?.copy || "").trim();
+  if (!text) return;
+  try {
+    let ok = false;
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text);
+      ok = true;
+    } else {
+      const ta = document.createElement("textarea");
+      ta.value = text;
+      ta.setAttribute("readonly", "");
+      ta.style.position = "fixed";
+      ta.style.left = "-9999px";
+      document.body.appendChild(ta);
+      ta.select();
+      ok = document.execCommand("copy");
+      ta.remove();
+    }
+    if (ok) showToast(`已复制：${text}`, "ok");
+    else showToast("复制失败，请手动复制", "error");
+  } catch {
+    showToast("复制失败，请手动复制", "error");
+  }
+});
+
+// Empty until cloud/disk about arrives — never paint invented contact/ad copy
+clearAboutContactUi();
+clearAboutAdUi();
 loadAboutContactFromCloud({ refresh: false });
 
 /* —— DevTools 独立窗口（自定义皮肤弹窗顶部；不绑定 F12，避免占用系统/WebView 调试快捷键） —— */
@@ -3574,8 +4114,9 @@ async function refreshCloudAndSkins(forceNetwork) {
       if (snap?.announcements) {
         applyAnnouncementsToBanner(snap.announcements);
       }
-      if (snap?.about?.contact) {
-        applyAboutContact(snap.about.contact);
+      if (snap?.about?.contact || snap?.about?.ad) {
+        if (snap.about.contact) applyAboutContact(snap.about.contact);
+        if (Object.prototype.hasOwnProperty.call(snap.about, "ad")) applyAboutAd(snap.about.ad);
       } else {
         await loadAboutContactFromCloud({ refresh: true });
       }
@@ -3608,6 +4149,9 @@ async function bootCloud() {
       const snap = await window.skinAPI.cloudStatus({ force: false });
       if (snap?.announcements) applyAnnouncementsToBanner(snap.announcements);
       if (snap?.about?.contact) applyAboutContact(snap.about.contact);
+      if (snap?.about && Object.prototype.hasOwnProperty.call(snap.about, "ad")) {
+        applyAboutAd(snap.about.ad);
+      }
     }
   } catch {
     paintPromo(0);
@@ -3627,6 +4171,9 @@ async function bootCloud() {
         if (snap?.announcements) applyAnnouncementsToBanner(snap.announcements);
         if (snap?.about?.contact) {
           applyAboutContact(snap.about.contact);
+        }
+        if (snap?.about && Object.prototype.hasOwnProperty.call(snap.about, "ad")) {
+          applyAboutAd(snap.about.ad);
         }
         // Soft sync may be skipped (cache-fresh) — only rebuild list when catalog may change
         const skipped = res?.sync?.skipped === true || snap?.sync?.skipped === true;
@@ -3649,62 +4196,94 @@ document.getElementById("btnChooseApp").addEventListener("click", async () => {
   }
 });
 
-document.getElementById("btnPause")?.addEventListener("click", async () => {
-  const mode = pauseButtonMode(latestStatus);
-  if (mode === "idle") return;
+/**
+ * Shared post-start/restart toast + status refresh.
+ * @param {any} result
+ * @param {"start"|"restart"} action
+ */
+async function finishHostLaunchResult(result, action) {
+  const lastId = latestStatus?.state?.skinId || result?.skinId;
+  const lastName =
+    (lastId && (latestStatus?.skins || []).find((s) => s.id === lastId)?.name) ||
+    lastId;
+  const verb = action === "restart" ? "重启" : "启动";
+  if (result?.ok === false) {
+    showToast(result?.error || `${verb}失败`, "error");
+  } else if (result?.mode === "apply-last-skin" || result?.skinId) {
+    const name =
+      result?.name ||
+      (latestStatus?.skins || []).find((s) => s.id === result.skinId)?.name ||
+      result.skinId ||
+      lastName ||
+      "上次皮肤";
+    showToast(
+      result?.artPending
+        ? `已${verb}并换上「${name}」（立绘加载中）`
+        : `已${verb}并换上「${name}」`,
+      "ok"
+    );
+  } else {
+    showToast(
+      action === "restart"
+        ? "已重启 ChatGPT（可直接换肤）"
+        : "已启动 ChatGPT（可直接换肤）",
+      "ok"
+    );
+  }
+  if (result?.lifecycle || result?.canHotApply !== undefined) {
+    updateHostPill(result);
+  }
+  await refresh();
+  await pollHostStatus(true);
+}
 
-  // Offline → launch ChatGPT; re-apply last skin when session exists
-  if (mode === "start") {
-    const lastId = latestStatus?.state?.skinId;
-    const lastName =
-      (lastId && (latestStatus?.skins || []).find((s) => s.id === lastId)?.name) || lastId;
-    setBusy(
-      true,
-      lastId
+document.getElementById("btnHost")?.addEventListener("click", async () => {
+  const mode = hostButtonMode(latestStatus);
+  const lastId = latestStatus?.state?.skinId;
+  const lastName =
+    (lastId && (latestStatus?.skins || []).find((s) => s.id === lastId)?.name) ||
+    lastId;
+  const isRestart = mode === "restart";
+  setBusy(
+    true,
+    isRestart
+      ? lastId
+        ? `正在重启 ChatGPT 并应用「${lastName}」…`
+        : "正在重启 ChatGPT…"
+      : lastId
         ? `正在启动 ChatGPT 并应用「${lastName}」…`
         : "正在启动 ChatGPT…"
-    );
-    try {
+  );
+  try {
+    if (isRestart) {
+      if (typeof window.skinAPI?.restartHost !== "function") {
+        throw new Error("当前版本不支持重启客户端，请更新后重试");
+      }
+      const result = await window.skinAPI.restartHost();
+      await finishHostLaunchResult(result, "restart");
+    } else {
       if (typeof window.skinAPI?.startHost !== "function") {
         throw new Error("当前版本不支持启动客户端，请更新后重试");
       }
       const result = await window.skinAPI.startHost();
-      if (result?.ok === false) {
-        showToast(result?.error || "启动失败", "error");
-      } else if (result?.mode === "apply-last-skin" || result?.skinId) {
-        const name =
-          result?.name ||
-          (latestStatus?.skins || []).find((s) => s.id === result.skinId)?.name ||
-          result.skinId ||
-          lastName ||
-          "上次皮肤";
-        showToast(
-          result?.artPending
-            ? `已启动并换上「${name}」（立绘加载中）`
-            : `已启动并换上「${name}」`,
-          "ok"
-        );
-      } else {
-        showToast("已启动 ChatGPT（可直接换肤）", "ok");
-      }
-      if (result?.lifecycle || result?.canHotApply !== undefined) {
-        updateHostPill(result);
-      }
-      await refresh();
-      await pollHostStatus(true);
-    } catch (err) {
-      showToast(friendlyError(err), "error");
-      await pollHostStatus(true);
-      try {
-        await refresh();
-      } catch {
-        /* ignore */
-      }
-    } finally {
-      setBusy(false);
+      await finishHostLaunchResult(result, "start");
     }
-    return;
+  } catch (err) {
+    showToast(friendlyError(err), "error");
+    await pollHostStatus(true);
+    try {
+      await refresh();
+    } catch {
+      /* ignore */
+    }
+  } finally {
+    setBusy(false);
   }
+});
+
+document.getElementById("btnSkinPause")?.addEventListener("click", async () => {
+  const mode = skinControlMode(latestStatus);
+  if (mode === "hidden") return;
 
   if (mode === "resume") {
     setBusy(true, "正在继续显示皮肤…");

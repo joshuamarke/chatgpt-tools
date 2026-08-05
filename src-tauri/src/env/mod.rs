@@ -507,7 +507,7 @@ fn probe_desktop_host() -> ToolInstallInfo {
                 path,
                 kind: "desktop".into(),
                 skin_supported: true,
-                note: Some("可通过本工具注入皮肤（需远程调试端口）".into()),
+                note: Some("可通过本工具切换皮肤".into()),
                 source: Some("microsoft-store".into()),
                 error: None,
             };
@@ -577,7 +577,7 @@ fn probe_desktop_host() -> ToolInstallInfo {
                 path: Some(cand.to_string_lossy().to_string()),
                 kind: "desktop".into(),
                 skin_supported: true,
-                note: Some("可通过本工具注入皮肤（需远程调试端口）".into()),
+                note: Some("可通过本工具切换皮肤".into()),
                 source: Some(source.into()),
                 error: None,
             };

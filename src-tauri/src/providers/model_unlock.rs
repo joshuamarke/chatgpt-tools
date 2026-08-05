@@ -350,8 +350,56 @@ fn build_clear_script() -> String {
 /// Skips when official; skips full CDP when model list fingerprint is unchanged
 /// **and** the page still has a matching install (keep path). Forced paths from
 /// provider switch still inject when fingerprint changes.
+///
+/// **Call sites that touch the GUI command thread** (provider switch / write_live)
+/// should use [`schedule_desktop_unlock`] instead — CDP open/evaluate can take
+/// several seconds and would freeze the UI if run inline.
 pub fn try_inject_desktop_unlock(settings: Option<&Value>) -> UnlockResult {
     try_inject_desktop_unlock_inner(settings, InjectMode::Normal)
+}
+
+/// Fire-and-forget desktop unlock after a provider write (non-blocking for GUI).
+///
+/// Cheap work (desired flag + keep-thread arm) runs immediately on the caller
+/// thread; full CDP probe/inject runs on a background worker.
+pub fn schedule_desktop_unlock(settings: Option<Value>) {
+    if should_skip_unlock_for_official() {
+        schedule_official_activated();
+        return;
+    }
+    // Arm keep loop immediately so host-ready path still works if Codex is down.
+    let models = resolve_unlock_models(settings.as_ref());
+    if models.is_empty() {
+        clear_unlock_desired();
+        // Still re-gate toolbox enhancements (force-chinese / plugin unlock).
+        schedule_toolbox_provider_changed();
+        return;
+    }
+    mark_unlock_desired_active();
+    schedule_toolbox_provider_changed();
+    let _ = thread::Builder::new()
+        .name("cgt-model-unlock".into())
+        .spawn(move || {
+            let _ = try_inject_desktop_unlock_inner(settings.as_ref(), InjectMode::Normal);
+        });
+}
+
+/// Background: clear third-party unlock hooks + re-gate toolbox after Official.
+pub fn schedule_official_activated() {
+    clear_unlock_desired();
+    let _ = thread::Builder::new()
+        .name("cgt-official-clear".into())
+        .spawn(|| {
+            let _ = on_official_activated();
+        });
+}
+
+fn schedule_toolbox_provider_changed() {
+    let _ = thread::Builder::new()
+        .name("cgt-toolbox-gate".into())
+        .spawn(|| {
+            crate::toolbox::on_provider_changed();
+        });
 }
 
 /// Same as [`try_inject_desktop_unlock`] but used by the keep loop (probe-first).
@@ -617,7 +665,12 @@ pub fn try_inject_from_live_catalog() -> UnlockResult {
 }
 
 /// Call when enabling OpenAI Official so keep-loop and page hooks stop.
+///
+/// Prefer [`schedule_official_activated`] from GUI command paths — this does
+/// synchronous CDP clear + toolbox re-inject.
 pub fn on_official_activated() -> UnlockResult {
+    // Toolbox third-party gate: force-chinese / plugin unlock turn off on official.
+    crate::toolbox::on_provider_changed();
     clear_unlock_desired();
     let _ = clear_on_open_ports();
     UnlockResult::skipped(String::new())
@@ -638,18 +691,34 @@ pub fn disarm_keep_loop() {
 }
 
 /// Provider / catalog changed: leave stable park and re-evaluate (single inject).
+///
+/// Non-blocking for the GUI: arms keep + schedules CDP on a worker thread.
 pub fn notify_provider_or_catalog_changed() -> UnlockResult {
     if should_skip_unlock_for_official() {
-        clear_unlock_desired();
-        let _ = clear_on_open_ports();
+        schedule_official_activated();
         return UnlockResult::skipped(String::new());
     }
     let models = resolve_unlock_models(None);
     if models.is_empty() {
         clear_unlock_desired();
+        schedule_toolbox_provider_changed();
         return UnlockResult::skipped(String::new());
     }
-    try_inject_desktop_unlock_inner(None, InjectMode::Force)
+    mark_unlock_desired_active();
+    schedule_toolbox_provider_changed();
+    let models_for_ui = models.clone();
+    let _ = thread::Builder::new()
+        .name("cgt-model-unlock-force".into())
+        .spawn(|| {
+            let _ = try_inject_desktop_unlock_inner(None, InjectMode::Force);
+        });
+    UnlockResult {
+        attempted: false,
+        ok: true,
+        models: models_for_ui,
+        skipped_unchanged: false,
+        message: String::new(),
+    }
 }
 
 /// Desire + leave stable + wake keep (active phase until healthy).

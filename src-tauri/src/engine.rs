@@ -121,6 +121,7 @@ pub fn run_engine(args: &[&str]) -> Result<Value, EngineError> {
             cdp::resume_skin_native(restart)
         }
         "start-host" | "start_host" => cdp::start_host_native(),
+        "restart-host" | "restart_host" => cdp::restart_host_native(),
         "resolve-asset" => {
             let skin_id = flag_value(args, "skin-id")
                 .ok_or_else(|| EngineError::msg("resolve-asset requires --skin-id"))?;

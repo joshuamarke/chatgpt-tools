@@ -152,11 +152,14 @@ pub fn cloud_status_snapshot(force_refresh: bool) -> Value {
     // Same CSP constraint as catalog previews — WebView cannot load raw https:// img.
     let about = {
         let ui = about::get_about(&cfg, false);
-        if ui.get("contact").map(|c| c.is_object()).unwrap_or(false) {
+        if ui.get("contact").map(|c| c.is_object()).unwrap_or(false)
+            || ui.get("ad").map(|a| a.is_object()).unwrap_or(false)
+        {
             Some(json!({
                 "protocol": ui.get("protocol").cloned().unwrap_or(json!(1)),
                 "updatedAt": ui.get("updatedAt").cloned().unwrap_or(Value::Null),
                 "contact": ui.get("contact").cloned().unwrap_or(json!({})),
+                "ad": ui.get("ad").cloned().unwrap_or(Value::Null),
             }))
         } else {
             about::load_about_disk()

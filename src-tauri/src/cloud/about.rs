@@ -84,6 +84,15 @@ pub fn load_about_disk() -> Option<Value> {
     Some(materialize_contact_images_disk_only(v))
 }
 
+fn about_ui_fields(v: &Value) -> Value {
+    json!({
+        "protocol": v.get("protocol").cloned().unwrap_or(json!(1)),
+        "updatedAt": v.get("updatedAt").cloned().unwrap_or(Value::Null),
+        "contact": v.get("contact").cloned().unwrap_or(json!({})),
+        "ad": v.get("ad").cloned().unwrap_or(Value::Null),
+    })
+}
+
 /// UI-facing about payload: disk first, optional network refresh.
 pub fn get_about(cfg: &CloudConfig, network: bool) -> Value {
     if !cfg.enabled {
@@ -91,39 +100,39 @@ pub fn get_about(cfg: &CloudConfig, network: bool) -> Value {
             "ok": true,
             "enabled": false,
             "contact": Value::Null,
+            "ad": Value::Null,
             "message": "云端已关闭",
         });
     }
     if network {
         match refresh_about(cfg) {
             Ok(v) => {
-                return json!({
-                    "ok": true,
-                    "enabled": true,
-                    "fromNetwork": true,
-                    "protocol": v.get("protocol").cloned().unwrap_or(json!(1)),
-                    "updatedAt": v.get("updatedAt").cloned().unwrap_or(Value::Null),
-                    "contact": v.get("contact").cloned().unwrap_or(json!({})),
-                });
+                let mut out = about_ui_fields(&v);
+                if let Some(obj) = out.as_object_mut() {
+                    obj.insert("ok".into(), json!(true));
+                    obj.insert("enabled".into(), json!(true));
+                    obj.insert("fromNetwork".into(), json!(true));
+                }
+                return out;
             }
             Err(e) => {
                 if let Some(disk) = read_json(&about_path()).map(normalize_about) {
                     let v = materialize_contact_images(cfg, true, disk);
-                    return json!({
-                        "ok": true,
-                        "enabled": true,
-                        "fromNetwork": false,
-                        "fromCache": true,
-                        "networkError": e.to_string(),
-                        "protocol": v.get("protocol").cloned().unwrap_or(json!(1)),
-                        "updatedAt": v.get("updatedAt").cloned().unwrap_or(Value::Null),
-                        "contact": v.get("contact").cloned().unwrap_or(json!({})),
-                    });
+                    let mut out = about_ui_fields(&v);
+                    if let Some(obj) = out.as_object_mut() {
+                        obj.insert("ok".into(), json!(true));
+                        obj.insert("enabled".into(), json!(true));
+                        obj.insert("fromNetwork".into(), json!(false));
+                        obj.insert("fromCache".into(), json!(true));
+                        obj.insert("networkError".into(), json!(e.to_string()));
+                    }
+                    return out;
                 }
                 return json!({
                     "ok": false,
                     "enabled": true,
                     "contact": Value::Null,
+                    "ad": Value::Null,
                     "error": e.to_string(),
                 });
             }
@@ -133,21 +142,21 @@ pub fn get_about(cfg: &CloudConfig, network: bool) -> Value {
     if let Some(disk) = read_json(&about_path()).map(normalize_about) {
         // Prefer cache; allow network fill for missing contact images so first open works offline-ish after one fetch.
         let v = materialize_contact_images(cfg, true, disk);
-        return json!({
-            "ok": true,
-            "enabled": true,
-            "fromNetwork": false,
-            "fromCache": true,
-            "protocol": v.get("protocol").cloned().unwrap_or(json!(1)),
-            "updatedAt": v.get("updatedAt").cloned().unwrap_or(Value::Null),
-            "contact": v.get("contact").cloned().unwrap_or(json!({})),
-        });
+        let mut out = about_ui_fields(&v);
+        if let Some(obj) = out.as_object_mut() {
+            obj.insert("ok".into(), json!(true));
+            obj.insert("enabled".into(), json!(true));
+            obj.insert("fromNetwork".into(), json!(false));
+            obj.insert("fromCache".into(), json!(true));
+        }
+        return out;
     }
 
     json!({
         "ok": true,
         "enabled": true,
         "contact": Value::Null,
+        "ad": Value::Null,
         "message": "尚无本地 about 缓存",
     })
 }
@@ -239,8 +248,93 @@ fn legacy_fields(contact: &Value) -> Vec<Value> {
     out
 }
 
+/// Normalize about-page ad slot. Modes: placeholder | image | html.
+/// Missing/null ad → `Null` (client hides slot). Never invent marketing copy.
+fn normalize_ad(raw: &Value) -> Value {
+    if raw.is_null() || !raw.is_object() {
+        return Value::Null;
+    }
+    let enabled = raw
+        .get("enabled")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(true);
+    let html = str_field(raw, "html");
+    let css = str_field(raw, "css");
+    let image_url = {
+        let u = str_field(raw, "imageUrl");
+        if u.is_empty() {
+            str_field(raw, "image")
+        } else {
+            u
+        }
+    };
+    let href = {
+        let h = str_field(raw, "href");
+        if h.is_empty() {
+            str_field(raw, "link")
+        } else {
+            h
+        }
+    };
+    let title = str_field(raw, "title");
+    let subtitle = {
+        let s = str_field(raw, "subtitle");
+        if s.is_empty() {
+            str_field(raw, "body")
+        } else {
+            s
+        }
+    };
+    let mut mode = str_field(raw, "mode").to_lowercase();
+    if mode != "placeholder" && mode != "image" && mode != "html" {
+        mode = if !html.is_empty() {
+            "html".into()
+        } else if !image_url.is_empty() {
+            "image".into()
+        } else {
+            "placeholder".into()
+        };
+    }
+    if mode == "html" {
+        return json!({
+            "enabled": enabled,
+            "mode": "html",
+            "title": title,
+            "subtitle": subtitle,
+            "imageUrl": "",
+            "href": href,
+            "html": html,
+            "css": css,
+        });
+    }
+    if mode == "image" {
+        return json!({
+            "enabled": enabled,
+            "mode": "image",
+            "title": title,
+            "subtitle": subtitle,
+            "imageUrl": image_url,
+            "href": href,
+            "html": "",
+            "css": "",
+        });
+    }
+    // Pass through cloud title/subtitle as-is (may be empty → client hides)
+    json!({
+        "enabled": enabled,
+        "mode": "placeholder",
+        "title": title,
+        "subtitle": subtitle,
+        "imageUrl": "",
+        "href": "",
+        "html": "",
+        "css": "",
+    })
+}
+
 fn normalize_about(raw: Value) -> Value {
     let contact_raw = raw.get("contact").cloned().unwrap_or(json!({}));
+    let ad = normalize_ad(raw.get("ad").unwrap_or(&Value::Null));
     let html = str_field(&contact_raw, "html");
     let css = str_field(&contact_raw, "css");
     let mut mode = str_field(&contact_raw, "mode").to_lowercase();
@@ -268,7 +362,8 @@ fn normalize_about(raw: Value) -> Value {
                 "fields": [],
                 "html": html,
                 "css": css,
-            }
+            },
+            "ad": ad,
         });
     }
 
@@ -285,6 +380,21 @@ fn normalize_about(raw: Value) -> Value {
     if let Some(arr) = contact_raw.get("fields").and_then(|v| v.as_array()) {
         for (i, item) in arr.iter().enumerate() {
             if let Some(f) = normalize_field(item, i) {
+                // Preserve optional copyable flag for QQ-style contact cards
+                if let Some(obj) = f.as_object() {
+                    let mut out = obj.clone();
+                    if let Some(c) = item.get("copyable").and_then(|v| v.as_bool()) {
+                        out.insert("copyable".into(), json!(c));
+                    }
+                    if let Some(cv) = item.get("copyValue").and_then(|v| v.as_str()) {
+                        let t = cv.trim();
+                        if !t.is_empty() {
+                            out.insert("copyValue".into(), json!(t));
+                        }
+                    }
+                    fields.push(Value::Object(out));
+                    continue;
+                }
                 fields.push(f);
             }
         }
@@ -302,7 +412,8 @@ fn normalize_about(raw: Value) -> Value {
             "fields": fields,
             "html": "",
             "css": "",
-        }
+        },
+        "ad": ad,
     })
 }
 
@@ -521,7 +632,49 @@ fn rewrite_html_img_srcs(cfg: Option<&CloudConfig>, allow_network: bool, html: &
     out
 }
 
+fn materialize_ad_images(cfg: Option<&CloudConfig>, allow_network: bool, about: &mut Value) {
+    let Some(ad) = about.get_mut("ad") else {
+        return;
+    };
+    if !ad.is_object() {
+        return;
+    }
+    let mode = ad
+        .get("mode")
+        .and_then(|v| v.as_str())
+        .unwrap_or("placeholder")
+        .to_ascii_lowercase();
+    if mode == "html" {
+        if let Some(html) = ad.get("html").and_then(|v| v.as_str()).map(|s| s.to_string()) {
+            let rewritten = rewrite_html_img_srcs(cfg, allow_network, &html);
+            if let Some(obj) = ad.as_object_mut() {
+                obj.insert("html".into(), json!(rewritten));
+            }
+        }
+        return;
+    }
+    if mode == "image" {
+        let value = ad
+            .get("imageUrl")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        if value.is_empty() {
+            return;
+        }
+        let resolved = resolve_image_src(cfg, allow_network, &value);
+        if let Some(obj) = ad.as_object_mut() {
+            if resolved.starts_with("data:") && !value.starts_with("data:") {
+                obj.insert("sourceUrl".into(), json!(value));
+            }
+            obj.insert("imageUrl".into(), json!(resolved));
+        }
+    }
+}
+
 fn materialize_contact_images(cfg: &CloudConfig, allow_network: bool, mut about: Value) -> Value {
+    materialize_ad_images(Some(cfg), allow_network, &mut about);
+
     let Some(contact) = about.get_mut("contact") else {
         return about;
     };
@@ -580,6 +733,8 @@ fn materialize_contact_images(cfg: &CloudConfig, allow_network: bool, mut about:
 }
 
 fn materialize_contact_images_disk_only(mut about: Value) -> Value {
+    materialize_ad_images(None, false, &mut about);
+
     let Some(contact) = about.get_mut("contact") else {
         return about;
     };

@@ -84,8 +84,8 @@ impl Default for CloudConfig {
             timeout_ms: DEFAULT_TIMEOUT_MS,
             allowed_hosts: default_allowed_hosts(),
             protocol: CLOUD_PROTOCOL,
-            // Keep in sync with GUI `APP_VERSION` / package.json (not crate 1.0.0).
-            app_version: "1.1.12".to_string(),
+            // Package version (Cargo.toml ≡ tauri.conf.json ≡ package.json).
+            app_version: env!("CARGO_PKG_VERSION").to_string(),
             engine_protocol: cdp::native_engine_protocol(),
         }
     }
@@ -153,7 +153,7 @@ fn allow_url_host(cfg: &mut CloudConfig, base_url: &str) {
 /// Load cloud config: package-time defaults → settings.json → env overrides.
 pub fn load_cloud_config() -> CloudConfig {
     let mut cfg = CloudConfig::default();
-    // Prefer GUI/about APP_VERSION when settings pin it
+    // Prefer package version env (set at boot from CARGO_PKG_VERSION) when present.
     if let Ok(v) = std::env::var("CODEX_SKIN_APP_VERSION") {
         if !v.trim().is_empty() {
             cfg.app_version = v.trim().to_string();

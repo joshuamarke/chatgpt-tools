@@ -67,6 +67,11 @@
      * Re-applies last session skin if present; otherwise cold-starts host only.
      */
     startHost: () => invoke("start_host"),
+    /**
+     * Hard restart ChatGPT (stop + relaunch with debug port).
+     * Re-applies last session skin if present.
+     */
+    restartHost: () => invoke("restart_host"),
     openPath: (p) => invoke("open_path", { target: p }),
     openExternal: (url) => invoke("open_external", { url }),
     exportSkin: (skinId) => invoke("export_skin", { skinId }),
@@ -143,13 +148,27 @@
             : null,
       }),
     /**
-     * @deprecated App updates use tauri-plugin-updater (`checkAppUpdate`).
-     * Kept for tooling; skin catalog version filters still use cloud.
+     * Installed app version from the Tauri package (Cargo / tauri.conf).
+     * Prefer this over any hardcoded GUI constant.
+     * @returns {Promise<string>}
+     */
+    getAppVersion: async () => {
+      const getVersion = window.__TAURI__?.app?.getVersion;
+      if (typeof getVersion === "function") {
+        return String(await getVersion());
+      }
+      throw new Error("无法读取应用版本（Tauri app API 不可用）");
+    },
+
+    /**
+     * @deprecated App version checks use GitHub via tauri-plugin-updater (`checkAppUpdate`).
+     * Kept for tooling; skin catalog minAppVersion filters still use cloud.
      */
     cloudCheckUpdate: () => invoke("cloud_check_update"),
 
     /**
-     * Check GitHub/CDN `latest.json` via tauri-plugin-updater (multi-endpoint fallback).
+     * Check GitHub Releases `latest.json` via tauri-plugin-updater (multi-endpoint fallback).
+     * Release notes come from the GitHub Release body embedded in latest.json.
      * @returns {Promise<null|{ rid:number, currentVersion:string, version:string, date?:string, body?:string, rawJson?:any }>}
      */
     checkAppUpdate: (opts = {}) =>
