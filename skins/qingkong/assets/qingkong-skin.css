@@ -29,7 +29,6 @@
   --skins-suggest-card-border: rgba(255, 255, 255, 0.55);
   --skins-suggest-card-shadow: 0 8px 24px rgba(30, 80, 130, 0.1), inset 0 1px 0 rgba(255, 255, 255, 0.55);
 
-  --qingkong-ink: #1e3a5f;
   --qingkong-ink-muted: #4a6a8a;
   --qingkong-sky: #6eb4e8;
   --qingkong-sky-deep: #3b8fd9;
@@ -48,6 +47,10 @@
   --skins-sidebar: rgba(200, 230, 250, 0.55);
   --skins-surface-raised: rgba(255, 255, 255, 0.72);
   --skins-line: rgba(90, 140, 190, 0.32);
+  --skins-overlay: 0;
+  --skins-surface-alpha: 0.72;
+  --skins-art-fit: cover;
+  --qingkong-ink: var(--skins-ink);
 
   color-scheme: light !important;
 
@@ -218,9 +221,14 @@ html.codex-qingkong-skin.skins-art-wide:is(.skins-task-ambient, .skins-task-bann
   body,
 html.codex-qingkong-skin.skins-art-wide body {
   background-color: var(--skins-canvas, #8ec8f0) !important;
-  background-image: var(--qingkong-art, var(--skins-art)) !important;
-  background-position: var(--skins-art-position, 78% 42%) !important;
-  background-size: cover !important;
+  background-image:
+    linear-gradient(
+      rgb(0 0 0 / var(--skins-overlay, 0)),
+      rgb(0 0 0 / var(--skins-overlay, 0))
+    ),
+    var(--qingkong-art, var(--skins-art)) !important;
+  background-position: center, var(--skins-art-position, 78% 42%) !important;
+  background-size: auto, var(--skins-art-fit, cover) !important;
   background-repeat: no-repeat !important;
   background-attachment: fixed !important;
 }

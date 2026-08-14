@@ -115,6 +115,9 @@ html.codex-jiuyi-skin.skins-art-standard {
   --skins-surface-raised: #1c2634;
   --skins-line: rgba(150, 170, 195, 0.32);
   --skins-accent: #a83a2e;
+  --skins-overlay: 0;
+  --skins-surface-alpha: 0.55;
+  --skins-art-fit: cover;
 
   /*
    * 短名 alias（部分旧路径 / 皮肤内部可读）
@@ -327,9 +330,14 @@ html.codex-jiuyi-skin[data-skins-art-paint="custom"].skins-art-wide body::before
 html.codex-jiuyi-skin.skins-art-wide body,
 html.codex-jiuyi-skin[data-skins-art-paint="custom"].skins-art-wide body {
   background-color: var(--skins-canvas, #121a24) !important;
-  background-image: var(--jiuyi-art, var(--skins-art)) !important;
-  background-position: var(--skins-art-position, 78% 42%) !important;
-  background-size: cover !important;
+  background-image:
+    linear-gradient(
+      rgb(0 0 0 / var(--skins-overlay, 0)),
+      rgb(0 0 0 / var(--skins-overlay, 0))
+    ),
+    var(--jiuyi-art, var(--skins-art)) !important;
+  background-position: center, var(--skins-art-position, 78% 42%) !important;
+  background-size: auto, var(--skins-art-fit, cover) !important;
   background-repeat: no-repeat !important;
   background-attachment: fixed !important;
 }

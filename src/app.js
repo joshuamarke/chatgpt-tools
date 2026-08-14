@@ -4373,24 +4373,49 @@ const wallpaperFileName = document.getElementById("wallpaperFileName");
 /** 与引擎 MAX_ART_BYTES 一致：壁纸选择硬上限 16 MB */
 const WALLPAPER_MAX_BYTES = 16 * 1024 * 1024;
 
-async function openWallpaper() {
-  wallpaperModal.hidden = false;
-  wallpaperModal.classList.add("show");
-  const status = latestStatus || (await window.skinAPI.status());
-  const skins = status.skins || [];
-  // Prefer currently applied skin as template when available
-  const activeId = status.activeSkinId || null;
-  wallpaperBase.innerHTML = skins
-    .map((skin) => {
-      const selected = activeId && skin.id === activeId ? " selected" : "";
-      return `<option value="${escapeHtml(skin.id)}"${selected}>${escapeHtml(skin.name)}${skin.builtin ? "（内置）" : ""}</option>`;
-    })
+function refreshWallpaperSelects() {
+  if (!window.UiSelect?.refresh) return;
+  ["wallpaperBase", "themeFont", "themeRadius", "wallpaperFit", "wallpaperPosition"].forEach((id) => {
+    const el = document.getElementById(id);
+    if (el) window.UiSelect.refresh(el);
+  });
+}
+
+function fillWallpaperBase(skins, activeId) {
+  const options = (skins || []).map((skin) => ({
+    value: skin.id,
+    label: `${skin.name}${skin.builtin ? "（内置）" : ""}`,
+  }));
+  const selected =
+    (activeId && options.some((o) => o.value === activeId) && activeId) ||
+    options[0]?.value ||
+    "";
+  if (window.UiSelect?.setOptions) {
+    window.UiSelect.setOptions(wallpaperBase, options, selected);
+    return;
+  }
+  wallpaperBase.innerHTML = options
+    .map((o) => `<option value="${escapeHtml(o.value)}">${escapeHtml(o.label)}</option>`)
     .join("");
-  // Prefill color tokens from selected template when possible
-  const selected = skins.find((s) => s.id === wallpaperBase.value) || skins[0];
+  if (selected) wallpaperBase.value = selected;
+}
+
+function prefillWallpaperTheme(skins) {
+  const selected = (skins || []).find((s) => s.id === wallpaperBase.value) || skins?.[0];
   if (selected?.accent && /^#[0-9a-fA-F]{6}$/.test(selected.accent)) {
     document.getElementById("themeAccent").value = selected.accent;
   }
+}
+
+async function openWallpaper() {
+  wallpaperModal.hidden = false;
+  wallpaperModal.classList.add("show");
+  if (window.UiSelect?.mountAll) window.UiSelect.mountAll(wallpaperModal);
+  const status = latestStatus || (await window.skinAPI.status());
+  const skins = status.skins || [];
+  // Prefer currently applied skin as template when available
+  fillWallpaperBase(skins, status.activeSkinId || null);
+  prefillWallpaperTheme(skins);
 }
 function closeWallpaper() {
   wallpaperModal.hidden = true;
@@ -4468,6 +4493,7 @@ wallpaperForm.addEventListener("submit", async (e) => {
     wallpaperForm.reset();
     wallpaperPath.value = "";
     wallpaperFileName.textContent = "支持 PNG、JPG、WebP，最大 16 MB";
+    refreshWallpaperSelects();
     await refresh();
     showToast(`已生成自定义皮肤「${result.name}」`, "ok");
   } catch (err) {

@@ -347,6 +347,10 @@ pub fn get_provider(app: String, id: String) -> Result<ProviderDetail, String> {
     };
     let (custom_user_agent, headers_json, body_json) = meta_form_fields(p);
     let model_catalog = model_catalog_rows(p);
+    let picker = match kind {
+        AppKind::Grok => grok::summarize_picker_name(p),
+        AppKind::Codex => String::new(),
+    };
     let live = live_status_for(
         kind,
         &app_store.current,
@@ -368,6 +372,7 @@ pub fn get_provider(app: String, id: String) -> Result<ProviderDetail, String> {
         profile,
         api_backend,
         context_window,
+        model_display_name: picker.to_string(),
         config_toml,
         custom_user_agent,
         local_proxy_headers_json: headers_json,
@@ -503,6 +508,7 @@ fn build_settings(
             request.api_backend.as_deref(),
             request.context_window,
             use_toml,
+            request.model_display_name.as_deref(),
         )?,
     };
 
@@ -952,6 +958,79 @@ fn write_live_for(kind: AppKind, provider: &Provider) -> Result<Vec<String>, Str
     }
 }
 
+/// Channel identity used to reject duplicate live imports.
+/// Official-like snapshots share one slot; custom channels key on normalized base_url.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum LiveImportIdentity {
+    OfficialLike,
+    Custom { base_url: String },
+}
+
+fn live_import_identity(kind: AppKind, provider: &Provider) -> Option<LiveImportIdentity> {
+    let config = provider
+        .settings_config
+        .get("config")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    match kind {
+        AppKind::Codex => {
+            if config.trim().is_empty() || codex::is_official_live_config(config) {
+                return Some(LiveImportIdentity::OfficialLike);
+            }
+            let base = codex::extract_base_url(config)
+                .map(|u| codex::normalize_base_url(&u))
+                .filter(|s| !s.is_empty())?;
+            Some(LiveImportIdentity::Custom { base_url: base })
+        }
+        AppKind::Grok => {
+            if grok::is_official_live_config(config) {
+                return Some(LiveImportIdentity::OfficialLike);
+            }
+            let (_, base, _) = grok::summarize(provider);
+            let base = base
+                .map(|u| u.trim().trim_end_matches('/').to_string())
+                .filter(|s| !s.is_empty())?;
+            Some(LiveImportIdentity::Custom { base_url: base })
+        }
+    }
+}
+
+fn find_duplicate_live_import<'a>(
+    kind: AppKind,
+    candidate: &Provider,
+    existing: &'a [Provider],
+) -> Option<&'a Provider> {
+    let identity = live_import_identity(kind, candidate)?;
+    existing.iter().find(|p| {
+        if p.is_official() {
+            // Built-in Official seed is a fixed default, not a live snapshot.
+            return false;
+        }
+        live_import_identity(kind, p).as_ref() == Some(&identity)
+    })
+}
+
+fn imported_settings_point_at_proxy(kind: AppKind, settings: &Value) -> bool {
+    let config = settings
+        .get("config")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    let base = match kind {
+        AppKind::Codex => codex::extract_base_url(config),
+        AppKind::Grok => grok::summarize(&Provider::new(
+            "tmp".into(),
+            "tmp".into(),
+            settings.clone(),
+        ))
+        .1,
+    };
+    let Some(base) = base else {
+        return false;
+    };
+    let cfg = store::load().map(|f| f.proxy).unwrap_or_default();
+    crate::proxy::is_proxy_base_url(&base, &cfg) || base.contains("127.0.0.1")
+}
+
 /// Import current live config as a new named provider.
 #[tauri::command]
 pub fn import_live_as_provider(
@@ -999,26 +1078,22 @@ pub fn import_live_as_provider(
         }
     };
 
+    if imported_settings_point_at_proxy(kind, &settings) {
+        return Err(
+            "当前本机配置指向本地路由代理，无法作为真实上游导入。请先关闭本地路由后再试。"
+                .into(),
+        );
+    }
+
     let mut file = store::load()?;
     let app_store = file.for_kind_mut(kind);
     let frag = store::sanitize_id_fragment(&display);
     let id = store::next_id(&frag);
     let mut provider = Provider::new(id, display, settings);
-    // Detect category
-    let is_official_like = match kind {
-        AppKind::Codex => provider
-            .settings_config
-            .get("config")
-            .and_then(|v| v.as_str())
-            .map(|c| c.trim().is_empty())
-            .unwrap_or(true),
-        AppKind::Grok => provider
-            .settings_config
-            .get("config")
-            .and_then(|v| v.as_str())
-            .map(grok::is_official_live_config)
-            .unwrap_or(true),
-    };
+    let is_official_like = matches!(
+        live_import_identity(kind, &provider),
+        Some(LiveImportIdentity::OfficialLike)
+    );
     // Always custom: Official seeds are fixed defaults, never promoted from live import.
     provider.category = Some("custom".into());
     provider.notes = Some(if is_official_like {
@@ -1026,6 +1101,14 @@ pub fn import_live_as_provider(
     } else {
         "从本机正在使用的配置导入".into()
     });
+
+    if let Some(dup) = find_duplicate_live_import(kind, &provider, &app_store.providers) {
+        return Err(format!(
+            "本机配置已对应供应商「{}」，无需重复导入",
+            dup.name
+        ));
+    }
+
     provider.sort_index = Some(app_store.providers.len());
 
     let current = app_store.current.clone();
@@ -1213,4 +1296,127 @@ pub async fn fetch_provider_models(
     })
     .await
     .map_err(|e| format!("拉取模型任务失败: {e}"))?
+}
+
+#[cfg(test)]
+mod import_dedup_tests {
+    use super::*;
+    use serde_json::json;
+
+    fn custom_codex(id: &str, name: &str, base_url: &str) -> Provider {
+        let mut p = Provider::new(
+            id.into(),
+            name.into(),
+            json!({
+                "auth": { "OPENAI_API_KEY": "sk-test" },
+                "config": format!(
+                    "model = \"deepseek-chat\"\nmodel_provider = \"custom\"\n[model_providers.custom]\nname = \"OpenAI\"\nbase_url = \"{base_url}\"\nwire_api = \"chat\"\n"
+                )
+            }),
+        );
+        p.category = Some("custom".into());
+        p
+    }
+
+    fn official_like_codex(id: &str, name: &str) -> Provider {
+        let mut p = Provider::new(
+            id.into(),
+            name.into(),
+            json!({
+                "auth": { "OPENAI_API_KEY": "" },
+                "config": "# comment only\n"
+            }),
+        );
+        p.category = Some("custom".into());
+        p
+    }
+
+    fn official_seed_codex() -> Provider {
+        let mut p = Provider::new(
+            store::CODEX_OFFICIAL_ID.into(),
+            "OpenAI Official".into(),
+            codex::official_settings_config(),
+        );
+        p.category = Some("official".into());
+        p
+    }
+
+    fn custom_grok(id: &str, name: &str, base_url: &str) -> Provider {
+        let mut p = Provider::new(
+            id.into(),
+            name.into(),
+            json!({
+                "config": format!(
+                    "[models]\ndefault = \"{name}\"\n\n[model.\"{name}\"]\nname = \"grok-4.5\"\nmodel = \"grok-4.5\"\nbase_url = \"{base_url}\"\napi_key = \"xai-test\"\napi_backend = \"responses\"\ncontext_window = 131072\n"
+                )
+            }),
+        );
+        p.category = Some("custom".into());
+        p
+    }
+
+    #[test]
+    fn same_base_url_is_duplicate_even_with_trailing_slash() {
+        let existing = vec![custom_codex(
+            "deepseek-1",
+            "DeepSeek",
+            "https://api.deepseek.com/v1",
+        )];
+        let candidate = custom_codex(
+            "import-1",
+            "从本机配置导入 · Codex",
+            "https://api.deepseek.com/v1/",
+        );
+        let dup = find_duplicate_live_import(AppKind::Codex, &candidate, &existing);
+        assert_eq!(dup.map(|p| p.id.as_str()), Some("deepseek-1"));
+    }
+
+    #[test]
+    fn different_base_url_is_not_duplicate() {
+        let existing = vec![custom_codex(
+            "deepseek-1",
+            "DeepSeek",
+            "https://api.deepseek.com/v1",
+        )];
+        let candidate = custom_codex(
+            "import-1",
+            "从本机配置导入 · Codex",
+            "https://openrouter.ai/api/v1",
+        );
+        assert!(find_duplicate_live_import(AppKind::Codex, &candidate, &existing).is_none());
+    }
+
+    #[test]
+    fn official_seed_does_not_block_first_official_like_import() {
+        let existing = vec![official_seed_codex()];
+        let candidate = official_like_codex("import-1", "从本机配置导入 · Codex");
+        assert!(find_duplicate_live_import(AppKind::Codex, &candidate, &existing).is_none());
+    }
+
+    #[test]
+    fn second_official_like_import_is_duplicate() {
+        let existing = vec![
+            official_seed_codex(),
+            official_like_codex("import-1", "从本机配置导入 · Codex"),
+        ];
+        let candidate = official_like_codex("import-2", "从本机配置导入 · Codex");
+        let dup = find_duplicate_live_import(AppKind::Codex, &candidate, &existing);
+        assert_eq!(dup.map(|p| p.id.as_str()), Some("import-1"));
+    }
+
+    #[test]
+    fn grok_same_base_url_is_duplicate() {
+        let existing = vec![custom_grok(
+            "proxy-1",
+            "CustomProxy",
+            "https://proxy.example.com/v1",
+        )];
+        let candidate = custom_grok(
+            "import-1",
+            "ImportedProxy",
+            "https://proxy.example.com/v1/",
+        );
+        let dup = find_duplicate_live_import(AppKind::Grok, &candidate, &existing);
+        assert_eq!(dup.map(|p| p.id.as_str()), Some("proxy-1"));
+    }
 }

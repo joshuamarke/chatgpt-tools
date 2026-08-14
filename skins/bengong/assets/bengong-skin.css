@@ -27,6 +27,11 @@
   --skins-sidebar: #f5eeea;
   --skins-surface-raised: #fffbf9;
   --skins-line: rgba(196, 120, 110, 0.18);
+  --skins-font: "PingFang SC", "SF Pro Display", "Hiragino Sans GB", "Helvetica Neue", sans-serif;
+  --skins-radius: 24px;
+  --skins-overlay: 0;
+  --skins-surface-alpha: 0.98;
+  --skins-art-fit: cover;
   --bengong-art: var(--skins-art, none);
 
   /* 更大的自适应 banner 占位高度（建议卡贴其底边） */
@@ -62,7 +67,7 @@
 
   color-scheme: light !important;
 
-  --bengong-ink: #4a3834;
+  --bengong-ink: var(--skins-ink);
   --bengong-ink-muted: #8f736c;
   --bengong-rose: #c4786e;
   --bengong-rose-deep: #b45a52;
@@ -101,8 +106,8 @@ html.codex-bengong-skin body {
     radial-gradient(ellipse 48% 36% at 12% 72%, rgba(232, 208, 200, 0.28), transparent 55%),
     radial-gradient(circle at 72% 58%, rgba(255, 236, 224, 0.55), transparent 42%),
     linear-gradient(165deg, #fdf9f6 0%, #faf6f2 42%, #f5ebe4 100%) !important;
-  color: var(--bengong-ink) !important;
-  font-family: "PingFang SC", "SF Pro Display", "Hiragino Sans GB", "Helvetica Neue", sans-serif !important;
+  color: var(--skins-text) !important;
+  font-family: var(--skins-font, "PingFang SC", "SF Pro Display", "Hiragino Sans GB", "Helvetica Neue", sans-serif) !important;
 }
 
 html.codex-bengong-skin body::before {
@@ -422,10 +427,15 @@ html.codex-bengong-skin[data-skins-art-paint="custom"]
     inset 0 1px 0 rgba(255, 255, 255, 0.6) !important;
   /* 立绘本身：无整幅硬切渐变，右上融合交给 ::after 局部柔光 */
   background-color: var(--bengong-cream-deep) !important;
-  background-image: var(--bengong-art, var(--skins-art, none)) !important;
+  background-image:
+    linear-gradient(
+      rgb(0 0 0 / var(--skins-overlay, 0)),
+      rgb(0 0 0 / var(--skins-overlay, 0))
+    ),
+    var(--bengong-art, var(--skins-art, none)) !important;
   background-repeat: no-repeat !important;
-  background-size: auto 120% !important;
-  background-position: left 4% 55% !important;
+  background-size: auto, var(--skins-art-fit, auto 120%) !important;
+  background-position: center, var(--skins-art-position, left 4% 55%) !important;
 }
 
 /*

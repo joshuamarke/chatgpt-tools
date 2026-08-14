@@ -33,7 +33,14 @@
   --skins-sidebar: rgba(232, 238, 236, 0.92);
   --skins-surface-raised: rgba(252, 251, 248, 0.92);
   --skins-line: rgba(106, 158, 171, 0.2);
+  --skins-font: "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+  --skins-radius: 14px;
+  --skins-overlay: 0;
+  --skins-surface-alpha: 0.92;
+  --skins-art-fit: cover;
   --ningyao-art: var(--skins-art, none);
+  --ningyao-ink: var(--skins-ink);
+  --ningyao-cream: var(--skins-canvas);
 
   /* 首页极淡 scrim；对话更实以保证可读 */
   --ningyao-scrim-home: linear-gradient(
@@ -333,11 +340,15 @@ html.codex-ningyao-skin main.main-surface {
   isolation: isolate;
   background-color: var(--ningyao-cream, #eef3f2) !important;
   background-image:
+    linear-gradient(
+      rgb(0 0 0 / var(--skins-overlay, 0)),
+      rgb(0 0 0 / var(--skins-overlay, 0))
+    ),
     var(--ningyao-scrim-home),
     var(--ningyao-art, var(--skins-art, none)) !important;
   background-repeat: no-repeat !important;
-  background-size: 100% 100%, cover !important;
-  background-position: center, var(--skins-art-position, 72% 42%) !important;
+  background-size: auto, 100% 100%, var(--skins-art-fit, cover) !important;
+  background-position: center, center, var(--skins-art-position, 72% 42%) !important;
   background-attachment: local, local !important;
   border: 0 !important;
   border-radius: 0 !important;
@@ -352,6 +363,10 @@ html.codex-ningyao-skin.skins-art-wide main.main-surface.ningyao-home-shell,
 html.codex-ningyao-skin.skins-art-standard main.main-surface.ningyao-home-shell {
   background-color: transparent !important;
   background-image:
+    linear-gradient(
+      rgb(0 0 0 / var(--skins-overlay, 0)),
+      rgb(0 0 0 / var(--skins-overlay, 0))
+    ),
     var(--ningyao-scrim-home),
     radial-gradient(
       ellipse 55% 70% at 18% 42%,
@@ -359,8 +374,8 @@ html.codex-ningyao-skin.skins-art-standard main.main-surface.ningyao-home-shell 
       transparent 70%
     ),
     var(--ningyao-art, var(--skins-art, none)) !important;
-  background-size: 100% 100%, 100% 100%, cover !important;
-  background-position: center, center, var(--skins-art-position, 72% 42%) !important;
+  background-size: auto, 100% 100%, 100% 100%, var(--skins-art-fit, cover) !important;
+  background-position: center, center, center, var(--skins-art-position, 72% 42%) !important;
   border: 0 !important;
   border-radius: 0 !important;
   box-shadow: none !important;
@@ -372,6 +387,10 @@ html.codex-ningyao-skin[data-skins-art-paint="custom"]
   main.main-surface:has(.thread-scroll-container) {
   background-color: transparent !important;
   background-image:
+    linear-gradient(
+      rgb(0 0 0 / var(--skins-overlay, 0)),
+      rgb(0 0 0 / var(--skins-overlay, 0))
+    ),
     var(--ningyao-scrim-thread),
     radial-gradient(
       ellipse 80% 70% at 50% 42%,
@@ -379,8 +398,8 @@ html.codex-ningyao-skin[data-skins-art-paint="custom"]
       transparent 72%
     ),
     var(--ningyao-art, var(--skins-art, none)) !important;
-  background-size: 100% 100%, 100% 100%, cover !important;
-  background-position: center, center, var(--skins-art-position, 72% 42%) !important;
+  background-size: auto, 100% 100%, 100% 100%, var(--skins-art-fit, cover) !important;
+  background-position: center, center, center, var(--skins-art-position, 72% 42%) !important;
 }
 
 /* 设置等非 home/thread：实底，不挂立绘 */

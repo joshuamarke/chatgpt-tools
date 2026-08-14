@@ -88,6 +88,59 @@ fn hex_or<'a>(value: Option<&'a str>, fallback: &'a str) -> &'a str {
     }
 }
 
+/// Designer writes the same `:root --skins-*` contract as author CSS.
+/// No layout hammers and no parallel `--designer-*` namespace.
+fn build_designer_root_css(
+    root_class: &str,
+    accent: &str,
+    canvas: &str,
+    text: &str,
+    panel: &str,
+    font_stack: &str,
+    radius_px: f64,
+    overlay: f64,
+    surface_alpha: f64,
+    art_fit: &str,
+    art_position: &str,
+) -> String {
+    format!(
+        r#"
+
+/* Custom skin tokens — same :root --skins-* contract as the template. */
+:root.{root} {{
+  --skins-accent: {accent};
+  --skins-text: {text};
+  --skins-ink: {text};
+  --skins-canvas: {canvas};
+  --skins-sidebar: color-mix(in srgb, {panel} 70%, {canvas});
+  --skins-surface-alpha: {alpha};
+  --skins-surface-raised: color-mix(in srgb, {panel} calc(var(--skins-surface-alpha) * 100%), transparent);
+  --skins-line: color-mix(in srgb, {accent} 32%, {text});
+  --skins-font: {font};
+  --skins-radius: {radius}px;
+  --skins-overlay: {overlay};
+  --skins-art-fit: {fit};
+  --skins-art-position: {position};
+  --skins-suggest-card-color: {text};
+  --skins-suggest-card-bg: color-mix(in srgb, {panel} calc(var(--skins-surface-alpha) * 28%), transparent);
+  --skins-suggest-card-radius: {radius}px;
+  --composer-border-radius: {radius}px;
+}}
+"#,
+        root = root_class,
+        accent = accent,
+        text = text,
+        canvas = canvas,
+        panel = panel,
+        alpha = surface_alpha,
+        font = font_stack,
+        radius = radius_px,
+        overlay = overlay,
+        fit = art_fit,
+        position = art_position,
+    )
+}
+
 /// Create a user skin from a template + wallpaper image (GUI designer).
 pub fn design_wallpaper_native(payload: &Value) -> Result<Value, EngineError> {
     ensure_state_dir()?;
@@ -403,17 +456,28 @@ pub fn design_wallpaper_native(payload: &Value) -> Result<Value, EngineError> {
                     .and_then(|v| v.as_f64())
                     .unwrap_or(inferred_focus_y)
             };
-            obj.insert(
-                "art".into(),
-                json!({
-                    "focusX": focus_x,
-                    "focusY": focus_y_final,
-                    "safeArea": resolved_safe_area,
-                    "taskMode": resolved_task_mode,
-                    "fit": valid_fit,
-                    "position": valid_position,
-                }),
-            );
+            let mut art_out = json!({
+                "focusX": focus_x,
+                "focusY": focus_y_final,
+                "safeArea": resolved_safe_area,
+                "taskMode": resolved_task_mode,
+                "fit": valid_fit,
+                "position": valid_position,
+            });
+            // Keep the template's paint strategy (wallpaper/body vs token-only/custom).
+            if let Some(mode) = base_art.get("mode") {
+                art_out
+                    .as_object_mut()
+                    .unwrap()
+                    .insert("mode".into(), mode.clone());
+            }
+            if let Some(paint) = base_art.get("paint") {
+                art_out
+                    .as_object_mut()
+                    .unwrap()
+                    .insert("paint".into(), paint.clone());
+            }
+            obj.insert("art".into(), art_out);
 
             if let Some(ref a) = accent {
                 if is_hex_color(a) {
@@ -438,11 +502,6 @@ pub fn design_wallpaper_native(payload: &Value) -> Result<Value, EngineError> {
             .and_then(|v| v.as_str())
             .unwrap_or("skins-root")
             .to_string();
-        let art_var = manifest
-            .pointer("/markers/artVar")
-            .and_then(|v| v.as_str())
-            .unwrap_or("--skins-art")
-            .to_string();
         let css_rel = manifest
             .pointer("/assets/css")
             .and_then(|v| v.as_str())
@@ -452,100 +511,60 @@ pub fn design_wallpaper_native(payload: &Value) -> Result<Value, EngineError> {
         let css = fs::read_to_string(&css_path)
             .map_err(|e| EngineError::msg(format!("读 CSS: {e}")))?;
 
-        let accent_hex = hex_or(
-            accent.as_deref(),
-            manifest
-                .get("accent")
-                .and_then(|v| v.as_str())
-                .unwrap_or("#8b7cff"),
-        );
-        // When accent invalid, fall back already applied; still prefer manifest accent for CSS.
-        let accent_css = if accent.as_ref().map(|a| is_hex_color(a)).unwrap_or(false) {
-            accent.as_deref().unwrap()
-        } else {
-            accent_hex
-        };
-        let bg_css = hex_or(background.as_deref(), "#f7f8fc");
-        let text_css = hex_or(text.as_deref(), "#202536");
-        let panel_css = hex_or(panel.as_deref(), "#ffffff");
+        let accent_fallback = manifest
+            .get("accent")
+            .and_then(|v| v.as_str())
+            .unwrap_or("#8b7cff")
+            .to_string();
+        let accent_css = hex_or(accent.as_deref(), &accent_fallback).to_string();
+        let bg_css = hex_or(background.as_deref(), "#f7f8fc").to_string();
+        let text_css = hex_or(text.as_deref(), "#202536").to_string();
+        let panel_css = hex_or(panel.as_deref(), "#ffffff").to_string();
         let safe_radius = radius.clamp(0.0, 32.0);
         let safe_overlay = overlay.clamp(0.0, 70.0);
-        let safe_opacity = opacity.clamp(55.0, 100.0);
+        let safe_opacity = opacity.clamp(0.0, 100.0);
         let font_stack = match font.as_str() {
             "sans" => r#""Inter", "PingFang SC", "Microsoft YaHei", sans-serif"#,
             "serif" => r#""Songti SC", "STSong", serif"#,
             "mono" => r#""SF Mono", "Cascadia Code", monospace"#,
             _ => r#"system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif"#,
         };
-
-        let custom_css = format!(
-            r#"
-
-/* Custom Skin Designer: overrides on top of template «{base_id}». */
-html.{root} {{
-  --designer-accent: {accent};
-  --designer-bg: {bg};
-  --designer-text: {text};
-  --designer-panel: {panel};
-  --designer-panel-alpha: {alpha};
-  --designer-radius: {radius}px;
-  --designer-overlay: {overlay};
-  --skins-art-position: {position};
-  --skins-accent: var(--designer-accent);
-  --skins-text: var(--designer-text);
-  --skins-canvas: var(--designer-bg);
-  --skins-surface-raised: color-mix(in srgb, var(--designer-panel) calc(var(--designer-panel-alpha) * 100%), transparent);
-}}
-html.{root} body {{
-  color: var(--designer-text) !important;
-  font-family: {font} !important;
-  background-color: var(--designer-bg) !important;
-  background-size: {fit} !important;
-  background-position: var(--skins-art-position, {position}) !important;
-  background-repeat: no-repeat !important;
-}}
-/* Dim layer over wallpaper without replacing template layout */
-html.{root} body::after {{
-  content: "";
-  position: fixed;
-  inset: 0;
-  z-index: 0;
-  pointer-events: none;
-  background: rgba(0,0,0,{overlay}) !important;
-}}
-/* Soften panels; keep template background-image / framework wide-art rules */
-html.{root} main.main-surface {{
-  border-radius: var(--designer-radius) !important;
-}}
-html.{root}.skins-art-wide main.main-surface {{
-  background-color: color-mix(in srgb, var(--designer-panel) calc(var(--designer-panel-alpha) * 100%), transparent) !important;
-}}
-html.{root}.skins-art-standard main.main-surface {{
-  background-color: color-mix(in srgb, var(--designer-panel) calc(var(--designer-panel-alpha) * 100%), transparent) !important;
-  background-size: {fit} !important;
-  background-position: var(--skins-art-position, {position}) !important;
-  background-repeat: no-repeat !important;
-}}
-html.{root} button, html.{root} [role="button"] {{ border-radius: var(--designer-radius) !important; }}
-html.{root} a, html.{root} [data-state="active"], html.{root} [aria-current="page"] {{
-  color: var(--designer-accent) !important;
-}}
-/* Runtime injects art via {art_var} (and --skins-art alias). */
-"#,
-            root = root_class,
-            accent = accent_css,
-            bg = bg_css,
-            text = text_css,
-            panel = panel_css,
-            alpha = safe_opacity / 100.0,
-            radius = safe_radius,
-            overlay = safe_overlay / 100.0,
-            position = valid_position,
-            font = font_stack,
-            fit = valid_fit,
-            art_var = art_var,
-            base_id = base_id,
+        let surface_alpha = safe_opacity / 100.0;
+        let overlay = safe_overlay / 100.0;
+        let custom_css = build_designer_root_css(
+            &root_class,
+            accent_css.as_str(),
+            bg_css.as_str(),
+            text_css.as_str(),
+            panel_css.as_str(),
+            font_stack,
+            safe_radius,
+            overlay,
+            surface_alpha,
+            valid_fit,
+            &valid_position,
         );
+        {
+            let obj = manifest
+                .as_object_mut()
+                .ok_or_else(|| EngineError::msg("skin.json 无效"))?;
+            obj.insert(
+                "tokens".into(),
+                json!({
+                    "accent": accent_css,
+                    "text": text_css,
+                    "ink": text_css,
+                    "canvas": bg_css,
+                    "panel": panel_css,
+                    "font": font_stack,
+                    "radius": format!("{safe_radius}px"),
+                    "overlay": overlay,
+                    "surfaceAlpha": surface_alpha,
+                    "artFit": valid_fit,
+                    "artPosition": valid_position,
+                }),
+            );
+        }
         fs::write(&css_path, format!("{css}{custom_css}"))
             .map_err(|e| EngineError::msg(format!("写 CSS: {e}")))?;
 
@@ -632,12 +651,44 @@ fn regex_position_ok(position: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::regex_position_ok;
+    use super::{build_designer_root_css, regex_position_ok};
 
     #[test]
     fn position_parser() {
         assert!(regex_position_ok("right center"));
         assert!(regex_position_ok("left"));
         assert!(!regex_position_ok("somewhere"));
+    }
+
+    #[test]
+    fn designer_css_uses_skins_root_tokens_only() {
+        let css = build_designer_root_css(
+            "codex-dream-skin",
+            "#b65cff",
+            "#fff9fc",
+            "#4c2364",
+            "#ffffff",
+            "system-ui, sans-serif",
+            16.0,
+            0.12,
+            0.92,
+            "cover",
+            "right center",
+        );
+        assert!(css.contains(":root.codex-dream-skin"));
+        assert!(css.contains("--skins-accent: #b65cff;"));
+        assert!(css.contains("--skins-canvas: #fff9fc;"));
+        assert!(css.contains("--skins-text: #4c2364;"));
+        assert!(css.contains("--skins-font:"));
+        assert!(css.contains("--skins-radius: 16px;"));
+        assert!(css.contains("--skins-overlay: 0.12;"));
+        assert!(css.contains("--skins-art-fit: cover;"));
+        assert!(css.contains("--skins-art-position: right center;"));
+        assert!(css.contains("--skins-suggest-card-radius: 16px;"));
+        assert!(css.contains("--composer-border-radius: 16px;"));
+        assert!(!css.contains("--designer-"));
+        assert!(!css.contains("body::after"));
+        assert!(!css.contains("!important"));
+        assert!(!css.contains("html.codex-dream-skin button"));
     }
 }

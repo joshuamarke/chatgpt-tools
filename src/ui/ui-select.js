@@ -131,6 +131,34 @@
     if (inst.search) inst.search.value = "";
   }
 
+  function commitSearchValue(inst) {
+    const typed = (inst.search?.value || "").trim();
+    if (!typed) return;
+    const select = inst.select;
+    const match = optionList(select).find(
+      (o) =>
+        o.value === typed ||
+        String(o.label || "").toLowerCase() === typed.toLowerCase()
+    );
+    let next = match ? match.value : "";
+    if (!next && select.getAttribute("data-allow-custom") === "true") {
+      const opt = document.createElement("option");
+      opt.value = typed;
+      opt.textContent = typed;
+      select.appendChild(opt);
+      next = typed;
+    }
+    if (!next) return;
+    const prev = select.value;
+    select.value = next;
+    if (prev !== next) {
+      select.dispatchEvent(new Event("change", { bubbles: true }));
+    }
+    syncTriggerLabel(inst);
+    closeMenu(inst);
+    inst.trigger?.focus?.();
+  }
+
   function onTriggerKey(inst, e) {
     if (inst.select.disabled) return;
     if (e.key === "ArrowDown" || e.key === "Enter" || e.key === " ") {
@@ -252,6 +280,9 @@
           e.preventDefault();
           closeMenu(inst);
           trigger.focus();
+        } else if (e.key === "Enter") {
+          e.preventDefault();
+          commitSearchValue(inst);
         } else if (e.key === "ArrowDown") {
           e.preventDefault();
           menu.querySelector(".ui-select-option:not(.is-disabled)")?.focus?.();

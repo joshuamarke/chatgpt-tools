@@ -11,6 +11,10 @@ use super::models::Provider;
 
 /// Official default model (Grok Build docs + `grok models`).
 pub const DEFAULT_MODEL: &str = "grok-4.5";
+/// Live-only `[model."<id>"]` identity while local routing is on.
+/// Official treats `<id>` as the Grok model identity; custom channels use the
+/// supplier name, and the local proxy is itself a supplier named `localproxy`.
+pub const LOCAL_PROXY_MODEL_ID: &str = "localproxy";
 /// Project default for *custom* third-party profiles (Responses-friendly).
 /// Official built-in models omit `api_backend` (Grok defaults to chat_completions).
 pub const DEFAULT_API_BACKEND: &str = "responses";
@@ -149,31 +153,67 @@ pub fn validate_for_switch(provider: &Provider) -> Result<(), String> {
     validate_custom(config)
 }
 
-pub fn build_custom_config(
+/// Custom `[model."<id>"]` / `[models].default` identity.
+/// Prefer an explicit profile; otherwise the supplier name. Never `localproxy`
+/// (that key is reserved for live local-routing).
+pub fn resolve_model_identity(profile: &str, provider_name: &str) -> String {
+    let profile = profile.trim();
+    if !profile.is_empty() && profile != LOCAL_PROXY_MODEL_ID {
+        return profile.to_string();
+    }
+    let name = provider_name.trim();
+    if !name.is_empty() && name != LOCAL_PROXY_MODEL_ID {
+        return name.to_string();
+    }
+    DEFAULT_MODEL.to_string()
+}
+
+/// Official `[model.<id>].name` = picker label. Never the supplier name.
+/// Empty / `localproxy` fall back to the upstream model id (e.g. grok-4.6).
+pub fn resolve_picker_name(picker: &str, model: &str) -> String {
+    let picker = picker.trim();
+    if !picker.is_empty() && picker != LOCAL_PROXY_MODEL_ID {
+        return picker.to_string();
+    }
+    let model = model.trim();
+    if !model.is_empty() {
+        return model.to_string();
+    }
+    DEFAULT_MODEL.to_string()
+}
+
+/// Picker label for the edit form: keep a real label; migrate leftover
+/// supplier-name / localproxy values to the upstream model id.
+pub fn picker_name_for_form(stored: &str, supplier_name: &str, model: &str) -> String {
+    let stored = stored.trim();
+    let supplier = supplier_name.trim();
+    if stored.is_empty()
+        || stored == LOCAL_PROXY_MODEL_ID
+        || (!supplier.is_empty() && stored == supplier)
+    {
+        return resolve_picker_name("", model);
+    }
+    stored.to_string()
+}
+
+pub fn build_custom_config_with_picker(
     profile: &str,
     model: &str,
     base_url: &str,
-    name: &str,
+    provider_name: &str,
+    picker_name: &str,
     api_key: &str,
     api_backend: &str,
     context_window: i64,
 ) -> String {
-    let profile = if profile.trim().is_empty() {
-        DEFAULT_MODEL
-    } else {
-        profile.trim()
-    };
+    let profile = resolve_model_identity(profile, provider_name);
     let model = if model.trim().is_empty() {
         DEFAULT_MODEL
     } else {
         model.trim()
     };
     let base_url = base_url.trim().trim_end_matches('/');
-    let name = if name.trim().is_empty() {
-        profile
-    } else {
-        name.trim()
-    };
+    let name = resolve_picker_name(picker_name, model);
     let backend = normalize_api_backend(api_backend);
     let cw = if context_window > 0 {
         context_window
@@ -192,10 +232,10 @@ api_key = {key_q}
 api_backend = {backend_q}
 context_window = {cw}
 "#,
-        profile_q = toml_string(profile),
+        profile_q = toml_string(&profile),
         model_q = toml_string(model),
         url_q = toml_string(base_url),
-        name_q = toml_string(name),
+        name_q = toml_string(&name),
         key_q = toml_string(api_key),
         backend_q = toml_string(&backend),
         cw = cw,
@@ -229,17 +269,28 @@ struct GrokFields {
 fn extract_fields(config_toml: &str) -> Option<GrokFields> {
     let document = config_toml.parse::<toml::Value>().ok()?;
     let root = document.as_table()?;
-    let default_model = root
-        .get("models")?
-        .as_table()?
-        .get("default")?
-        .as_str()?
-        .trim();
-    let selected = root
-        .get("model")?
-        .as_table()?
-        .get(default_model)?
-        .as_table()?;
+    let model_entries = root.get("model")?.as_table()?;
+    let default_raw = root
+        .get("models")
+        .and_then(|v| v.as_table())
+        .and_then(|t| t.get("default"))
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
+    let profile = match default_raw {
+        Some(key) if model_entries.get(key).and_then(|v| v.as_table()).is_some() => {
+            key.to_string()
+        }
+        _ if model_entries
+            .get(LOCAL_PROXY_MODEL_ID)
+            .and_then(|v| v.as_table())
+            .is_some() =>
+        {
+            LOCAL_PROXY_MODEL_ID.to_string()
+        }
+        _ => return None,
+    };
+    let selected = model_entries.get(&profile)?.as_table()?;
     let context_window = selected
         .get("context_window")
         .and_then(|v| v.as_integer())
@@ -250,9 +301,16 @@ fn extract_fields(config_toml: &str) -> Option<GrokFields> {
         .and_then(|v| v.as_str())
         .map(normalize_api_backend)
         .unwrap_or_else(|| DEFAULT_API_BACKEND.into());
+    let model = selected
+        .get("model")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .unwrap_or(profile.as_str())
+        .to_string();
     Some(GrokFields {
-        profile: default_model.to_string(),
-        model: selected.get("model")?.as_str()?.trim().to_string(),
+        profile: profile.clone(),
+        model,
         base_url: selected
             .get("base_url")?
             .as_str()?
@@ -263,7 +321,7 @@ fn extract_fields(config_toml: &str) -> Option<GrokFields> {
             .and_then(|v| v.as_str())
             .map(str::trim)
             .filter(|s| !s.is_empty())
-            .unwrap_or(default_model)
+            .unwrap_or(profile.as_str())
             .to_string(),
         api_key: selected
             .get("api_key")
@@ -287,19 +345,38 @@ pub fn patch_config_from_form(
     api_backend: &str,
     context_window: i64,
 ) -> Result<String, String> {
-    let profile = if profile.trim().is_empty() {
-        model.trim()
-    } else {
-        profile.trim()
-    };
-    let profile = if profile.is_empty() { DEFAULT_MODEL } else { profile };
+    patch_config_from_form_with_picker(
+        existing,
+        profile,
+        model,
+        base_url,
+        name,
+        "",
+        api_key,
+        api_backend,
+        context_window,
+    )
+}
+
+pub fn patch_config_from_form_with_picker(
+    existing: &str,
+    profile: &str,
+    model: &str,
+    base_url: &str,
+    provider_name: &str,
+    picker_name: &str,
+    api_key: &str,
+    api_backend: &str,
+    context_window: i64,
+) -> Result<String, String> {
+    let identity = resolve_model_identity(profile, provider_name);
     let model = if model.trim().is_empty() {
         DEFAULT_MODEL
     } else {
         model.trim()
     };
     let base_url = base_url.trim().trim_end_matches('/');
-    let name = if name.trim().is_empty() { profile } else { name.trim() };
+    let name = resolve_picker_name(picker_name, model);
     let backend = normalize_api_backend(api_backend);
     let cw = if context_window > 0 {
         context_window
@@ -308,10 +385,28 @@ pub fn patch_config_from_form(
     };
 
     if existing.trim().is_empty() {
-        return Ok(build_custom_config(
-            profile, model, base_url, name, api_key, &backend, cw,
+        return Ok(build_custom_config_with_picker(
+            &identity,
+            model,
+            base_url,
+            provider_name,
+            &name,
+            api_key,
+            &backend,
+            cw,
         ));
     }
+
+    let old_default = existing
+        .parse::<toml::Value>()
+        .ok()
+        .and_then(|d| {
+            d.get("models")?
+                .get("default")?
+                .as_str()
+                .map(|s| s.trim().to_string())
+        })
+        .filter(|s| !s.is_empty());
 
     let mut doc = existing
         .parse::<DocumentMut>()
@@ -327,10 +422,10 @@ pub fn patch_config_from_form(
             .get_mut("models")
             .and_then(|i| i.as_table_like_mut())
             .ok_or_else(|| "Grok config.toml 中 [models] 非法".to_string())?;
-        models.insert("default", toml_edit::value(profile));
+        models.insert("default", toml_edit::value(identity.as_str()));
     }
 
-    // [model.<profile>]
+    // [model.<identity>]  — supplier name (or explicit profile), never the upstream id
     {
         let root = doc.as_table_mut();
         if !root.contains_key("model") {
@@ -340,13 +435,13 @@ pub fn patch_config_from_form(
             .get_mut("model")
             .and_then(|i| i.as_table_like_mut())
             .ok_or_else(|| "Grok config.toml 中 [model] 非法".to_string())?;
-        if model_root.get(profile).is_none() {
-            model_root.insert(profile, toml_edit::Item::Table(toml_edit::Table::new()));
+        if model_root.get(&identity).is_none() {
+            model_root.insert(&identity, toml_edit::Item::Table(toml_edit::Table::new()));
         }
         let table = model_root
-            .get_mut(profile)
+            .get_mut(&identity)
             .and_then(|i| i.as_table_like_mut())
-            .ok_or_else(|| format!("Grok config.toml 中 [model.\"{profile}\"] 非法"))?;
+            .ok_or_else(|| format!("Grok config.toml 中 [model.\"{identity}\"] 非法"))?;
         table.insert("model", toml_edit::value(model));
         table.insert("base_url", toml_edit::value(base_url));
         table.insert("name", toml_edit::value(name));
@@ -372,9 +467,36 @@ pub fn patch_config_from_form(
         } else {
             table.insert("api_key", toml_edit::value(api_key.trim()));
         }
+
+        let mut drop = vec![LOCAL_PROXY_MODEL_ID.to_string()];
+        if let Some(old) = old_default {
+            if old != identity {
+                drop.push(old);
+            }
+        }
+        if model != identity {
+            drop.push(model.to_string());
+        }
+        prune_model_tables(model_root, &identity, &drop);
     }
 
     Ok(doc.to_string())
+}
+
+fn prune_model_tables(
+    model_root: &mut dyn toml_edit::TableLike,
+    keep: &str,
+    extra_drop: &[String],
+) {
+    let keys: Vec<String> = model_root.iter().map(|(k, _)| k.to_string()).collect();
+    for key in keys {
+        if key == keep {
+            continue;
+        }
+        if extra_drop.iter().any(|d| d == &key) {
+            model_root.remove(&key);
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -683,6 +805,7 @@ pub fn settings_from_form(
     api_backend: Option<&str>,
     context_window: Option<i64>,
     use_config_toml: bool,
+    display_name: Option<&str>,
 ) -> Result<Value, String> {
     let is_official = category == Some("official");
     if is_official {
@@ -751,10 +874,7 @@ pub fn settings_from_form(
         .map(str::trim)
         .filter(|s| !s.is_empty())
         .unwrap_or(DEFAULT_MODEL);
-    let profile_val = profile
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-        .unwrap_or(model_val);
+    let profile_val = resolve_model_identity(profile.unwrap_or(""), name);
     let backend = api_backend.unwrap_or(DEFAULT_API_BACKEND);
     let cw = context_window
         .filter(|v| *v > 0)
@@ -765,15 +885,26 @@ pub fn settings_from_form(
         .and_then(|v| v.as_str())
         .unwrap_or("");
 
+    let picker = resolve_picker_name(display_name.unwrap_or(""), model_val);
     let text = if existing_cfg.trim().is_empty() {
-        build_custom_config(profile_val, model_val, url, name, &key, backend, cw)
-    } else {
-        patch_config_from_form(
-            existing_cfg,
-            profile_val,
+        build_custom_config_with_picker(
+            &profile_val,
             model_val,
             url,
             name,
+            &picker,
+            &key,
+            backend,
+            cw,
+        )
+    } else {
+        patch_config_from_form_with_picker(
+            existing_cfg,
+            &profile_val,
+            model_val,
+            url,
+            name,
+            &picker,
             &key,
             backend,
             cw,
@@ -821,6 +952,22 @@ pub fn summarize_extra(provider: &Provider) -> (String, String, i64) {
         (f.profile, f.api_backend, f.context_window)
     } else {
         (DEFAULT_MODEL.into(), DEFAULT_API_BACKEND.into(), DEFAULT_CONTEXT_WINDOW)
+    }
+}
+
+pub fn summarize_picker_name(provider: &Provider) -> String {
+    if provider.is_official() {
+        return DEFAULT_MODEL.into();
+    }
+    let config = provider
+        .settings_config
+        .get("config")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    if let Some(f) = extract_fields(config) {
+        picker_name_for_form(&f.name, &provider.name, &f.model)
+    } else {
+        DEFAULT_MODEL.into()
     }
 }
 
@@ -924,11 +1071,12 @@ context_window = 500000
 
     #[test]
     fn edit_form_fields_update_profile_backend_and_window() {
-        let existing_cfg = build_custom_config(
+        let existing_cfg = build_custom_config_with_picker(
             "grok-4.5",
             "grok-4.5",
             "https://old.example.com/v1",
             "Old",
+            "",
             "sk-old",
             "responses",
             500_000,
@@ -952,6 +1100,7 @@ context_window = 500000
             Some("chat_completions"),
             Some(256_000),
             false,
+            Some("Grok New"),
         )
         .expect("grok edit save");
 
@@ -962,5 +1111,126 @@ context_window = 500000
         assert!(config.contains("chat_completions"));
         assert!(config.contains("256000") || config.contains("256_000"));
         assert!(config.contains("sk-old"));
+        assert!(
+            config.contains("name = \"Grok New\""),
+            "picker name must stay separate from supplier: {config}"
+        );
+        // Old identity table must not linger beside the new profile.
+        assert!(
+            !config.contains("[model.\"grok-4.5\"]") && !config.contains("[model.grok-4.5]"),
+            "stale [model.grok-4.5] should be pruned: {config}"
+        );
+    }
+
+    #[test]
+    fn identity_defaults_to_supplier_name_not_upstream_model() {
+        assert_eq!(resolve_model_identity("", "OpenRouter (Grok)"), "OpenRouter (Grok)");
+        assert_eq!(resolve_model_identity("my-relay", "OpenRouter (Grok)"), "my-relay");
+        assert_eq!(
+            resolve_model_identity(LOCAL_PROXY_MODEL_ID, "OpenRouter (Grok)"),
+            "OpenRouter (Grok)"
+        );
+
+        let settings = settings_from_form(
+            Some("sk-test"),
+            Some("https://openrouter.ai/api/v1"),
+            Some("x-ai/grok-4.5"),
+            None,
+            "OpenRouter (Grok)",
+            Some("custom"),
+            None,
+            false,
+            None,
+            Some("responses"),
+            Some(500_000),
+            false,
+            None,
+        )
+        .expect("save");
+        let config = settings.get("config").and_then(|v| v.as_str()).unwrap();
+        assert!(
+            config.contains("default = \"OpenRouter (Grok)\"")
+                || config.contains("default = 'OpenRouter (Grok)'"),
+            "{config}"
+        );
+        assert!(
+            config.contains("[model.\"OpenRouter (Grok)\"]"),
+            "table key must be supplier name: {config}"
+        );
+        assert!(config.contains("model = \"x-ai/grok-4.5\""));
+        assert!(
+            config.contains("name = \"x-ai/grok-4.5\""),
+            "empty picker must default to upstream id: {config}"
+        );
+        assert!(
+            !config.contains("name = \"OpenRouter (Grok)\""),
+            "picker name must not be the supplier name: {config}"
+        );
+        assert!(
+            !config.contains("[model.\"x-ai/grok-4.5\"]"),
+            "upstream id must not become a table key: {config}"
+        );
+    }
+
+    #[test]
+    fn patch_prunes_model_keyed_leftover_and_localproxy() {
+        let existing = r#"
+[models]
+default = "grok-4.5"
+
+[model."grok-4.5"]
+model = "grok-4.5"
+base_url = "https://old.example.com/v1"
+name = "Old"
+api_key = "sk-old"
+api_backend = "responses"
+context_window = 500000
+
+[model."localproxy"]
+model = "grok-4.5"
+base_url = "http://127.0.0.1:18964/grok/v1"
+name = "localproxy"
+api_key = "PROXY_MANAGED"
+api_backend = "responses"
+context_window = 500000
+"#;
+        let patched = patch_config_from_form(
+            existing,
+            "",
+            "grok-4.5",
+            "https://new.example.com/v1",
+            "My Relay",
+            "sk-new",
+            "responses",
+            500_000,
+        )
+        .expect("patch");
+        assert!(patched.contains("[model.\"My Relay\"]"), "{patched}");
+        assert!(patched.contains("default = \"My Relay\""), "{patched}");
+        assert!(!patched.contains("[model.\"grok-4.5\"]"), "{patched}");
+        assert!(!patched.contains("[model.\"localproxy\"]"), "{patched}");
+        assert!(
+            patched.contains("name = \"grok-4.5\""),
+            "picker name must follow upstream: {patched}"
+        );
+    }
+
+    #[test]
+    fn extract_fields_falls_back_when_model_key_missing() {
+        let cfg = r#"
+[models]
+default = "localproxy"
+
+[model."localproxy"]
+base_url = "http://127.0.0.1:18964/grok/v1"
+name = "localproxy"
+api_key = "PROXY_MANAGED"
+api_backend = "responses"
+context_window = 500000
+"#;
+        let fields = extract_fields(cfg).expect("extract");
+        assert_eq!(fields.profile, "localproxy");
+        assert_eq!(fields.model, "localproxy");
+        assert_eq!(fields.base_url, "http://127.0.0.1:18964/grok/v1");
     }
 }

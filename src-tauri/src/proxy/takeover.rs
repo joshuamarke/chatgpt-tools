@@ -130,8 +130,9 @@ pub fn apply_takeover_live(kind: AppKind, provider: &Provider, cfg: &GlobalProxy
 
 /// Hot-switch under an **already-active** local route.
 ///
-/// Does **not** rewrite `model_providers` when the proxy shell is already in place:
-/// only updates logical current (caller's job), top-level `model`, and model catalog.
+/// Codex: does **not** rewrite `model_providers` when the proxy shell is already
+/// in place — only top-level `model` and model catalog.
+/// Grok: keeps `[model."localproxy"]` and only refreshes upstream `.model`.
 /// Falls back to full [`apply_takeover_live`] if live is not yet proxy-shaped
 /// (or official ↔ third-party kind changed).
 pub fn hot_switch_live(
@@ -164,14 +165,15 @@ pub fn hot_switch_live(
             if provider.is_official() {
                 return Err("本地路由下不能启用 Grok 官方渠道。".into());
             }
-            // Live already points at local proxy (`/grok/v1`). Upstream selection is
-            // entirely inside the proxy (current + failover); do **not** rewrite
-            // ~/.grok/config.toml on hot-switch — only full apply_takeover sets
-            // base_url / name=localproxy once when routing is turned on.
-            warnings.push(format!(
-                "已切换到「{}」（本地路由热切，未改 live 配置）。",
-                provider.name
-            ));
+            // Keep `[model."localproxy"]` as the Grok identity; only refresh
+            // upstream `.model` / backend so the client sends the new API id.
+            let path = grok::config_path();
+            let provider = provider.clone();
+            let base = proxy_base_url_for(kind, cfg);
+            crate::live_config::read_modify_write(&path, |live| {
+                hot_switch_grok_localproxy(live, &provider, &base)
+            })?;
+            warnings.push(format!("已切换到「{}」。", provider.name));
         }
     }
     Ok(warnings)
@@ -434,8 +436,8 @@ fn apply_grok_proxy_route(
         .get("config")
         .and_then(|v| v.as_str())
         .unwrap_or("");
-    // Start from richer of live vs archive, then force selected model base_url/api_key.
-    let base_text = if live.trim().len() >= archive.trim().len() && !live.trim().is_empty() {
+    // Prefer live so MCP / ui survive; empty live falls back to the archive.
+    let base_text = if !live.trim().is_empty() {
         live
     } else if !archive.trim().is_empty() {
         archive
@@ -450,49 +452,178 @@ fn apply_grok_proxy_route(
             .map_err(|e| format!("Invalid Grok config: {e}"))?
     };
 
-    let (profile, model, _backend, _cw) = {
-        let (p, b, c) = grok::summarize_extra(provider);
-        let (_k, _base, m) = grok::summarize(provider);
-        let model = m.filter(|s| !s.is_empty()).unwrap_or_else(|| p.clone());
-        (p, model, b, c)
-    };
-    let model_key = if model.is_empty() { profile.clone() } else { model.clone() };
-    if model_key.is_empty() {
-        return Err("Grok 供应商缺少 model / profile".into());
-    }
+    let (archive_identity, backend, cw) = grok::summarize_extra(provider);
+    let (_k, _base, upstream) = grok::summarize(provider);
+    let upstream = upstream
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| grok::DEFAULT_MODEL.to_string());
+    let identity = grok::LOCAL_PROXY_MODEL_ID;
 
     if doc.get("models").is_none() {
         doc["models"] = toml_edit::Item::Table(toml_edit::Table::new());
     }
     if let Some(models) = doc.get_mut("models").and_then(|i| i.as_table_like_mut()) {
-        models.insert("default", toml_edit::value(model_key.as_str()));
+        models.insert("default", toml_edit::value(identity));
     }
 
-    // Ensure [model."<id>"]
     if doc.get("model").is_none() {
         let mut t = toml_edit::Table::new();
         t.set_implicit(true);
         doc.as_table_mut()
             .insert("model", toml_edit::Item::Table(t));
     }
+    write_grok_localproxy_table(&mut doc, proxy_base, &upstream, &backend, cw)?;
+    prune_stale_grok_route_tables(
+        &mut doc,
+        proxy_base,
+        &archive_identity,
+        &upstream,
+        &provider.name,
+    )?;
+    Ok(doc.to_string())
+}
+
+fn write_grok_localproxy_table(
+    doc: &mut DocumentMut,
+    proxy_base: &str,
+    upstream_model: &str,
+    backend: &str,
+    context_window: i64,
+) -> Result<(), String> {
+    let identity = grok::LOCAL_PROXY_MODEL_ID;
     let model_root = doc
         .get_mut("model")
         .and_then(|i| i.as_table_like_mut())
         .ok_or_else(|| "Grok [model] 非法".to_string())?;
-    if model_root.get(&model_key).is_none() {
-        model_root.insert(&model_key, toml_edit::Item::Table(toml_edit::Table::new()));
+    if model_root.get(identity).is_none() {
+        model_root.insert(identity, toml_edit::Item::Table(toml_edit::Table::new()));
     }
     let entry = model_root
-        .get_mut(&model_key)
+        .get_mut(identity)
         .and_then(|i| i.as_table_like_mut())
-        .ok_or_else(|| format!("Grok model.{model_key} 非法"))?;
+        .ok_or_else(|| format!("Grok model.{identity} 非法"))?;
+    entry.insert("model", toml_edit::value(upstream_model));
     entry.insert("base_url", toml_edit::value(proxy_base));
     entry.insert("api_key", toml_edit::value(PROXY_MANAGED));
-    // Grok local routing: always stamp model entry name for UI / client identity.
-    entry.insert("name", toml_edit::value("localproxy"));
-    if entry.get("api_backend").is_none() {
-        entry.insert("api_backend", toml_edit::value("responses"));
+    // Official picker label follows the upstream model id (grok-4.6), not localproxy.
+    entry.insert(
+        "name",
+        toml_edit::value(grok::resolve_picker_name("", upstream_model)),
+    );
+    let backend = if backend.trim().is_empty() || backend == "built-in" {
+        grok::DEFAULT_API_BACKEND
+    } else {
+        backend
+    };
+    entry.insert(
+        "api_backend",
+        toml_edit::value(grok::normalize_api_backend(backend)),
+    );
+    let cw = if context_window > 0 {
+        context_window
+    } else {
+        grok::DEFAULT_CONTEXT_WINDOW
+    };
+    entry.insert("context_window", toml_edit::value(cw));
+    Ok(())
+}
+
+fn prune_stale_grok_route_tables(
+    doc: &mut DocumentMut,
+    proxy_base: &str,
+    archive_identity: &str,
+    upstream_model: &str,
+    provider_name: &str,
+) -> Result<(), String> {
+    let keep = grok::LOCAL_PROXY_MODEL_ID;
+    let proxy_n = proxy_base.trim().trim_end_matches('/');
+    let model_root = doc
+        .get_mut("model")
+        .and_then(|i| i.as_table_like_mut())
+        .ok_or_else(|| "Grok [model] 非法".to_string())?;
+    let keys: Vec<String> = model_root.iter().map(|(k, _)| k.to_string()).collect();
+    let mut drop = Vec::new();
+    for key in keys {
+        if key == keep {
+            continue;
+        }
+        let Some(table) = model_root.get(&key).and_then(|i| i.as_table_like()) else {
+            continue;
+        };
+        let base = table
+            .get("base_url")
+            .and_then(|i| i.as_str())
+            .unwrap_or("")
+            .trim()
+            .trim_end_matches('/');
+        let name = table
+            .get("name")
+            .and_then(|i| i.as_str())
+            .unwrap_or("")
+            .trim();
+        let api_key = table
+            .get("api_key")
+            .and_then(|i| i.as_str())
+            .unwrap_or("")
+            .trim();
+        let drop_it = base.eq_ignore_ascii_case(proxy_n)
+            || name == grok::LOCAL_PROXY_MODEL_ID
+            || api_key == PROXY_MANAGED
+            || (!archive_identity.is_empty() && key == archive_identity)
+            || (!upstream_model.is_empty()
+                && key == upstream_model
+                && (name.is_empty()
+                    || name == grok::LOCAL_PROXY_MODEL_ID
+                    || name == provider_name
+                    || name == archive_identity));
+        if drop_it {
+            drop.push(key);
+        }
     }
+    for key in drop {
+        model_root.remove(&key);
+    }
+    Ok(())
+}
+
+fn grok_live_uses_localproxy_identity(live: &str, proxy_base: &str) -> bool {
+    let Ok(doc) = live.parse::<toml::Value>() else {
+        return false;
+    };
+    let default = doc
+        .get("models")
+        .and_then(|m| m.get("default"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    if default != grok::LOCAL_PROXY_MODEL_ID {
+        return false;
+    }
+    let url = doc
+        .get("model")
+        .and_then(|m| m.get(grok::LOCAL_PROXY_MODEL_ID))
+        .and_then(|t| t.get("base_url"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    url.trim().trim_end_matches('/') == proxy_base.trim().trim_end_matches('/')
+}
+
+fn hot_switch_grok_localproxy(
+    live: &str,
+    provider: &Provider,
+    proxy_base: &str,
+) -> Result<String, String> {
+    if !grok_live_uses_localproxy_identity(live, proxy_base) {
+        return apply_grok_proxy_route(live, provider, proxy_base);
+    }
+    let mut doc = live
+        .parse::<DocumentMut>()
+        .map_err(|e| format!("Invalid Grok config: {e}"))?;
+    let (_identity, backend, cw) = grok::summarize_extra(provider);
+    let (_k, _base, upstream) = grok::summarize(provider);
+    let upstream = upstream
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| grok::DEFAULT_MODEL.to_string());
+    write_grok_localproxy_table(&mut doc, proxy_base, &upstream, &backend, cw)?;
     Ok(doc.to_string())
 }
 
@@ -526,18 +657,24 @@ pub fn live_matches_proxy(kind: AppKind, cfg: &GlobalProxyConfig) -> bool {
 
 fn extract_grok_fields_loose(config: &str) -> Option<String> {
     let doc = config.parse::<toml::Value>().ok()?;
+    let models = doc.get("model")?.as_table()?;
     let default = doc
-        .get("models")?
-        .get("default")?
-        .as_str()?
-        .to_string();
-    let url = doc
-        .get("model")?
-        .get(&default)?
-        .get("base_url")?
-        .as_str()?
-        .to_string();
-    Some(url)
+        .get("models")
+        .and_then(|m| m.get("default"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    if let Some(url) = models
+        .get(default)
+        .and_then(|t| t.get("base_url"))
+        .and_then(|v| v.as_str())
+    {
+        return Some(url.to_string());
+    }
+    models
+        .get(grok::LOCAL_PROXY_MODEL_ID)
+        .and_then(|t| t.get("base_url"))
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string())
 }
 
 /// Resolve real upstream base_url + api key from provider archive (not live).
@@ -564,5 +701,133 @@ pub fn upstream_from_provider(kind: AppKind, provider: &Provider) -> Result<(Str
             let base = base.ok_or_else(|| "供应商缺少 base_url".to_string())?;
             Ok((base, key, false))
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    fn grok_provider(identity: &str, model: &str, name: &str) -> Provider {
+        let cfg = grok::build_custom_config_with_picker(
+            identity,
+            model,
+            "https://proxy.example.com/v1",
+            name,
+            "",
+            "sk-test",
+            "responses",
+            500_000,
+        );
+        Provider::new("g-relay".into(), name.into(), json!({ "config": cfg }))
+    }
+
+    #[test]
+    fn grok_takeover_uses_localproxy_identity() {
+        let provider = grok_provider("My Relay", "grok-4.5", "My Relay");
+        let live = provider
+            .settings_config
+            .get("config")
+            .and_then(|v| v.as_str())
+            .unwrap();
+        let out = apply_grok_proxy_route(live, &provider, "http://127.0.0.1:18964/grok/v1")
+            .expect("takeover");
+        assert!(
+            out.contains("default = \"localproxy\""),
+            "default must be localproxy: {out}"
+        );
+        assert!(
+            out.contains("[model.\"localproxy\"]") || out.contains("[model.localproxy]"),
+            "table key must be localproxy: {out}"
+        );
+        assert!(out.contains("model = \"grok-4.5\""), "{out}");
+        assert!(
+            out.contains("name = \"grok-4.5\""),
+            "picker name must follow upstream model: {out}"
+        );
+        assert!(
+            !out.contains("name = \"localproxy\""),
+            "picker name must not be localproxy: {out}"
+        );
+        assert!(out.contains("http://127.0.0.1:18964/grok/v1"), "{out}");
+        assert!(
+            !out.contains("[model.\"My Relay\"]"),
+            "archive identity must be replaced: {out}"
+        );
+        assert!(
+            !out.contains("[model.\"grok-4.5\"]"),
+            "upstream id must not become a table: {out}"
+        );
+    }
+
+    #[test]
+    fn grok_takeover_prunes_model_keyed_leftovers() {
+        let provider = grok_provider("my-profile", "grok-4.5", "My Relay");
+        let dirty = r#"
+[models]
+default = "grok-4.5"
+
+[ui]
+theme = "auto"
+
+[model."my-profile"]
+model = "grok-4.5"
+base_url = "https://proxy.example.com/v1"
+name = "My Relay"
+api_key = "sk-test"
+api_backend = "responses"
+context_window = 500000
+
+[model."grok-4.5"]
+model = "grok-4.5"
+base_url = "http://127.0.0.1:18964/grok/v1"
+name = "localproxy"
+api_key = "PROXY_MANAGED"
+api_backend = "responses"
+context_window = 500000
+"#;
+        let out = apply_grok_proxy_route(dirty, &provider, "http://127.0.0.1:18964/grok/v1")
+            .expect("takeover");
+        assert!(
+            out.contains("[model.\"localproxy\"]") || out.contains("[model.localproxy]"),
+            "{out}"
+        );
+        assert!(out.contains("theme = \"auto\""), "keep unmanaged: {out}");
+        assert!(!out.contains("[model.\"grok-4.5\"]"), "{out}");
+        assert!(!out.contains("[model.\"my-profile\"]"), "{out}");
+        let parsed = out.parse::<toml::Value>().expect("toml");
+        let tables = parsed.get("model").and_then(|v| v.as_table()).unwrap();
+        assert_eq!(tables.len(), 1, "only localproxy should remain: {out}");
+    }
+
+    #[test]
+    fn grok_hot_switch_updates_upstream_model() {
+        let first = grok_provider("Relay A", "grok-4.5", "Relay A");
+        let proxy = "http://127.0.0.1:18964/grok/v1";
+        let routed = apply_grok_proxy_route("", &first, proxy).expect("takeover");
+        let second = grok_provider("Relay B", "x-ai/grok-4.5", "Relay B");
+        let switched = hot_switch_grok_localproxy(&routed, &second, proxy).expect("hot");
+        assert!(switched.contains("default = \"localproxy\""), "{switched}");
+        assert!(switched.contains("model = \"x-ai/grok-4.5\""), "{switched}");
+        assert!(
+            switched.contains("name = \"x-ai/grok-4.5\""),
+            "picker name must follow new upstream: {switched}"
+        );
+        assert!(
+            !switched.contains("model = \"grok-4.5\""),
+            "old upstream id should be replaced: {switched}"
+        );
+    }
+
+    #[test]
+    fn grok_takeover_picker_name_follows_grok_4_6() {
+        let provider = grok_provider("My Relay", "grok-4.6", "My Relay");
+        let out = apply_grok_proxy_route("", &provider, "http://127.0.0.1:18964/grok/v1")
+            .expect("takeover");
+        assert!(out.contains("model = \"grok-4.6\""), "{out}");
+        assert!(out.contains("name = \"grok-4.6\""), "{out}");
+        assert!(!out.contains("name = \"localproxy\""), "{out}");
+        assert!(!out.contains("name = \"My Relay\""), "{out}");
     }
 }

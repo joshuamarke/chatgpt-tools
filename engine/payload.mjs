@@ -82,6 +82,7 @@ const THEME_CHOICES = {
   artMode: new Set(["wallpaper", "token-only", "none"]),
   /** body = immersive paints body; none/custom = skin paints (main/chrome/any selector) */
   artPaint: new Set(["body", "none", "custom"]),
+  artFit: new Set(["cover", "contain"]),
 };
 
 /**
@@ -173,6 +174,7 @@ export function normalizeThemeConfig(manifest = {}) {
         THEME_CHOICES.taskMode,
         "auto"
       ),
+      fit: normalizedChoice(mergedArt.fit, "art.fit", THEME_CHOICES.artFit, "cover"),
     },
     skipAnalysis:
       themeBlock.skipAnalysis === true ||

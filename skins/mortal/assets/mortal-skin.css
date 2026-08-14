@@ -49,6 +49,9 @@
   --skins-sidebar: rgba(230, 220, 245, 0.52);
   --skins-surface-raised: rgba(255, 255, 255, 0.72);
   --skins-line: rgba(139, 111, 212, 0.32);
+  --skins-overlay: 0;
+  --skins-surface-alpha: 0.72;
+  --skins-art-fit: cover;
 
   color-scheme: light !important;
 
@@ -219,9 +222,14 @@ html.codex-mortal-skin.skins-art-wide:is(.skins-task-ambient, .skins-task-banner
   body,
 html.codex-mortal-skin.skins-art-wide body {
   background-color: var(--skins-canvas, #d4cce8) !important;
-  background-image: var(--mortal-art, var(--skins-art)) !important;
-  background-position: var(--skins-art-position, 72% 45%) !important;
-  background-size: cover !important;
+  background-image:
+    linear-gradient(
+      rgb(0 0 0 / var(--skins-overlay, 0)),
+      rgb(0 0 0 / var(--skins-overlay, 0))
+    ),
+    var(--mortal-art, var(--skins-art)) !important;
+  background-position: center, var(--skins-art-position, 72% 45%) !important;
+  background-size: auto, var(--skins-art-fit, cover) !important;
   background-repeat: no-repeat !important;
   background-attachment: fixed !important;
 }

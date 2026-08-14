@@ -784,7 +784,7 @@
         <form id="wallpaperForm" class="wallpaper-form">
           <label class="prov-field">
             <span class="prov-field-label">基于目标皮肤模板</span>
-            <select id="wallpaperBase" required></select>
+            <select id="wallpaperBase" class="ui-select-source" data-ui-select data-searchable="true" data-placeholder="选择目标皮肤模板" required aria-label="基于目标皮肤模板"></select>
           </label>
           <div class="image-drop" id="imageDrop">
             <button type="button" class="ghost sm" id="btnChooseWallpaper">选择壁纸</button>
@@ -800,13 +800,13 @@
             <label class="prov-field"><span class="prov-field-label">页面底色</span><input id="themeBackground" type="color" value="#f7f8fc" /></label>
             <label class="prov-field"><span class="prov-field-label">文字颜色</span><input id="themeText" type="color" value="#202536" /></label>
             <label class="prov-field"><span class="prov-field-label">面板颜色</span><input id="themePanel" type="color" value="#ffffff" /></label>
-            <label class="prov-field"><span class="prov-field-label">字体</span><select id="themeFont"><option value="system">系统默认</option><option value="sans">现代无衬线</option><option value="serif">宋体 / 衬线</option><option value="mono">等宽字体</option></select></label>
-            <label class="prov-field"><span class="prov-field-label">圆角</span><select id="themeRadius"><option value="0">直角</option><option value="8">小</option><option value="16" selected>标准</option><option value="26">圆润</option></select></label>
-            <label class="prov-field"><span class="prov-field-label">图片适配</span><select id="wallpaperFit"><option value="cover">铺满（可能裁切）</option><option value="contain">完整显示</option></select></label>
-            <label class="prov-field"><span class="prov-field-label">主体位置</span><select id="wallpaperPosition"><option value="right center">右侧</option><option value="center center">居中</option><option value="left center">左侧</option></select></label>
+            <label class="prov-field"><span class="prov-field-label">字体</span><select id="themeFont" class="ui-select-source" data-ui-select aria-label="字体"><option value="system">系统默认</option><option value="sans">现代无衬线</option><option value="serif">宋体 / 衬线</option><option value="mono">等宽字体</option></select></label>
+            <label class="prov-field"><span class="prov-field-label">圆角</span><select id="themeRadius" class="ui-select-source" data-ui-select aria-label="圆角"><option value="0">直角</option><option value="8">小</option><option value="16" selected>标准</option><option value="26">圆润</option></select></label>
+            <label class="prov-field"><span class="prov-field-label">图片适配</span><select id="wallpaperFit" class="ui-select-source" data-ui-select aria-label="图片适配"><option value="cover">铺满（可能裁切）</option><option value="contain">完整显示</option></select></label>
+            <label class="prov-field"><span class="prov-field-label">主体位置</span><select id="wallpaperPosition" class="ui-select-source" data-ui-select aria-label="主体位置"><option value="right center">右侧</option><option value="center center">居中</option><option value="left center">左侧</option></select></label>
           </div>
           <label class="prov-field range-label"><span class="prov-field-label">壁纸暗度</span> <input id="themeOverlay" type="range" min="0" max="70" value="12" /><output id="themeOverlayValue">12%</output></label>
-          <label class="prov-field range-label"><span class="prov-field-label">面板透明度</span> <input id="themeOpacity" type="range" min="55" max="100" value="92" /><output id="themeOpacityValue">92%</output></label>
+          <label class="prov-field range-label"><span class="prov-field-label">面板透明度</span> <input id="themeOpacity" type="range" min="0" max="100" value="92" /><output id="themeOpacityValue">92%</output></label>
           <div class="form-actions confirm-actions is-end">
             <button type="button" class="ghost" id="btnWallpaperCancel">取消</button>
             <button type="submit" class="primary">生成自定义皮肤</button>
@@ -1124,10 +1124,11 @@
             <label class="prov-field">
               <span class="prov-field-label" id="provFormModelLabel">默认模型</span>
               <div class="prov-input-with-action">
-                <input id="provFormModel" type="text" maxlength="120" placeholder="gpt-5.5 / grok-4.5" autocomplete="off" spellcheck="false" list="provFormModelList" />
+                <select id="provFormModel" class="ui-select-source" data-ui-select data-searchable="true" data-allow-custom="true" data-placeholder="选择或搜索模型" aria-label="模型">
+                  <option value="">选择或搜索模型</option>
+                </select>
                 <button type="button" class="ghost sm prov-action-btn" id="btnProvFetchModelsMain" title="通过 OpenAI 兼容的 /models 端点拉取可用模型" hidden>拉取模型</button>
               </div>
-              <datalist id="provFormModelList"></datalist>
               <span class="prov-field-hint" id="provFormModelHint">写入顶层 model；Codex 可在下方「模型映射」拉取完整列表。</span>
               <div class="prov-probe-status" id="provModelStatus" hidden role="status"></div>
             </label>
@@ -1192,21 +1193,14 @@
           <!-- Grok-only -->
           <div class="prov-form-section prov-app-fields" id="provFormGrokFields" hidden>
             <div class="prov-form-section-title">Grok Build 专用</div>
-            <div class="prov-field-row">
-              <label class="prov-field">
-                <span class="prov-field-label">配置档案名 (profile)</span>
-                <input id="provFormProfile" type="text" maxlength="80" placeholder="默认与模型 id 相同" autocomplete="off" spellcheck="false" />
-                <span class="prov-field-hint">对应 [models].default 与 [model.&lt;profile&gt;]。</span>
-              </label>
-              <label class="prov-field">
-                <span class="prov-field-label">API 后端 (api_backend)</span>
-                <select id="provFormApiBackend" class="ui-select-source" data-ui-select aria-label="Grok api_backend">
-                  <option value="responses">responses（推荐）</option>
-                  <option value="chat_completions">chat_completions</option>
-                </select>
-                <span class="prov-field-hint">写入 [model.*].api_backend。</span>
-              </label>
-            </div>
+            <label class="prov-field">
+              <span class="prov-field-label">API 后端 (api_backend)</span>
+              <select id="provFormApiBackend" class="ui-select-source" data-ui-select aria-label="Grok api_backend">
+                <option value="responses">responses（推荐）</option>
+                <option value="chat_completions">chat_completions</option>
+              </select>
+              <span class="prov-field-hint">写入 [model.*].api_backend。</span>
+            </label>
             <label class="prov-field">
               <span class="prov-field-label">上下文窗口 (context_window)</span>
               <input id="provFormContextWindow" type="number" min="1" step="1" placeholder="500000" inputmode="numeric" list="provFormContextPresetList" />

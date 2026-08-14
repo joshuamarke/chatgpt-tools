@@ -36,6 +36,11 @@
   --skins-sidebar: #eef0fa;
   --skins-surface-raised: #ffffff;
   --skins-line: #c8cad8;
+  --skins-font: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --skins-radius: 12px;
+  --skins-overlay: 0;
+  --skins-surface-alpha: 0.82;
+  --skins-art-fit: cover;
   /* 立绘变量名必须与 skin.json markers.artVar 一致；paint=body 时框架用 --skins-art 画 body */
   --my-skin-art: var(--skins-art, none);
   /* 推荐卡片 token（可选；引擎有默认）。列表勿默认写——未定义 = 宿主原生 */
@@ -73,8 +78,8 @@
   flex-direction: column;
   gap: 2px;
   padding: 10px 14px;
-  border-radius: 12px;
-  background: color-mix(in srgb, var(--skins-surface-raised) 82%, transparent);
+  border-radius: var(--skins-radius, 12px);
+  background: color-mix(in srgb, var(--skins-surface-raised) calc(var(--skins-surface-alpha, 0.82) * 100%), transparent);
   border: 1px solid color-mix(in srgb, var(--skins-line) 70%, transparent);
   color: var(--skins-text);
   font-size: 12px;
@@ -116,7 +121,7 @@ html.codex-my-skin[data-skins-art-paint="custom"] main.main-surface {
   background-color: var(--skins-canvas) !important;
   background-image: var(--my-skin-art, var(--skins-art)) !important;
   background-position: var(--skins-art-position, 50% 50%) !important;
-  background-size: cover !important;
+  background-size: var(--skins-art-fit, cover) !important;
   background-repeat: no-repeat !important;
 }
 */

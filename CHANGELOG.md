@@ -4,10 +4,16 @@
 
 ## Unreleased
 
-- **单一路径引擎**：GUI 运行时不再 spawn Node / `engine/cli.mjs`；失败不再静默回退。
-- **自定义壁纸**改为 Tauri/Rust 实现（`src-tauri/src/cdp/design.rs`），无系统 Node。
-- 资源根发现以 `engine/runtime/renderer-core.js` 为准。
-- Release 构建要求 Secret `CODEX_SKIN_CLOUD_URL`（例：`https://cdn.aiku.cc.cd/v1`）以嵌入默认云端 catalog。
+## 1.1.14 - 2026-08-15
+
+- 自定义皮肤弹窗「面板透明度」范围改为 0–100%。
+- 修复「从本机配置导入」对同一本机配置重复创建档案。
+- 修复 Grok 配置文件 `name` 语义对齐 xAI 设置文档。
+- 供应商 / 本地路由：优化代理接管与切换路径；官方 Codex 默认模型改为 gpt-5.6-terra。
+- 工具箱增强：强制中文、插件解锁、快速启动、Computer Use Guard（默认关闭）。
+- 标题栏拆分为启动/重启宿主；「暂停皮肤」仅在注入正常时显示。
+- 自定义壁纸改为 Tauri/Rust 实现，不再依赖系统 Node。
+- 皮肤注入与自定义壁纸生成路径继续收敛到原生引擎。
 
 ## 1.1.13 - 2026-08-03
 
@@ -20,5 +26,5 @@
 
 1. 同步三处版本号：`package.json`、`src-tauri/tauri.conf.json`、`src-tauri/Cargo.toml`。
 2. 在本文件顶部新增 `## x.y.z - YYYY-MM-DD` 段落。
-3. 提交后打 tag（如 `v1.1.13`）并在 GitHub 创建 **Published** Release，正文使用本段 changelog。
+3. 提交后打 tag（如 `v1.1.14`）并在 GitHub 创建 **Published** Release，正文使用本段 changelog。
 4. 等待 Actions 把 `.exe` / `.dmg` / `latest.json` 挂到该 Release。

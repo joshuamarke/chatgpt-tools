@@ -273,7 +273,7 @@
       "native-inject": "src-tauri/src/cdp/inject.rs + keep.rs + launch.rs"
     },
     "recommendedPatterns": [
-      "html.<markers.rootClass> { --skins-accent: … }",
+      ":root.<markers.rootClass> { --skins-accent: … }",
       "html.<root>.skins-art-standard aside.app-shell-left-panel { … }",
       "html.<root> .composer-surface-chrome { … }",
       "#<markers.chromeId> { pointer-events: none !important; }"

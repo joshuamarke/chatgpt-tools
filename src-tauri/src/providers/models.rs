@@ -545,7 +545,7 @@ pub struct ProviderUpsertRequest {
     /// Codex top-level `model_reasoning_effort`: high | medium | low | minimal
     #[serde(default)]
     pub reasoning_effort: Option<String>,
-    /// Grok `[models].default` / profile key (defaults to model id).
+    /// Grok `[models].default` / `[model."<id>"]` identity (defaults to supplier name).
     #[serde(default)]
     pub profile: Option<String>,
     /// Grok `api_backend`: responses | chat_completions
@@ -554,6 +554,9 @@ pub struct ProviderUpsertRequest {
     /// Grok `context_window` (positive integer).
     #[serde(default)]
     pub context_window: Option<i64>,
+    /// Grok `[model.*].name` picker label (defaults to upstream model id).
+    #[serde(default)]
+    pub model_display_name: Option<String>,
     /// When true (or when base_url is empty), use `config_toml` as the source of truth.
     #[serde(default)]
     pub use_config_toml: Option<bool>,
@@ -603,6 +606,9 @@ pub struct ProviderDetail {
     pub api_backend: String,
     #[serde(default)]
     pub context_window: i64,
+    /// Grok `[model.*].name` picker label.
+    #[serde(default)]
+    pub model_display_name: String,
     pub config_toml: String,
     #[serde(default)]
     pub custom_user_agent: String,

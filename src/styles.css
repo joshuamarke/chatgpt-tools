@@ -1293,18 +1293,33 @@ button.sm {
   outline-offset: 2px;
 }
 
-.wallpaper-editor { width: min(640px, 100%); }
-/* 壁纸表单复用 prov-field 字段栈，仅保留网格布局 */
+.modal-card.wallpaper-editor {
+  width: min(640px, 100%);
+  max-height: min(92vh, 900px);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 0;
+}
+.wallpaper-editor .modal-head { flex-shrink: 0; }
+/* 壁纸表单复用 prov-field + ui-select（与编辑供应商一致） */
 .wallpaper-form {
   display: grid;
   gap: 14px;
   padding: 18px;
+  overflow: auto;
+  flex: 1;
+  min-height: 0;
 }
 .wallpaper-form > .prov-field input,
-.wallpaper-form > .prov-field select {
+.wallpaper-form > .prov-field select:not(.ui-select-native) {
   width: 100%;
   background: #fbfcff;
 }
+.wallpaper-form .ui-select { z-index: 2; }
+.wallpaper-form .ui-select.is-open { z-index: 6; }
+.wallpaper-form .ui-select-trigger { background: #fbfcff; }
+.wallpaper-form .ui-select-panel { z-index: 24; }
 .image-drop {
   display: flex;
   align-items: center;
@@ -3381,6 +3396,10 @@ button.sm {
 }
 .prov-action-btn[hidden] {
   display: none !important;
+}
+.prov-input-with-action .ui-select {
+  flex: 1;
+  min-width: 0;
 }
 .prov-probe-status {
   margin: 2px 0 0;

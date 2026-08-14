@@ -32,21 +32,33 @@
     inset 0 0 0 1px color-mix(in srgb, var(--skins-line, #c8e89a) 35%, transparent);
 
   color-scheme: light !important;
-  --shiguang-ink: #2d3a28;
-  --shiguang-grass: #7ec850;
+  --skins-accent: #7ec850;
+  --skins-text: #2d3a28;
+  --skins-ink: #2d3a28;
+  --skins-canvas: #f4fce8;
+  --skins-sidebar: #eef8dc;
+  --skins-surface-raised: rgba(255, 252, 246, 0.92);
+  --skins-line: rgba(126, 200, 80, 0.42);
+  --skins-font: "Microsoft YaHei UI", "Microsoft YaHei", system-ui, sans-serif;
+  --skins-radius: 20px;
+  --skins-overlay: 0;
+  --skins-surface-alpha: 0.92;
+  --skins-art-fit: cover;
+  --shiguang-ink: var(--skins-ink);
+  --shiguang-grass: var(--skins-accent);
   --shiguang-leaf: #5a9e38;
   --shiguang-sun: #f5d03a;
-  --shiguang-meadow: #f4fce8;
-  --shiguang-pearl: rgba(255, 252, 246, 0.92);
-  --shiguang-line: rgba(126, 200, 80, 0.42);
+  --shiguang-meadow: var(--skins-canvas);
+  --shiguang-pearl: var(--skins-surface-raised);
+  --shiguang-line: var(--skins-line);
 }
 
 html.codex-shiguang-skin body {
   background:
     radial-gradient(circle at 78% 2%, rgba(245, 208, 58, 0.28), transparent 25%),
-    linear-gradient(135deg, #f7fcef 0%, #eef8dc 48%, #e2f2c8 100%) !important;
-  color: var(--shiguang-ink) !important;
-  font-family: "Microsoft YaHei UI", "Microsoft YaHei", system-ui, sans-serif !important;
+    linear-gradient(135deg, var(--skins-canvas) 0%, #eef8dc 48%, #e2f2c8 100%) !important;
+  color: var(--skins-text) !important;
+  font-family: var(--skins-font, "Microsoft YaHei UI", "Microsoft YaHei", system-ui, sans-serif) !important;
 }
 
 html.codex-shiguang-skin body::before {
@@ -255,10 +267,14 @@ html.codex-shiguang-skin.skins-art-standard main.main-surface.shiguang-home-shel
   background-color: transparent !important;
   background-image:
     linear-gradient(90deg, rgba(90, 140, 50, 0.05), rgba(245, 208, 58, 0.04)),
+    linear-gradient(
+      rgb(0 0 0 / var(--skins-overlay, 0)),
+      rgb(0 0 0 / var(--skins-overlay, 0))
+    ),
     var(--skins-art) !important;
   background-repeat: no-repeat !important;
-  background-size: 100% 100%, auto 300% !important;
-  background-position: center, right 22% !important;
+  background-size: 100% 100%, auto, var(--skins-art-fit, auto 300%) !important;
+  background-position: center, center, var(--skins-art-position, right 22%) !important;
   box-shadow:
     0 14px 34px rgba(70, 110, 50, 0.16),
     inset 0 0 0 4px rgba(255, 255, 255, 0.2) !important;

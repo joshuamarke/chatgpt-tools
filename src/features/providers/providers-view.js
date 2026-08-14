@@ -30,6 +30,7 @@
   /** @type {Array<{id:string,ownedBy?:string}>} */
   let fetchedModels = [];
   let probeBusy = false;
+  let importBusy = false;
   let fetchModelsSeq = 0;
 
   /**
@@ -1298,6 +1299,7 @@
       "provFormWireApi",
       "provFormReasoning",
       "provFormApiBackend",
+      "provFormModel",
     ].forEach((id) => {
       const el = $(id);
       if (el) window.UiSelect.refresh(el);
@@ -1337,9 +1339,8 @@
     const reasoning = $("provFormReasoning");
     if (reasoning) reasoning.value = "high";
 
-    // Grok-specific defaults from preset
+    // Grok-specific defaults from preset: identity = supplier name, not upstream id
     if (isGrok()) {
-      setField("provFormProfile", p.model || "grok-4.5");
       const backend = $("provFormApiBackend");
       if (backend) {
         backend.value =
@@ -1412,13 +1413,13 @@
     const modelLabel = $("provFormModelLabel");
     const modelHint = $("provFormModelHint");
     if (modelLabel) {
-      modelLabel.textContent = isGrok() ? "上游模型 id" : "模型";
+      modelLabel.textContent = isGrok() ? "模型 id" : "模型";
     }
     if (modelHint) {
       modelHint.hidden = false;
       if (isGrok()) {
         modelHint.textContent =
-          "写入 [model.*].model。可手填；点右侧「拉取模型」获取列表并填入第一项。";
+          "默认调用 API 的模型 id（[model.<id>].model）。拉取成功后点开下拉可选全部模型；也可搜索或回车手填。身份默认用供应商名，选择器显示名与此 id 一致。";
       } else {
         modelHint.textContent =
           "默认使用模型。桌面/CLI 可选列表 = 下方「模型映射」全量（须含 DeepSeek/Claude/Gemini/Grok 等实际要用的 id）。";
@@ -1429,7 +1430,7 @@
     if (wire) wire.disabled = lock || isGrok();
     const reasoning = $("provFormReasoning");
     if (reasoning) reasoning.disabled = lock || isGrok();
-    ["provFormProfile", "provFormApiBackend", "provFormContextWindow"].forEach(
+    ["provFormApiBackend", "provFormContextWindow"].forEach(
       (id) => {
         const el = $(id);
         if (el) el.disabled = lock || !isGrok();
@@ -1468,7 +1469,49 @@
     }
   }
 
+  function setModelSelect(value, extraIds) {
+    const sel = $("provFormModel");
+    if (!sel) return;
+    const selected = String(value || "").trim();
+    const seen = new Set();
+    const options = [];
+    const push = (id) => {
+      const v = String(id || "").trim();
+      if (!v || seen.has(v)) return;
+      seen.add(v);
+      options.push({ value: v, label: v });
+    };
+    // Fetched list is authoritative: never keep leftover / hardcoded ids.
+    if (Array.isArray(extraIds)) {
+      extraIds.forEach(push);
+    } else {
+      push(selected);
+    }
+    if (!options.length) {
+      options.push({ value: "", label: "选择或搜索模型" });
+    }
+    const next =
+      selected && options.some((o) => o.value === selected)
+        ? selected
+        : options[0].value;
+    if (window.UiSelect?.setOptions) {
+      window.UiSelect.setOptions(sel, options, next);
+    } else {
+      sel.innerHTML = options
+        .map(
+          (o) =>
+            `<option value="${escapeHtml(o.value)}">${escapeHtml(o.label)}</option>`
+        )
+        .join("");
+      sel.value = next;
+    }
+  }
+
   function setField(id, value) {
+    if (id === "provFormModel") {
+      setModelSelect(value);
+      return;
+    }
     const el = $(id);
     if (el) el.value = value ?? "";
   }
@@ -1511,7 +1554,6 @@
       "provFormApiKey",
       "provFormWebsite",
       "provFormContextWindow",
-      "provFormProfile",
     ].forEach((id) => markFieldError(id, false));
   }
 
@@ -1603,10 +1645,6 @@
         : "high";
     }
 
-    setField(
-      "provFormProfile",
-      detail?.profile || detail?.model || "grok-4.5"
-    );
     const backend = $("provFormApiBackend");
     if (backend) {
       const b = (detail?.apiBackend || "responses").toLowerCase();
@@ -1636,10 +1674,6 @@
       }
     }
 
-    const modelInput = $("provFormModel");
-    if (modelInput) {
-      modelInput.placeholder = isGrok() ? "grok-4.5" : "gpt-5.5";
-    }
     const baseInput = $("provFormBaseUrl");
     if (baseInput && mode === "add" && !detail?.baseUrl) {
       baseInput.placeholder = isGrok()
@@ -1655,7 +1689,6 @@
       "provFormConfigToml",
       "provFormWireApi",
       "provFormReasoning",
-      "provFormProfile",
       "provFormApiBackend",
       "provFormContextWindow",
       "provFormUserAgent",
@@ -1959,11 +1992,11 @@
     }
   }
 
-  /** Clear model datalist suggestions; keep current free-text value. */
+  /** Clear fetched model suggestions; keep the current model selection. */
   function clearFetchedModels() {
     fetchedModels = [];
-    const list = $("provFormModelList");
-    if (list) list.innerHTML = "";
+    const current = ($("provFormModel")?.value || "").trim();
+    if (current) setModelSelect(current);
   }
 
   /**
@@ -2037,7 +2070,7 @@
   }
 
   /**
-   * Fill editable model input + datalist suggestions (id only, no ownedBy suffix).
+   * Fill the shared UiSelect with fetched model ids (same control as api_backend).
    * For Codex, also project the full list into the model-mapping table
    * (catalog must contain every model that should appear in /model).
    * @param {any} models
@@ -2048,16 +2081,12 @@
     const selectFirst = opts?.selectFirst !== false;
     const fillCatalog = opts?.fillCatalog !== false;
     fetchedModels = normalizeFetchedModels(models);
-    const list = $("provFormModelList");
-    const input = $("provFormModel");
-    if (list) {
-      // Only model id — no "· openai" / ownedBy suffix.
-      list.innerHTML = fetchedModels
-        .map((m) => `<option value="${escapeHtml(m.id)}"></option>`)
-        .join("");
-    }
-    if (selectFirst && fetchedModels.length && input) {
-      input.value = fetchedModels[0].id;
+    const ids = fetchedModels.map((m) => m.id);
+    const current = ($("provFormModel")?.value || "").trim();
+    const selected =
+      selectFirst && ids.length ? ids[0] : current || ids[0] || "";
+    setModelSelect(selected, ids);
+    if (ids.length) {
       markStructuredEdit();
       markFieldError("provFormModel", false);
     }
@@ -2293,7 +2322,6 @@
     )
       ? reasoningRaw
       : "high";
-    const profile = ($("provFormProfile")?.value || "").trim() || null;
     const backendRaw = ($("provFormApiBackend")?.value || "responses").trim();
     const apiBackend =
       backendRaw === "chat" || backendRaw === "chat_completions"
@@ -2344,7 +2372,8 @@
       wireApi: isGrok() || formIsOfficial || useConfigToml ? null : wireApi,
       reasoningEffort:
         isGrok() || formIsOfficial || useConfigToml ? null : reasoningEffort,
-      profile: !isGrok() || formIsOfficial || useConfigToml ? null : profile,
+      profile: null,
+      modelDisplayName: null,
       apiBackend:
         !isGrok() || formIsOfficial || useConfigToml ? null : apiBackend,
       contextWindow:
@@ -2477,6 +2506,7 @@
         wireApi: req.wireApi,
         reasoningEffort: req.reasoningEffort,
         profile: req.profile,
+        modelDisplayName: req.modelDisplayName,
         apiBackend: req.apiBackend,
         contextWindow: req.contextWindow,
         customUserAgent: req.customUserAgent,
@@ -2589,20 +2619,27 @@
   }
 
   async function onImportLive() {
+    if (importBusy) return;
     const ok = await confirm({
       title: "从本机配置导入",
       message: isGrok()
-        ? "读取 Grok 本机配置，另存为一条供应商档案（不会自动启用）。"
-        : "读取 Codex 本机配置，另存为一条供应商档案（不会自动启用）。",
+        ? "读取 Grok 本机配置，另存为一条供应商档案（不会自动启用）。同一渠道已导入过则不会再创建。"
+        : "读取 Codex 本机配置，另存为一条供应商档案（不会自动启用）。同一渠道已导入过则不会再创建。",
       confirmText: "导入",
     });
     if (!ok) return;
+    const btn = $("btnProvImportLive");
+    importBusy = true;
+    if (btn) btn.disabled = true;
     try {
       const created = await window.providerAPI.importLive(app);
       toast(`已导入：${created?.name || "新供应商"}`, "ok");
       await loadList();
     } catch (err) {
       toast(err?.message || String(err), "error");
+    } finally {
+      importBusy = false;
+      if (btn) btn.disabled = false;
     }
   }
 
@@ -2859,7 +2896,6 @@
       "provFormModel",
       "provFormApiKey",
       "provFormWebsite",
-      "provFormProfile",
       "provFormContextWindow",
     ].forEach((id) => {
       $(id)?.addEventListener("input", () => {
@@ -2867,8 +2903,6 @@
         clearFormError();
         if (
           id === "provFormBaseUrl" ||
-          id === "provFormModel" ||
-          id === "provFormProfile" ||
           id === "provFormContextWindow"
         ) {
           markStructuredEdit();
@@ -2948,8 +2982,8 @@
         markStructuredEdit();
       }
     });
-    // Wire/reasoning/apiBackend selects: keep ui-select label in sync after programmatic sets
-    ["provFormWireApi", "provFormReasoning", "provFormApiBackend"].forEach(
+    // Wire/reasoning/apiBackend/model selects: keep ui-select label in sync after programmatic sets
+    ["provFormWireApi", "provFormReasoning", "provFormApiBackend", "provFormModel"].forEach(
       (id) => {
         $(id)?.addEventListener("change", () => {
           if (window.UiSelect?.refresh) window.UiSelect.refresh($(id));

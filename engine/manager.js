@@ -1019,27 +1019,8 @@ function createWallpaperSkin({
     }
     // Merge art layout onto template defaults; position select drives focusX
     const baseArt = manifest.art && typeof manifest.art === "object" ? manifest.art : {};
-    const resolvedSafeArea =
-      safeAreaChoice !== "auto"
-        ? safeAreaChoice
-        : posX === "left"
-          ? "right"
-          : posX === "right"
-            ? "left"
-            : baseArt.safeArea || "center";
-    const resolvedTaskMode =
-      taskModeChoice !== "auto" ? taskModeChoice : baseArt.taskMode || "auto";
-    manifest.art = {
-      focusX: inferredFocusX,
-      focusY:
-        focusY != null && Number.isFinite(Number(focusY))
-          ? inferredFocusY
-          : baseArt.focusY ?? inferredFocusY,
-      safeArea: resolvedSafeArea,
-      taskMode: resolvedTaskMode,
-      fit: validFit,
-      position: validPosition,
-    };
+    if (baseArt.mode) manifest.art.mode = baseArt.mode;
+    if (baseArt.paint) manifest.art.paint = baseArt.paint;
     if (/^#[0-9a-f]{6}$/i.test(String(accent))) {
       manifest.accent = String(accent);
     }
@@ -1052,14 +1033,13 @@ function createWallpaperSkin({
     }
     // else: leave template desktopTheme.appearanceTheme untouched
     const root = manifest.markers.rootClass;
-    const artVar = manifest.markers.artVar || "--skins-art";
     const cssPath = path.join(tmp, manifest.assets.css);
     const css = fs.readFileSync(cssPath, "utf8");
     const hex = (value, fallback) =>
       /^#[0-9a-f]{6}$/i.test(String(value)) ? String(value) : fallback;
     const safeRadius = Math.max(0, Math.min(32, Number(radius) || 16));
     const safeOverlay = Math.max(0, Math.min(70, Number(overlay) || 0));
-    const safeOpacity = Math.max(55, Math.min(100, Number(opacity) || 92));
+    const safeOpacity = Math.max(0, Math.min(100, Number(opacity) || 92));
     const fonts = {
       system: 'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
       sans: '"Inter", "PingFang SC", "Microsoft YaHei", sans-serif',
@@ -1067,62 +1047,49 @@ function createWallpaperSkin({
       mono: '"SF Mono", "Cascadia Code", monospace',
     };
     const fontStack = fonts[font] || fonts.system;
-    // Designer overlay: token + fit/position only.
-    // Do NOT repaint main.main-surface with cover art — that breaks template
-    // full-window wallpaper (framework paints body; skins like jiuyi own main).
+    const accentCss = hex(accent, manifest.accent || "#8b7cff");
+    const bgCss = hex(background, "#f7f8fc");
+    const textCss = hex(text, "#202536");
+    const panelCss = hex(panel, "#ffffff");
+    const surfaceAlpha = safeOpacity / 100;
+    const overlayAlpha = safeOverlay / 100;
+    // Same :root --skins-* contract as author CSS. Do not hammer layout.
     const customCss = `
 
-/* Custom Skin Designer: overrides on top of template «${base.id}». */
-html.${root} {
-  --designer-accent: ${hex(accent, manifest.accent || "#8b7cff")};
-  --designer-bg: ${hex(background, "#f7f8fc")};
-  --designer-text: ${hex(text, "#202536")};
-  --designer-panel: ${hex(panel, "#ffffff")};
-  --designer-panel-alpha: ${safeOpacity / 100};
-  --designer-radius: ${safeRadius}px;
-  --designer-overlay: ${safeOverlay / 100};
+/* Custom skin tokens — same :root --skins-* contract as the template. */
+:root.${root} {
+  --skins-accent: ${accentCss};
+  --skins-text: ${textCss};
+  --skins-ink: ${textCss};
+  --skins-canvas: ${bgCss};
+  --skins-sidebar: color-mix(in srgb, ${panelCss} 70%, ${bgCss});
+  --skins-surface-alpha: ${surfaceAlpha};
+  --skins-surface-raised: color-mix(in srgb, ${panelCss} calc(var(--skins-surface-alpha) * 100%), transparent);
+  --skins-line: color-mix(in srgb, ${accentCss} 32%, ${textCss});
+  --skins-font: ${fontStack};
+  --skins-radius: ${safeRadius}px;
+  --skins-overlay: ${overlayAlpha};
+  --skins-art-fit: ${validFit};
   --skins-art-position: ${validPosition};
-  --skins-accent: var(--designer-accent);
-  --skins-text: var(--designer-text);
-  --skins-canvas: var(--designer-bg);
-  --skins-surface-raised: color-mix(in srgb, var(--designer-panel) calc(var(--designer-panel-alpha) * 100%), transparent);
+  --skins-suggest-card-color: ${textCss};
+  --skins-suggest-card-bg: color-mix(in srgb, ${panelCss} calc(var(--skins-surface-alpha) * 28%), transparent);
+  --skins-suggest-card-radius: ${safeRadius}px;
+  --composer-border-radius: ${safeRadius}px;
 }
-html.${root} body {
-  color: var(--designer-text) !important;
-  font-family: ${fontStack} !important;
-  background-color: var(--designer-bg) !important;
-  background-size: ${validFit} !important;
-  background-position: var(--skins-art-position, ${validPosition}) !important;
-  background-repeat: no-repeat !important;
-}
-/* Dim layer over wallpaper without replacing template layout */
-html.${root} body::after {
-  content: "";
-  position: fixed;
-  inset: 0;
-  z-index: 0;
-  pointer-events: none;
-  background: rgba(0,0,0,${safeOverlay / 100}) !important;
-}
-/* Soften panels; keep template background-image / framework wide-art rules */
-html.${root} main.main-surface {
-  border-radius: var(--designer-radius) !important;
-}
-html.${root}.skins-art-wide main.main-surface {
-  background-color: color-mix(in srgb, var(--designer-panel) calc(var(--designer-panel-alpha) * 100%), transparent) !important;
-}
-html.${root}.skins-art-standard main.main-surface {
-  background-color: color-mix(in srgb, var(--designer-panel) calc(var(--designer-panel-alpha) * 100%), transparent) !important;
-  background-size: ${validFit} !important;
-  background-position: var(--skins-art-position, ${validPosition}) !important;
-  background-repeat: no-repeat !important;
-}
-html.${root} button, html.${root} [role="button"] { border-radius: var(--designer-radius) !important; }
-html.${root} a, html.${root} [data-state="active"], html.${root} [aria-current="page"] {
-  color: var(--designer-accent) !important;
-}
-/* Runtime injects art via ${artVar} (and --skins-art alias). */
 `;
+    manifest.tokens = {
+      accent: accentCss,
+      text: textCss,
+      ink: textCss,
+      canvas: bgCss,
+      panel: panelCss,
+      font: fontStack,
+      radius: `${safeRadius}px`,
+      overlay: overlayAlpha,
+      surfaceAlpha,
+      artFit: validFit,
+      artPosition: validPosition,
+    };
     fs.writeFileSync(cssPath, `${css}${customCss}`);
     // Ensure plugin.json exists (copy from base or minimal)
     const pluginPath = path.join(tmp, "assets", "plugin.json");

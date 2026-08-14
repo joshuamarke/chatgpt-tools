@@ -22,21 +22,33 @@
     inset 0 0 0 1px color-mix(in srgb, var(--skins-line, #c8cad4) 35%, transparent);
 
   color-scheme: light !important;
-  --dream-ink: #4c2364;
+  --skins-accent: #b65cff;
+  --skins-text: #4c2364;
+  --skins-ink: #4c2364;
+  --skins-canvas: #fff9fc;
+  --skins-sidebar: #f3eafd;
+  --skins-surface-raised: rgba(255, 251, 253, 0.92);
+  --skins-line: rgba(221, 122, 184, 0.42);
+  --skins-font: "Microsoft YaHei UI", "Microsoft YaHei", system-ui, sans-serif;
+  --skins-radius: 20px;
+  --skins-overlay: 0;
+  --skins-surface-alpha: 0.92;
+  --skins-art-fit: cover;
+  --dream-ink: var(--skins-ink);
   --dream-purple: #8b3dce;
-  --dream-violet: #b45cff;
+  --dream-violet: var(--skins-accent);
   --dream-pink: #ff73bd;
-  --dream-blush: #fff3f9;
-  --dream-pearl: rgba(255, 251, 253, .92);
-  --dream-line: rgba(221, 122, 184, .42);
+  --dream-blush: var(--skins-canvas);
+  --dream-pearl: var(--skins-surface-raised);
+  --dream-line: var(--skins-line);
 }
 
 html.codex-dream-skin body {
   background:
     radial-gradient(circle at 78% 2%, rgba(255, 184, 215, .42), transparent 25%),
-    linear-gradient(135deg, #fff9fc 0%, #fceef8 48%, #f3eafd 100%) !important;
-  color: var(--dream-ink) !important;
-  font-family: "Microsoft YaHei UI", "Microsoft YaHei", system-ui, sans-serif !important;
+    linear-gradient(135deg, var(--skins-canvas) 0%, #fceef8 48%, #f3eafd 100%) !important;
+  color: var(--skins-text) !important;
+  font-family: var(--skins-font, "Microsoft YaHei UI", "Microsoft YaHei", system-ui, sans-serif) !important;
 }
 
 html.codex-dream-skin body::before {
@@ -248,10 +260,14 @@ html.codex-dream-skin.skins-art-standard main.main-surface.dream-home-shell
   background-color: transparent !important;
   background-image:
     linear-gradient(90deg, rgba(113, 50, 178, 0.06), rgba(255, 129, 196, 0.05)),
+    linear-gradient(
+      rgb(0 0 0 / var(--skins-overlay, 0)),
+      rgb(0 0 0 / var(--skins-overlay, 0))
+    ),
     var(--skins-art) !important;
   background-repeat: no-repeat !important;
-  background-size: 100% 100%, auto 300% !important;
-  background-position: center, right 22% !important;
+  background-size: 100% 100%, auto, var(--skins-art-fit, auto 300%) !important;
+  background-position: center, center, var(--skins-art-position, right 22%) !important;
   box-shadow:
     0 14px 34px rgba(150, 60, 151, 0.2),
     inset 0 0 0 4px rgba(255, 255, 255, 0.2) !important;

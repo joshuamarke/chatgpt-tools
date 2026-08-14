@@ -287,6 +287,12 @@ pub fn normalize_theme_config(manifest: &Value) -> Result<Value, PayloadError> {
         &["auto", "ambient", "banner", "off"],
         "auto",
     )?;
+    let art_fit = normalized_choice(
+        merged_art.get("fit"),
+        "art.fit",
+        &["cover", "contain"],
+        "cover",
+    )?;
     let skip = theme_block
         .get("skipAnalysis")
         .and_then(|v| v.as_bool())
@@ -313,6 +319,7 @@ pub fn normalize_theme_config(manifest: &Value) -> Result<Value, PayloadError> {
             "focusY": focus_y,
             "safeArea": safe_area,
             "taskMode": task_mode,
+            "fit": art_fit,
         },
         "skipAnalysis": skip,
     }))

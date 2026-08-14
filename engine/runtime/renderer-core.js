@@ -103,6 +103,7 @@
     "--skins-surface-raised",
     "--skins-text",
     "--skins-line",
+    "--skins-art-fit",
     // legacy engine vars
     "--dream-art",
     "--dream-art-position",
@@ -217,6 +218,7 @@
       taskMode: taskModeChoice,
       artMode,
       artPaint,
+      artFit: artCfg.fit === "contain" || artCfg.fit === "cover" ? artCfg.fit : "cover",
       focusX: hasNumber(artCfg.focusX) ? clamp(artCfg.focusX) : null,
       focusY: hasNumber(artCfg.focusY) ? clamp(artCfg.focusY) : null,
       accent:
@@ -482,6 +484,7 @@
       "--skins-accent",
       "--skins-accent-ink",
       "--skins-image-luma",
+      "--skins-art-fit",
       "--dream-art",
       "--dream-art-position",
       "--dream-focus-x",
@@ -845,6 +848,7 @@
       "--skins-accent",
       "--skins-accent-ink",
       "--skins-image-luma",
+      "--skins-art-fit",
       "--dream-art-position",
       "--dream-focus-x",
       "--dream-focus-y",
@@ -976,19 +980,28 @@
     setStyleProperty(root, "--skins-accent", accent);
     setStyleProperty(root, "--skins-accent-ink", accentInk);
     setStyleProperty(root, "--skins-image-luma", Number(profile.luma || 0.32).toFixed(3));
-    // Baseline tokens for shared immersive-skin.css (skins may override in their CSS).
+    const artFit =
+      config.artFit === "contain" || config.artFit === "cover" ? config.artFit : "cover";
+    setStyleProperty(root, "--skins-art-fit", artFit);
+    // Color / surface tokens belong to skin CSS (`:root.<root>`).
+    // Only fill gaps so skins without a contract still get a readable baseline.
+    // Never overwrite author or designer --skins-* with generic light/dark.
+    const applyFallbackToken = (name, value) => {
+      const existing = getComputedStyle(root).getPropertyValue(name).trim();
+      if (!existing) setStyleProperty(root, name, value);
+    };
     if (appearance === "dark") {
-      setStyleProperty(root, "--skins-canvas", "rgb(26 28 36)");
-      setStyleProperty(root, "--skins-sidebar", "rgb(18 20 26)");
-      setStyleProperty(root, "--skins-surface-raised", "rgb(37 40 48)");
-      setStyleProperty(root, "--skins-text", "rgb(238 240 246)");
-      setStyleProperty(root, "--skins-line", "rgb(72 76 90)");
+      applyFallbackToken("--skins-canvas", "rgb(26 28 36)");
+      applyFallbackToken("--skins-sidebar", "rgb(18 20 26)");
+      applyFallbackToken("--skins-surface-raised", "rgb(37 40 48)");
+      applyFallbackToken("--skins-text", "rgb(238 240 246)");
+      applyFallbackToken("--skins-line", "rgb(72 76 90)");
     } else {
-      setStyleProperty(root, "--skins-canvas", "rgb(247 248 252)");
-      setStyleProperty(root, "--skins-sidebar", "rgb(240 241 246)");
-      setStyleProperty(root, "--skins-surface-raised", "rgb(255 255 255)");
-      setStyleProperty(root, "--skins-text", "rgb(32 37 54)");
-      setStyleProperty(root, "--skins-line", "rgb(200 202 212)");
+      applyFallbackToken("--skins-canvas", "rgb(247 248 252)");
+      applyFallbackToken("--skins-sidebar", "rgb(240 241 246)");
+      applyFallbackToken("--skins-surface-raised", "rgb(255 255 255)");
+      applyFallbackToken("--skins-text", "rgb(32 37 54)");
+      applyFallbackToken("--skins-line", "rgb(200 202 212)");
     }
     setAttribute(root, "data-chatgpt-tools-skin", markers.id || ROOT_CLASS);
     setAttribute(root, "data-skins-shell", appearance);

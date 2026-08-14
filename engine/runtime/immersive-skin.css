@@ -29,7 +29,8 @@
  *   skins-theme-light | skins-theme-dark
  *   skins-task-ambient | skins-task-banner | skins-task-off
  *   skins-safe-* , skins-focus-*
- *   --skins-art , --skins-art-position , --skins-accent , --skins-text , …
+ *   --skins-art , --skins-art-position , --skins-art-fit , --skins-overlay
+ *   --skins-accent , --skins-text , --skins-font , --skins-radius , --skins-surface-alpha , …
  *   data-skins-art-mode = wallpaper | token-only | none
  *   data-skins-art-paint = body | none | custom
  *     body   — framework paints full-window wallpaper on body (default)
@@ -42,6 +43,10 @@
 
 /* ---- Shared readability tokens (skins override via --skins-* on :root) ---- */
 html:is(.skins-art-wide, .skins-art-standard) {
+  /* Optional contract tokens — skins / designer override on :root.<root> */
+  --skins-overlay: 0;
+  --skins-art-fit: cover;
+  --skins-surface-alpha: 1;
   /* Solid primary buttons (创建 / send): always light ink on filled bg */
   --cg-primary-button-ink: #ffffff;
   --cg-immersive-edge: color-mix(in srgb, var(--skins-canvas, #f7f8fc) 46%, transparent);
@@ -71,7 +76,7 @@ html:is(.skins-art-wide, .skins-art-standard) {
    */
   --skins-suggest-card-color: var(--cg-text);
   --skins-suggest-card-bg: color-mix(in srgb, var(--cg-surface-raised) 28%, transparent);
-  --skins-suggest-card-radius: 14px;
+  --skins-suggest-card-radius: var(--skins-radius, 14px);
   --skins-suggest-card-border: var(--cg-immersive-line);
   --skins-suggest-card-shadow:
     0 8px 22px color-mix(in srgb, var(--skins-canvas, #f7f8fc) 18%, transparent),
@@ -162,6 +167,10 @@ html.skins-theme-dark {
  * Engine only: ink + clickability. Never set position/top/z-index/transform.
  * Appearance (bg / shadow / border / text-shadow) belongs in each skin CSS.
  */
+html:is(.skins-art-wide, .skins-art-standard) body {
+  font-family: var(--skins-font, inherit);
+}
+
 html:is(.skins-art-wide, .skins-art-standard) main.main-surface > header {
   /* position / top / z-index not set here — leave native fixed header geometry */
   color: var(--cg-text) !important;
@@ -332,9 +341,14 @@ html.skins-art-wide[data-skins-art-paint="body"]:is(.skins-task-ambient, .skins-
   )
   body {
   background-color: var(--skins-canvas, #f7f8fc) !important;
-  background-image: var(--skins-art) !important;
-  background-position: var(--skins-art-position, 50% 50%) !important;
-  background-size: cover !important;
+  background-image:
+    linear-gradient(
+      rgb(0 0 0 / var(--skins-overlay, 0)),
+      rgb(0 0 0 / var(--skins-overlay, 0))
+    ),
+    var(--skins-art) !important;
+  background-position: center, var(--skins-art-position, 50% 50%) !important;
+  background-size: auto, var(--skins-art-fit, cover) !important;
   background-repeat: no-repeat !important;
   background-attachment: fixed !important;
 }
@@ -521,7 +535,7 @@ html.skins-art-wide .composer-surface-chrome {
   color: var(--cg-text) !important;
   background: var(--cg-immersive-composer) !important;
   border: 0 !important;
-  border-radius: var(--composer-border-radius, 1.25rem) !important;
+  border-radius: var(--composer-border-radius, var(--skins-radius, 1.25rem)) !important;
   box-shadow:
     0 10px 30px color-mix(in srgb, var(--skins-canvas, #f7f8fc) 20%, transparent),
     inset 0 0 0 1px var(--cg-immersive-line) !important;
@@ -541,7 +555,7 @@ html:is(.skins-art-wide, .skins-art-standard) [class*="home-utility"],
 html:is(.skins-art-wide, .skins-art-standard) [class*="homeUtilityBar"],
 html:is(.skins-art-wide, .skins-art-standard) [class*="_homeUtilityBar_"] {
   border: 1px solid var(--cg-immersive-line) !important;
-  border-radius: 18px !important;
+  border-radius: var(--skins-radius, 18px) !important;
   background: var(--cg-immersive-composer) !important;
   box-shadow: none !important;
 }
