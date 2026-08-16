@@ -90,6 +90,13 @@ check(
   "应用更新走 GitHub updater",
   /checkAppUpdate/.test(appJs) && /plugin:updater\|check/.test(skinApiJs)
 );
+const nsisInstaller = read("src-tauri/nsis/installer.nsi");
+check(
+  "Windows /UPDATE 原地覆盖当前运行目录",
+  /PreferRunningAppDirOnUpdate/.test(nsisInstaller) &&
+    /UpdateInstallDir/.test(nsisInstaller) &&
+    /GetRunningAppInstallDir/.test(nsisInstaller)
+);
 
 // —— 确认框 / 更新 ——
 check("确认框 confirm-actions", /id="confirmModal"[\s\S]*?confirm-actions/.test(html));

@@ -1392,8 +1392,12 @@
     const hint = $("provFormAdvancedHint");
     if (!hint) return;
     hint.textContent = advancedDirty
-      ? "已修改 config.toml：保存时会把此处内容叠加到完整配置上（保留 MCP / desktop 等未改段落），并优先于上方结构化字段。"
-      : "显示完整配置（含 MCP 等）。未改动时保存仍以结构化字段为准，并自动保留其余段落。";
+      ? isGrok()
+        ? "已修改 config.toml：保存只提取 [models].default 与 [model.\"身份\"]，不会覆盖 MCP / ui 等其它段落。"
+        : "已修改 config.toml：保存只提取 model / model_provider / model_providers.<id>，不会覆盖 MCP / desktop 等其它段落。"
+      : isGrok()
+        ? "此处为供应商路由片段。启用时只改 [models].default 与对应 [model.\"身份\"]，其它段落保持本机原样。"
+        : "此处为供应商路由片段。启用时只改 model / model_provider / model_providers.<id>，其它段落保持本机原样。";
   }
 
   function markStructuredEdit() {

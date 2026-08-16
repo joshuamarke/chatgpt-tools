@@ -185,7 +185,7 @@ jobs:
             "ChatGPT Tools portable build",
             "1. Extract the whole folder",
             "2. Run ChatGPT Tools.exe",
-            "3. In-app update targets the NSIS installer build; portable users re-download zip",
+            "3. In-app update overwrites this folder (same location)",
             "Version: $version"
           ) | Set-Content -Path (Join-Path $portableApp "readme.txt") -Encoding UTF8
 

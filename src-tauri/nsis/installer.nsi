@@ -8,6 +8,12 @@ Unicode true
 
 !include MUI2.nsh
 !include FileFunc.nsh
+!ifndef GetFileName
+  !insertmacro GetFileName
+!endif
+!ifndef GetParent
+  !insertmacro GetParent
+!endif
 !include x64.nsh
 !include WordFunc.nsh
 !include "StrFunc.nsh"
@@ -413,10 +419,11 @@ Function .onInit
     Call RestorePreviousInstallLocation
   ${EndIf}
 
-
   !if "${INSTALLMODE}" == "both"
     !insertmacro MULTIUSER_INIT
   !endif
+
+  Call PreferRunningAppDirOnUpdate
 FunctionEnd
 
 
@@ -723,6 +730,106 @@ Function RestorePreviousInstallLocation
   ReadRegStr $4 SHCTX "${MANUPRODUCTKEY}" ""
   StrCmp $4 "" +2 0
     StrCpy $INSTDIR $4
+FunctionEnd
+
+; In-app updater (/UPDATE): install over the directory of the running exe
+; so portable unzip-and-run copies stay in place (not %LOCALAPPDATA%).
+Function GetRunningAppInstallDir
+  ; $R9 = install dir or empty. Native snapshot so this still works if the
+  ; updater already called ShellExecute and is about to exit.
+  StrCpy $R9 ""
+  Push $0
+  Push $1
+  Push $2
+  Push $3
+  Push $4
+  Push $5
+  Push $6
+  Push $7
+
+  System::Call 'kernel32::GetCurrentProcessId() i.r0'
+  System::Call 'kernel32::CreateToolhelp32Snapshot(i 2, i 0) p.r1'
+  ${If} $1 P= 0
+  ${OrIf} $1 P= -1
+    Goto get_running_done
+  ${EndIf}
+
+  System::Alloc 1024
+  Pop $2
+  System::Call "*$2(i 1024)"
+  System::Call 'kernel32::Process32FirstW(p r1, p r2) i.r3'
+
+  enum_proc:
+    IntCmp $3 0 enum_done
+    ; PROCESSENTRY32[W].th32ProcessID is at offset 8 on x86 and x64
+    System::Call "*$2(&i4, &i4, &i4 .r4)"
+    IntCmp $4 $0 enum_next
+
+    System::Call 'kernel32::OpenProcess(i 0x1000, i 0, i r4) p.r5'
+    ${If} $5 P= 0
+      System::Call 'kernel32::OpenProcess(i 0x0410, i 0, i r4) p.r5'
+    ${EndIf}
+    ${If} $5 P= 0
+      Goto enum_next
+    ${EndIf}
+
+    StrCpy $6 ${NSIS_MAX_STRLEN}
+    System::Call 'kernel32::QueryFullProcessImageName(p r5, i 0, t .r7, *i r6r6) i.r6'
+    System::Call 'kernel32::CloseHandle(p r5)'
+    IntCmp $6 0 enum_next
+
+    ${GetFileName} $7 $5
+    StrCmp $5 "${MAINBINARYNAME}.exe" 0 enum_next
+    ${GetParent} $7 $R9
+    Goto enum_done
+
+    enum_next:
+    System::Call "*$2(i 1024)"
+    System::Call 'kernel32::Process32NextW(p r1, p r2) i.r3'
+    Goto enum_proc
+
+  enum_done:
+  System::Free $2
+  System::Call 'kernel32::CloseHandle(p r1)'
+
+  get_running_done:
+  Pop $7
+  Pop $6
+  Pop $5
+  Pop $4
+  Pop $3
+  Pop $2
+  Pop $1
+  Pop $0
+FunctionEnd
+
+Function PreferRunningAppDirOnUpdate
+  ${GetOptions} $CMDLINE "/UPDATE" $0
+  IfErrors prefer_done
+
+  Call GetRunningAppInstallDir
+  ${If} $R9 != ""
+  ${AndIf} ${FileExists} "$R9\${MAINBINARYNAME}.exe"
+    StrCpy $INSTDIR $R9
+    Goto prefer_done
+  ${EndIf}
+
+  ; Portable first update: parent may have already exited; inherited CWD is
+  ; usually the folder the user double-clicked (Explorer launch).
+  System::Call 'kernel32::GetCurrentDirectory(i ${NSIS_MAX_STRLEN}, t .R9) i.r0'
+  ${If} $R9 != ""
+  ${AndIf} ${FileExists} "$R9\${MAINBINARYNAME}.exe"
+    StrCpy $INSTDIR $R9
+    Goto prefer_done
+  ${EndIf}
+
+  ReadRegStr $R9 HKCU "Software\ChatGPTTools" "UpdateInstallDir"
+  ${If} $R9 != ""
+  ${AndIf} ${FileExists} "$R9\${MAINBINARYNAME}.exe"
+    StrCpy $INSTDIR $R9
+  ${EndIf}
+
+  prefer_done:
 FunctionEnd
 
 Function SkipIfPassive

@@ -23,6 +23,9 @@ pub fn run() {
     std::env::set_var("CODEX_SKIN_ROOT", &root);
     // 状态目录名：%LOCALAPPDATA%\ChatGPTTools
     std::env::set_var("CODEX_SKIN_STATE_NAME", "ChatGPTTools");
+    // Windows 免安装包：记下当前 exe 目录，供 NSIS /UPDATE 原地覆盖（不要落到默认 LOCALAPPDATA）。
+    #[cfg(all(windows, not(debug_assertions)))]
+    persist_windows_update_install_dir();
     // Align cloud version filters with the package version (Cargo / tauri.conf).
     // Single source of truth — do not hardcode a second GUI version string.
     if std::env::var("CODEX_SKIN_APP_VERSION").is_err() {
@@ -236,6 +239,66 @@ pub fn run() {
                 proxy::shutdown_on_exit();
             }
         });
+}
+
+/// Remember the directory of the running exe so the next in-app NSIS update
+/// (`/UPDATE`) can overwrite this copy instead of `%LOCALAPPDATA%\ChatGPT Tools`.
+#[cfg(all(windows, not(debug_assertions)))]
+fn persist_windows_update_install_dir() {
+    let Ok(exe) = std::env::current_exe() else {
+        return;
+    };
+    let Some(dir) = exe.parent() else {
+        return;
+    };
+    let Some(dir) = normalize_windows_install_dir(&dir.to_string_lossy()) else {
+        return;
+    };
+    use std::os::windows::process::CommandExt;
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    let _ = std::process::Command::new("reg")
+        .args([
+            "add",
+            r"HKCU\Software\ChatGPTTools",
+            "/v",
+            "UpdateInstallDir",
+            "/t",
+            "REG_SZ",
+            "/d",
+            dir,
+            "/f",
+        ])
+        .creation_flags(CREATE_NO_WINDOW)
+        .output();
+}
+
+#[cfg(any(test, all(windows, not(debug_assertions))))]
+fn normalize_windows_install_dir(dir: &str) -> Option<&str> {
+    let dir = dir.strip_prefix(r"\\?\").unwrap_or(dir).trim();
+    let dir = dir.trim_end_matches(['\\', '/']);
+    if dir.is_empty() {
+        None
+    } else {
+        Some(dir)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::normalize_windows_install_dir;
+
+    #[test]
+    fn strips_extended_prefix_and_trailing_slash() {
+        assert_eq!(
+            normalize_windows_install_dir(r"\\?\D:\softs\chatgpt-tools\"),
+            Some(r"D:\softs\chatgpt-tools")
+        );
+        assert_eq!(
+            normalize_windows_install_dir(r"D:\softs\chatgpt-tools"),
+            Some(r"D:\softs\chatgpt-tools")
+        );
+        assert_eq!(normalize_windows_install_dir("   "), None);
+    }
 }
 
 fn resolve_app_root() -> std::path::PathBuf {

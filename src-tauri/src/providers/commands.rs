@@ -142,9 +142,10 @@ fn live_status_for(
                 "direct",
                 "drift",
                 false,
-                // Drift = routing (base_url / official shape), never default model alone.
+                // Codex: base_url / official shape (model id switch is not drift).
+                // Grok: [models].default identity + base_url (API .model switch is not drift).
                 if kind == AppKind::Grok {
-                    "供应商与本机配置不一致（渠道地址可能已在外部更改）".into()
+                    "供应商与本机配置不一致（默认模型身份或渠道地址可能已在外部更改）".into()
                 } else {
                     "供应商与本机配置不一致（渠道地址可能已在外部更改）".into()
                 },
@@ -339,11 +340,11 @@ pub fn get_provider(app: String, id: String) -> Result<ProviderDetail, String> {
         .and_then(|v| v.as_str())
         .unwrap_or("")
         .to_string();
-    // Codex: show full live-aware config in the advanced editor so users never
-    // only see a short routing template and wipe MCP/desktop on save.
+    // Advanced editor shows the routing fragment only (never the full live file).
     let config_toml = match kind {
         AppKind::Codex => codex::config_for_editor(&archive_toml),
-        AppKind::Grok => archive_toml,
+        AppKind::Grok => grok::extract_routing_fragment(&archive_toml)
+            .unwrap_or(archive_toml),
     };
     let (custom_user_agent, headers_json, body_json) = meta_form_fields(p);
     let model_catalog = model_catalog_rows(p);

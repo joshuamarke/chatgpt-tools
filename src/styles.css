@@ -4724,14 +4724,6 @@ button.sm {
   line-height: 1.55;
   color: #4a5568;
 }
-.about-ad-remote-body a {
-  color: #e86a9a;
-  text-decoration: none;
-  font-weight: 550;
-}
-.about-ad-remote-body a:hover {
-  text-decoration: underline;
-}
 .about-ad-remote-body img {
   max-width: 100%;
   height: auto;
