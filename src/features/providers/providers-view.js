@@ -408,7 +408,7 @@
         }
         if (p.wireApi) {
           chips.push(
-            `<span class="prov-meta-chip" title="wire_api">wire ${escapeHtml(p.wireApi)}</span>`
+            `<span class="prov-meta-chip" title="上游协议（Chat 需本地路由转换）">上游 ${escapeHtml(p.wireApi)}</span>`
           );
         }
         if (p.baseUrl) {
@@ -484,6 +484,7 @@
     const host = $("provRouteListenHost");
     const port = $("provRouteListenPort");
     const log = $("provRouteLogging");
+    const fill = $("provRoutePassthroughFill");
     const fo = $("provRouteAutoFailover");
     const retries = $("provRouteMaxRetries");
     const egress = $("provRouteEgressProxy");
@@ -491,6 +492,8 @@
     if (host && document.activeElement !== host) host.value = proxy.listenAddress || "127.0.0.1";
     if (port && document.activeElement !== port) port.value = String(proxy.listenPort || 18964);
     if (log) log.checked = proxy.enableLogging !== false;
+    // Default ON: missing / undefined → checked; only explicit false unchecks
+    if (fill) fill.checked = proxy.enablePassthroughFill !== false;
     // Default ON: missing / undefined → checked; only explicit false unchecks
     if (fo) fo.checked = listPayload?.autoFailoverEnabled !== false;
     if (egress && document.activeElement !== egress) {
@@ -555,6 +558,7 @@
       const host = ($("provRouteListenHost")?.value || "127.0.0.1").trim();
       const port = Number($("provRouteListenPort")?.value || 18964);
       const enableLogging = !!$("provRouteLogging")?.checked;
+      const enablePassthroughFill = !!$("provRoutePassthroughFill")?.checked;
       const egressProxy = ($("provRouteEgressProxy")?.value || "").trim();
       if (!Number.isFinite(port) || port < 1024 || port > 65535) {
         toast("端口需在 1024–65535", "error");
@@ -565,6 +569,7 @@
         listenAddress: host,
         listenPort: port,
         enableLogging,
+        enablePassthroughFill,
         logRetentionDays: Number(prevProxy.logRetentionDays) || 7,
         egressProxy,
       });
@@ -614,7 +619,6 @@
     hideModal($("provRouteModal"));
   }
 
-  // ── Request logs modal ─────────────────────────────────────────────────
   /** @type {{ page: number, pageSize: number, total: number, selectedId: string|null }} */
   const logsState = {
     page: 0,
@@ -1314,7 +1318,7 @@
       if (hint) {
         hint.textContent = isGrok()
           ? "选择常见渠道可自动填充 Base URL、模型、api_backend（Grok 独立预设）。"
-          : "选择常见渠道可自动填充 Base URL、模型与 wire_api（Codex 独立预设）。";
+          : "选择常见渠道可自动填充 Base URL、模型与上游协议（Codex 独立预设）。";
       }
       return;
     }
@@ -1338,8 +1342,8 @@
     }
     const reasoning = $("provFormReasoning");
     if (reasoning) reasoning.value = "high";
+    updateProtocolRouteHints();
 
-    // Grok-specific defaults from preset: identity = supplier name, not upstream id
     if (isGrok()) {
       const backend = $("provFormApiBackend");
       if (backend) {
@@ -1348,6 +1352,7 @@
             ? "chat_completions"
             : "responses";
       }
+      updateProtocolRouteHints();
       const grokCw = guessContextWindow(p.model || "grok-4.5") || 500000;
       setField("provFormContextWindow", String(grokCw));
     } else {
@@ -1393,10 +1398,10 @@
     if (!hint) return;
     hint.textContent = advancedDirty
       ? isGrok()
-        ? "已修改 config.toml：保存只提取 [models].default 与 [model.\"身份\"]，不会覆盖 MCP / ui 等其它段落。"
+        ? "已修改 config.toml：保存只提取 [models].default 与 [model.\"chatgpt-tools-proxy\"]，不会覆盖 MCP / ui 等其它段落。"
         : "已修改 config.toml：保存只提取 model / model_provider / model_providers.<id>，不会覆盖 MCP / desktop 等其它段落。"
       : isGrok()
-        ? "此处为供应商路由片段。启用时只改 [models].default 与对应 [model.\"身份\"]，其它段落保持本机原样。"
+        ? "此处为供应商路由片段。启用时只改 [models].default 与 [model.\"chatgpt-tools-proxy\"]，其它段落保持本机原样。供应商名称只在本工具中显示。"
         : "此处为供应商路由片段。启用时只改 model / model_provider / model_providers.<id>，其它段落保持本机原样。";
   }
 
@@ -1405,6 +1410,31 @@
     // User edited structured fields after touching advanced → prefer form fields
     advancedDirty = false;
     updateAdvancedHint();
+  }
+
+  /** Show red "need local routing" hint only when Chat Completions is selected. */
+  function updateProtocolRouteHints() {
+    const wireHint = $("provFormWireApiHint");
+    const backendHint = $("provFormApiBackendHint");
+    if (wireHint) {
+      const wire = ($("provFormWireApi")?.value || "responses").trim();
+      const show = !isGrok() && !formIsOfficial && wire === "chat";
+      wireHint.hidden = !show;
+      wireHint.textContent = show
+        ? "上游为 Chat Completions：请先开启本地路由（Codex 接管）。客户端始终走 responses，由代理转换。"
+        : "";
+    }
+    if (backendHint) {
+      const backend = ($("provFormApiBackend")?.value || "responses").trim();
+      const show =
+        isGrok() &&
+        !formIsOfficial &&
+        (backend === "chat_completions" || backend === "chat");
+      backendHint.hidden = !show;
+      backendHint.textContent = show
+        ? "上游为 chat_completions：请先开启本地路由（Grok 接管）。客户端始终走 responses，由代理转换。"
+        : "";
+    }
   }
 
   function syncAppSpecificFields() {
@@ -1423,7 +1453,7 @@
       modelHint.hidden = false;
       if (isGrok()) {
         modelHint.textContent =
-          "默认调用 API 的模型 id（[model.<id>].model）。拉取成功后点开下拉可选全部模型；也可搜索或回车手填。身份默认用供应商名，选择器显示名与此 id 一致。";
+          "默认调用 API 的模型 id（[model.\"chatgpt-tools-proxy\"].model）。拉取成功后点开下拉可选全部模型；也可搜索或回车手填。配置身份固定为 chatgpt-tools-proxy，供应商名称只在本工具中显示。";
       } else {
         modelHint.textContent =
           "默认使用模型。桌面/CLI 可选列表 = 下方「模型映射」全量（须含 DeepSeek/Claude/Gemini/Grok 等实际要用的 id）。";
@@ -1471,6 +1501,7 @@
         fetchBtn.hidden = !showCatalog || lock;
       }
     }
+    updateProtocolRouteHints();
   }
 
   function setModelSelect(value, extraIds) {
@@ -1665,6 +1696,7 @@
     clearFormError();
     clearFieldErrors();
     syncAppSpecificFields();
+    updateProtocolRouteHints();
 
     const keyHint = $("provFormApiKeyHint");
     if (keyHint) {
@@ -1792,7 +1824,7 @@
     clearFieldErrors();
   }
 
-  // ── Connectivity + model list ───────────────────────────────────────────
+
 
   function resetProbeUi() {
     fetchModelsSeq += 1;
@@ -1868,7 +1900,7 @@
     return ($("provFormUserAgent")?.value || "").trim();
   }
 
-  // ── Codex model catalog rows ────────────────────────────────────────────
+
 
   function renderCatalogRows(rows) {
     const body = $("provCatalogBody");
@@ -2888,7 +2920,7 @@
         if (hint) {
           hint.textContent = isGrok()
             ? "选择常见渠道可自动填充 Base URL、模型、api_backend（Grok 独立预设）。"
-            : "选择常见渠道可自动填充 Base URL、模型与 wire_api（Codex 独立预设）。";
+            : "选择常见渠道可自动填充 Base URL、模型与上游协议（Codex 独立预设）。";
         }
       }
     });
@@ -2918,6 +2950,9 @@
         $(id)?.addEventListener("change", () => {
           clearFormError();
           markStructuredEdit();
+          if (id === "provFormWireApi" || id === "provFormApiBackend") {
+            updateProtocolRouteHints();
+          }
         });
       }
     );

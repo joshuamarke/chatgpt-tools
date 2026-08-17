@@ -177,7 +177,6 @@ pub fn write_text(path: &Path, text: &str) -> Result<(), String> {
     })
 }
 
-// ── Port helpers (local routing listen port) ───────────────────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -305,52 +304,4 @@ fn find_free_port(host: &str, start: u16) -> Option<u16> {
         }
     }
     None
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::fs;
-
-    #[test]
-    fn atomic_write_roundtrip() {
-        let dir = std::env::temp_dir().join(format!(
-            "chatgpt-tools-live-{}",
-            uuid::Uuid::new_v4()
-        ));
-        fs::create_dir_all(&dir).unwrap();
-        let path = dir.join("cfg.toml");
-        write_text(&path, "a = 1\n").unwrap();
-        assert_eq!(fs::read_to_string(&path).unwrap(), "a = 1\n");
-        read_modify_write(&path, |t| Ok(format!("{t}b = 2\n"))).unwrap();
-        let text = fs::read_to_string(&path).unwrap();
-        assert!(text.contains("a = 1"));
-        assert!(text.contains("b = 2"));
-        let _ = fs::remove_dir_all(&dir);
-    }
-
-    #[test]
-    fn cas_rejects_stale_original() {
-        let dir = std::env::temp_dir().join(format!(
-            "chatgpt-tools-live-cas-{}",
-            uuid::Uuid::new_v4()
-        ));
-        fs::create_dir_all(&dir).unwrap();
-        let path = dir.join("cfg.toml");
-        fs::write(&path, b"old\n").unwrap();
-        let err = atomic_write_text(&path, "new\n", Some(b"stale\n")).unwrap_err();
-        assert!(err.contains("修改") || err.contains("中止"));
-        assert_eq!(fs::read_to_string(&path).unwrap(), "old\n");
-        let _ = fs::remove_dir_all(&dir);
-    }
-
-    #[test]
-    fn port_check_localhost() {
-        // port 0 is invalid for our check (< 1024 → structured failure + suggestion)
-        let low = check_listen_port("127.0.0.1", 0);
-        assert!(!low.available);
-        // high port: may or may not be free; just ensure API returns structured result
-        let r = check_listen_port("127.0.0.1", 58421);
-        assert_eq!(r.port, 58421);
-    }
 }

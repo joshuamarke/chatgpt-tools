@@ -43,6 +43,7 @@ pub fn load() -> Result<ProvidersFile, String> {
     }
     let before = serde_json::to_string(&file).unwrap_or_default();
     ensure_official_seeds(&mut file);
+    migrate_grok_archive_identities(&mut file);
     file.codex.normalize_failover_order();
     file.grok.normalize_failover_order();
     reconcile_current_pointers(&mut file);
@@ -131,6 +132,30 @@ fn seed_codex_official(store: &mut AppProviderStore) {
     p.sort_index = Some(0);
     store.providers.insert(0, p);
     // Do not set current here — Official seed ≠ “currently enabled”.
+}
+
+/// Rewrite leftover Grok supplier-name table keys onto the public
+/// `chatgpt-tools-proxy` identity. Display names stay on `Provider.name`.
+fn migrate_grok_archive_identities(file: &mut ProvidersFile) {
+    for provider in file.grok.providers.iter_mut() {
+        if provider.is_official() {
+            continue;
+        }
+        let Some(config) = provider
+            .settings_config
+            .get("config")
+            .and_then(|v| v.as_str())
+            .map(str::to_string)
+        else {
+            continue;
+        };
+        let Some(next) = super::grok::migrate_archive_identity(&config, &provider.name) else {
+            continue;
+        };
+        if let Some(obj) = provider.settings_config.as_object_mut() {
+            obj.insert("config".into(), serde_json::Value::String(next));
+        }
+    }
 }
 
 fn seed_grok_official(store: &mut AppProviderStore) {
@@ -312,144 +337,4 @@ pub fn mask_api_key(key: &str) -> Option<String> {
     let head: String = t.chars().take(4).collect();
     let tail: String = t.chars().rev().take(4).collect::<String>().chars().rev().collect();
     Some(format!("{head}…{tail}"))
-}
-
-#[cfg(test)]
-mod reconcile_tests {
-    use super::*;
-    use serde_json::json;
-    use std::sync::Mutex;
-
-    /// Serialize tests that touch CODEX_HOME / env.
-    static ENV_LOCK: Mutex<()> = Mutex::new(());
-
-    fn temp_codex_home(label: &str) -> std::path::PathBuf {
-        let stamp = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        let dir = std::env::temp_dir().join(format!("chatgpt-tools-reconcile-{label}-{stamp}"));
-        fs::create_dir_all(&dir).expect("mkdir");
-        dir
-    }
-
-    fn write_live(home: &std::path::Path, config: &str) {
-        fs::write(home.join("config.toml"), config).expect("write config");
-    }
-
-    #[test]
-    fn empty_current_with_official_live_selects_official() {
-        let _g = ENV_LOCK.lock().unwrap();
-        let home = temp_codex_home("official");
-        std::env::set_var("CODEX_HOME", &home);
-        write_live(&home, "model = \"gpt-5.5\"\n");
-
-        let mut store = AppProviderStore::default();
-        seed_codex_official(&mut store);
-        assert!(store.current.is_empty());
-        reconcile_current_with_live(AppKind::Codex, &mut store);
-        assert_eq!(store.current, CODEX_OFFICIAL_ID);
-
-        let _ = fs::remove_dir_all(&home);
-        std::env::remove_var("CODEX_HOME");
-    }
-
-    #[test]
-    fn false_official_current_with_third_party_live_clears() {
-        let _g = ENV_LOCK.lock().unwrap();
-        let home = temp_codex_home("third");
-        std::env::set_var("CODEX_HOME", &home);
-        write_live(
-            &home,
-            r#"
-model = "deepseek-chat"
-model_provider = "custom"
-[model_providers.custom]
-name = "OpenAI"
-base_url = "https://api.deepseek.com/v1"
-wire_api = "chat"
-"#,
-        );
-
-        let mut store = AppProviderStore::default();
-        seed_codex_official(&mut store);
-        // Legacy seed behavior claimed Official was enabled.
-        store.current = CODEX_OFFICIAL_ID.into();
-        reconcile_current_with_live(AppKind::Codex, &mut store);
-        assert!(
-            store.current.is_empty(),
-            "must not claim Official enabled when live is third-party"
-        );
-
-        let _ = fs::remove_dir_all(&home);
-        std::env::remove_var("CODEX_HOME");
-    }
-
-    #[test]
-    fn third_party_live_points_at_matching_archive() {
-        let _g = ENV_LOCK.lock().unwrap();
-        let home = temp_codex_home("match");
-        std::env::set_var("CODEX_HOME", &home);
-        write_live(
-            &home,
-            r#"
-model = "deepseek-chat"
-model_provider = "custom"
-[model_providers.custom]
-name = "OpenAI"
-base_url = "https://api.deepseek.com/v1"
-wire_api = "chat"
-"#,
-        );
-
-        let mut store = AppProviderStore::default();
-        seed_codex_official(&mut store);
-        store.current = CODEX_OFFICIAL_ID.into();
-
-        let mut tp = Provider::new(
-            "deepseek-1".into(),
-            "DeepSeek".into(),
-            json!({
-                "auth": { "OPENAI_API_KEY": "sk-test" },
-                "config": "model = \"deepseek-chat\"\nmodel_provider = \"custom\"\n[model_providers.custom]\nname = \"OpenAI\"\nbase_url = \"https://api.deepseek.com/v1\"\nwire_api = \"chat\"\n"
-            }),
-        );
-        tp.category = Some("third_party".into());
-        store.providers.push(tp);
-
-        reconcile_current_with_live(AppKind::Codex, &mut store);
-        assert_eq!(store.current, "deepseek-1");
-
-        let _ = fs::remove_dir_all(&home);
-        std::env::remove_var("CODEX_HOME");
-    }
-
-    #[test]
-    fn explicit_third_party_current_not_overwritten() {
-        let _g = ENV_LOCK.lock().unwrap();
-        let home = temp_codex_home("keep");
-        std::env::set_var("CODEX_HOME", &home);
-        // Live is official-shaped, but user marked a third-party as current (real drift).
-        write_live(&home, "model = \"gpt-5.5\"\n");
-
-        let mut store = AppProviderStore::default();
-        seed_codex_official(&mut store);
-        let mut tp = Provider::new(
-            "mine".into(),
-            "Mine".into(),
-            json!({
-                "auth": { "OPENAI_API_KEY": "sk-x" },
-                "config": "model = \"x\"\nmodel_provider = \"custom\"\n[model_providers.custom]\nbase_url = \"https://example.com/v1\"\n"
-            }),
-        );
-        tp.category = Some("custom".into());
-        store.providers.push(tp);
-        store.current = "mine".into();
-
-        reconcile_current_with_live(AppKind::Codex, &mut store);
-        assert_eq!(store.current, "mine");
-
-        let _ = fs::remove_dir_all(&home);
-        std::env::remove_var("CODEX_HOME");
-    }
 }

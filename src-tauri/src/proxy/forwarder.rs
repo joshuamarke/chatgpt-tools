@@ -682,7 +682,17 @@ async fn forward_one(
         base
     };
 
-    let url = build_upstream_url(&base, &ctx.path_and_query, ctx.app).map_err(|e| AttemptErr {
+    // Responses → Chat Completions bridge when upstream only speaks Chat.
+    let convert_chat = matches!(ctx.app, AppKind::Codex | AppKind::Grok)
+        && super::protocol::should_convert_codex_responses_to_chat(provider, &ctx.path_and_query);
+
+    let effective_path = if convert_chat {
+        super::protocol::rewrite_responses_endpoint_to_chat(&ctx.path_and_query)
+    } else {
+        ctx.path_and_query.clone()
+    };
+
+    let url = build_upstream_url(&base, &effective_path, ctx.app).map_err(|e| AttemptErr {
         status: StatusCode::BAD_REQUEST,
         message: e,
         retryable: false,
@@ -701,7 +711,45 @@ async fn forward_one(
         retryable: false,
     })?;
     apply_meta_headers(&mut headers, provider);
-    let body = apply_meta_body(ctx.body.clone(), provider);
+
+    let session_id = ctx
+        .headers
+        .get("session_id")
+        .or_else(|| ctx.headers.get("x-session-id"))
+        .or_else(|| ctx.headers.get("x-codex-session-id"))
+        .and_then(|v| v.to_str().ok())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string);
+
+    let (body, tool_context) = if convert_chat {
+        match super::protocol::convert_responses_request_body(
+            provider,
+            &ctx.body,
+            session_id.as_deref(),
+        )
+        .await
+        {
+            Ok((b, ctx_tools)) => (apply_meta_body(b, provider), Some(ctx_tools)),
+            Err(e) => {
+                return Err(AttemptErr {
+                    status: super::protocol::transform_status_from_error(&e),
+                    message: e.message(),
+                    retryable: false,
+                });
+            }
+        }
+    } else {
+        (apply_meta_body(ctx.body.clone(), provider), None)
+    };
+
+    // Content-Length must match rewritten body.
+    if convert_chat {
+        headers.remove(http::header::CONTENT_LENGTH);
+        if let Ok(v) = HeaderValue::from_str(&body.len().to_string()) {
+            headers.insert(http::header::CONTENT_LENGTH, v);
+        }
+    }
 
     let mut builder = client.request(ctx.method.clone(), &url);
     for (k, v) in headers.iter() {
@@ -747,6 +795,22 @@ async fn forward_one(
         StatusCode::from_u16(resp.status().as_u16()).unwrap_or(StatusCode::BAD_GATEWAY);
     if !status.is_success() {
         let text = resp.text().await.unwrap_or_default();
+        if convert_chat {
+            let err_bytes = super::protocol::convert_chat_error_to_responses(text.as_bytes());
+            let preview = String::from_utf8_lossy(&err_bytes)
+                .chars()
+                .take(600)
+                .collect::<String>();
+            return Err(AttemptErr {
+                status,
+                message: if preview.is_empty() {
+                    format!("上游返回 {status}")
+                } else {
+                    preview
+                },
+                retryable: is_retryable_status(status),
+            });
+        }
         let preview = if text.is_empty() {
             format!("上游返回 {status}")
         } else {
@@ -759,7 +823,7 @@ async fn forward_one(
         });
     }
 
-    let out_headers = filter_response_headers(resp.headers());
+    let mut out_headers = filter_response_headers(resp.headers());
     let model_hint = log_store::extract_model_from_body(&ctx.body);
 
     // Non-streaming: buffer body, validate semantic success, parse usage.
@@ -780,6 +844,40 @@ async fn forward_one(
                 message: format!("读取响应体失败: {e}"),
                 retryable: true,
             })?;
+
+        // Convert Chat → Responses when we planned to, OR as a safety net when the
+        // client asked for /responses but upstream returned Chat Completions
+        // (missing `created_at` → Codex/Grok "serialization error").
+        let need_chat_to_responses = tool_context.is_some()
+            || (super::protocol::path_is_responses_endpoint(&ctx.path_and_query)
+                && super::protocol::body_looks_like_chat_completion(&body_bytes));
+
+        let body_bytes = if need_chat_to_responses {
+            let tool_ctx = tool_context.clone().unwrap_or_default();
+            match super::protocol::convert_chat_json_to_responses(&body_bytes, &tool_ctx).await {
+                Ok(b) => {
+                    super::protocol::responses_content_type_json(&mut out_headers);
+                    b
+                }
+                Err(e) => {
+                    return Err(AttemptErr {
+                        status: super::protocol::transform_status_from_error(&e),
+                        message: e.message(),
+                        retryable: false,
+                    });
+                }
+            }
+        } else if super::protocol::path_is_responses_endpoint(&ctx.path_and_query)
+            && store::load()
+                .map(|f| f.proxy.enable_passthrough_fill)
+                .unwrap_or(true)
+        {
+            // Native Responses upstreams often omit created_at / other required fields;
+            // Grok Build deserializes strictly → "missing field `created_at`".
+            super::protocol::ensure_responses_json_created_at(body_bytes)
+        } else {
+            body_bytes
+        };
 
         if let Some(msg) = semantic_error_message(&body_bytes) {
             return Err(AttemptErr {
@@ -861,6 +959,132 @@ async fn forward_one(
     };
 
     let first_token_ms = Some(started.elapsed().as_millis() as u64);
+
+    // Chat SSE → Responses SSE when we planned convert, or when client asked for
+    // /responses but the first chunk looks like Chat Completions SSE (safety net).
+    let first_looks_chat_sse = {
+        let t = String::from_utf8_lossy(&first);
+        let trimmed = t.trim_start_matches('\u{feff}').trim_start();
+        // Chat streams use data: {choices:…} without response.created events.
+        (trimmed.starts_with("data:") || trimmed.contains("\ndata:"))
+            && (t.contains("\"choices\"") || t.contains("chat.completion") || t.contains("chatcmpl"))
+            && !t.contains("response.created")
+            && !t.contains("\"created_at\"")
+    };
+    let convert_stream = tool_context.is_some()
+        || (super::protocol::path_is_responses_endpoint(&ctx.path_and_query) && first_looks_chat_sse);
+
+    if convert_stream {
+        let tool_ctx = tool_context.unwrap_or_default();
+        let rest = byte_stream.map(|chunk| {
+            chunk
+                .map(Bytes::from)
+                .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))
+        });
+        let chained = futures::stream::once(async move { Ok::<Bytes, std::io::Error>(first) })
+            .chain(rest);
+        let converted = super::protocol::convert_chat_sse_stream_to_responses(chained, tool_ctx);
+        super::protocol::responses_content_type_sse(&mut out_headers);
+
+        // Prime first converted chunk for early failure / TTFB logging.
+        let mut converted = Box::pin(converted);
+        let conv_first = match converted.as_mut().next().await {
+            None => {
+                return Err(AttemptErr {
+                    status: StatusCode::BAD_GATEWAY,
+                    message: "Chat→Responses 流式转换后无数据".into(),
+                    retryable: true,
+                });
+            }
+            Some(Err(e)) => {
+                return Err(AttemptErr {
+                    status: StatusCode::BAD_GATEWAY,
+                    message: format!("Chat→Responses 流式转换失败: {e}"),
+                    retryable: true,
+                });
+            }
+            Some(Ok(b)) => b,
+        };
+        let first_text = String::from_utf8_lossy(&conv_first);
+        if let Some(msg) = sse_early_failure_message(&first_text) {
+            return Err(AttemptErr {
+                status: StatusCode::BAD_GATEWAY,
+                message: format!("上游流式 2xx 语义失败: {msg}"),
+                retryable: true,
+            });
+        }
+        let early_usage = TokenUsage::from_sse_text(&first_text).unwrap_or_default();
+        return Ok(AttemptOk {
+            outcome: ForwardOutcome {
+                status,
+                headers: out_headers,
+                body_stream: Box::pin(converted),
+                provider_id: provider.id.clone(),
+            },
+            usage: early_usage,
+            first_token_ms,
+            needs_stream_log: true,
+            primed_first: Some(conv_first),
+            model_hint,
+        });
+    }
+
+    // Native Responses SSE missing nested response.created_at / sequence_number
+    // (common on third-party gateways). Patch before Grok Build / Codex deserialize.
+    let passthrough_fill = store::load()
+        .map(|f| f.proxy.enable_passthrough_fill)
+        .unwrap_or(true);
+    if super::protocol::path_is_responses_endpoint(&ctx.path_and_query) && passthrough_fill {
+        let rest = byte_stream.map(|chunk| {
+            chunk
+                .map(Bytes::from)
+                .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))
+        });
+        let chained = futures::stream::once(async move { Ok::<Bytes, std::io::Error>(first) })
+            .chain(rest);
+        let patched = super::protocol::ensure_responses_sse_created_at_stream(chained);
+        let mut patched = Box::pin(patched);
+        let conv_first = match patched.as_mut().next().await {
+            None => {
+                return Err(AttemptErr {
+                    status: StatusCode::BAD_GATEWAY,
+                    message: "流式响应在首包到达前结束".into(),
+                    retryable: true,
+                });
+            }
+            Some(Err(e)) => {
+                return Err(AttemptErr {
+                    status: StatusCode::BAD_GATEWAY,
+                    message: format!("读取流式响应失败: {e}"),
+                    retryable: true,
+                });
+            }
+            Some(Ok(b)) => b,
+        };
+        let first_text = String::from_utf8_lossy(&conv_first);
+        if let Some(msg) = sse_early_failure_message(&first_text) {
+            return Err(AttemptErr {
+                status: StatusCode::BAD_GATEWAY,
+                message: format!("上游流式 2xx 语义失败: {msg}"),
+                retryable: true,
+            });
+        }
+        let early_usage = TokenUsage::from_sse_text(&first_text).unwrap_or_default();
+        return Ok(AttemptOk {
+            outcome: ForwardOutcome {
+                status,
+                headers: out_headers,
+                body_stream: Box::pin(patched),
+                provider_id: provider.id.clone(),
+            },
+            usage: early_usage,
+            first_token_ms,
+            needs_stream_log: true,
+            primed_first: Some(conv_first),
+            model_hint,
+        });
+    }
+
     let first_text = String::from_utf8_lossy(&first);
     if let Some(msg) = sse_early_failure_message(&first_text) {
         return Err(AttemptErr {

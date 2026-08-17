@@ -11,6 +11,7 @@ mod circuit;
 pub mod commands;
 mod forwarder;
 pub mod log_store;
+pub(crate) mod protocol;
 pub mod runtime;
 mod server;
 pub mod takeover;

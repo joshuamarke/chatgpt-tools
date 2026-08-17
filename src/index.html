@@ -908,6 +908,10 @@
               <div class="prov-field">
                 <span class="prov-field-label">选项</span>
                 <div class="prov-catalog-actions">
+                  <label class="ui-check session-filter-check" title="上游 Responses 缺少 created_at / sequence_number / usage.output_tokens_details / annotations 等字段时由代理补全，供 Grok Build 等严格客户端解析">
+                    <input type="checkbox" id="provRoutePassthroughFill" checked />
+                    <span>透传补全</span>
+                  </label>
                   <label class="ui-check session-filter-check">
                     <input type="checkbox" id="provRouteLogging" checked />
                     <span>请求日志</span>
@@ -1139,12 +1143,12 @@
             <div class="prov-form-section-title">Codex 专用</div>
             <div class="prov-field-row">
               <label class="prov-field" id="provFormWireField">
-                <span class="prov-field-label">协议 (wire_api)</span>
-                <select id="provFormWireApi" class="ui-select-source" data-ui-select aria-label="Codex wire_api">
+                <span class="prov-field-label">上游协议</span>
+                <select id="provFormWireApi" class="ui-select-source" data-ui-select aria-label="上游 API 协议">
                   <option value="responses">responses（推荐）</option>
-                  <option value="chat">chat（Chat Completions）</option>
+                  <option value="chat">chat_completions</option>
                 </select>
-                <span class="prov-field-hint">默认 responses（推荐）；部分仅兼容 Chat Completions 的接口可选 chat。</span>
+                <span class="prov-field-hint prov-protocol-route-hint" id="provFormWireApiHint" hidden></span>
               </label>
               <label class="prov-field" id="provFormReasoningField">
                 <span class="prov-field-label">推理强度</span>
@@ -1199,7 +1203,7 @@
                 <option value="responses">responses（推荐）</option>
                 <option value="chat_completions">chat_completions</option>
               </select>
-              <span class="prov-field-hint">写入 [model.*].api_backend。</span>
+              <span class="prov-field-hint prov-protocol-route-hint" id="provFormApiBackendHint" hidden></span>
             </label>
             <label class="prov-field">
               <span class="prov-field-label">上下文窗口 (context_window)</span>

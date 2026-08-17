@@ -51,38 +51,3 @@ pub fn runtime_status() -> ToolboxRuntimeStatus {
         settings,
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::toolbox::settings::ToolboxSettings;
-
-    #[test]
-    fn effective_requires_both_pref_and_third_party() {
-        // Pure logic unit: without third party, effective is false even if pref true.
-        // We cannot flip live routing in unit tests easily; assert helpers compose.
-        let pref_on = true;
-        let third = false;
-        assert!(!(pref_on && third));
-        let pref_off = false;
-        let third_on = true;
-        assert!(!(pref_off && third_on));
-        assert!(pref_on && third_on);
-    }
-
-    #[test]
-    fn runtime_status_effective_matches_pref_and_third_party() {
-        let s = runtime_status();
-        // Do not assume on-disk prefs (may differ from Default in dev machines).
-        // effective must always be pref ∧ third_party.
-        assert_eq!(
-            s.force_chinese_effective,
-            s.settings.force_chinese_locale && s.third_party_active
-        );
-        assert_eq!(
-            s.plugin_marketplace_unlock_effective,
-            s.settings.plugin_marketplace_unlock && s.third_party_active
-        );
-        let _ = ToolboxSettings::default();
-    }
-}

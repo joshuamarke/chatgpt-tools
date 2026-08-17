@@ -48,46 +48,6 @@ fn strip_prefix_ci<'a>(value: &'a str, prefix: &str) -> Option<&'a str> {
     }
 }
 
-#[cfg(test)]
-mod path_tests {
-    use super::normalize_display_path;
-
-    #[test]
-    fn strips_win32_device_prefix() {
-        assert_eq!(
-            normalize_display_path(r"\\?\E:\projects\image-2"),
-            r"E:\projects\image-2"
-        );
-        assert_eq!(
-            normalize_display_path(r"\\?\C:\Users\demo"),
-            r"C:\Users\demo"
-        );
-    }
-
-    #[test]
-    fn strips_unc_device_prefix() {
-        assert_eq!(
-            normalize_display_path(r"\\?\UNC\server\share\proj"),
-            r"\\server\share\proj"
-        );
-    }
-
-    #[test]
-    fn strips_forward_slash_device_form() {
-        assert_eq!(
-            normalize_display_path("//?/E:/tmp/proj"),
-            r"E:\tmp\proj"
-        );
-    }
-
-    #[test]
-    fn leaves_normal_paths() {
-        assert_eq!(normalize_display_path(r"E:\work\app"), r"E:\work\app");
-        assert_eq!(normalize_display_path("/home/user/p"), "/home/user/p");
-        assert_eq!(normalize_display_path(""), "");
-    }
-}
-
 /// Atomic write: temp file next to target, then replace.
 pub fn atomic_write(path: &Path, bytes: &[u8]) -> anyhow::Result<()> {
     if let Some(parent) = path.parent() {

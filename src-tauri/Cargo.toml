@@ -53,6 +53,7 @@ hyper-util = { version = "0.1", features = ["tokio", "http1", "server-auto", "cl
 http-body-util = "0.1"
 bytes = "1"
 futures = "0.3"
+async-stream = "0.3"
 http = "1"
 reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "rustls-tls", "socks"] }
 tower = "0.5"

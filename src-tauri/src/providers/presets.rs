@@ -35,7 +35,6 @@ pub fn list_presets(app: &str) -> Vec<ProviderPreset> {
 
 fn all_presets() -> Vec<ProviderPreset> {
     vec![
-        // ── Codex ─────────────────────────────────────────────
         ProviderPreset {
             id: "codex-custom".into(),
             name: "自定义渠道".into(),
@@ -85,9 +84,10 @@ fn all_presets() -> Vec<ProviderPreset> {
             base_url: "https://api.deepseek.com/v1".into(),
             model: "deepseek-chat".into(),
             models: vec!["deepseek-chat".into(), "deepseek-reasoner".into()],
-            wire_api: "responses".into(),
+            // Client config is always responses; DeepSeek upstream is Chat — proxy bridges.
+            wire_api: "chat".into(),
             notes: Some(
-                "DeepSeek 官方 API（默认 responses 协议）。启用后建议开本地路由；映射含 chat + reasoner。"
+                "DeepSeek 上游为 Chat Completions：归档写 responses，经本地路由转换。映射含 chat + reasoner。"
                     .into(),
             ),
             category: Some("third_party".into()),
@@ -101,7 +101,10 @@ fn all_presets() -> Vec<ProviderPreset> {
             model: "kimi-k2.5".into(),
             models: vec!["kimi-k2.5".into(), "kimi-k2.5-thinking".into()],
             wire_api: "chat".into(),
-            notes: Some("月之暗面 Kimi。Chat Completions 建议开本地路由。".into()),
+            notes: Some(
+                "月之暗面 Kimi（Chat Completions）。归档 wire_api=responses，需开本地路由做协议转换。"
+                    .into(),
+            ),
             category: Some("third_party".into()),
         },
         ProviderPreset {
@@ -117,7 +120,10 @@ fn all_presets() -> Vec<ProviderPreset> {
                 "Qwen/Qwen2.5-72B-Instruct".into(),
             ],
             wire_api: "chat".into(),
-            notes: Some("硅基流动聚合。建议拉取模型覆盖完整列表。".into()),
+            notes: Some(
+                "硅基流动（Chat Completions）。需开本地路由；建议拉取模型覆盖完整列表。"
+                    .into(),
+            ),
             category: Some("aggregator".into()),
         },
         ProviderPreset {
@@ -137,12 +143,11 @@ fn all_presets() -> Vec<ProviderPreset> {
             ],
             wire_api: "chat".into(),
             notes: Some(
-                "任意 OpenAI-compatible /v1 网关。映射表已预填多厂商 id，请按上游实际修改。"
+                "任意 OpenAI-compatible Chat 网关。归档为 responses + 本地路由转换；请按上游修改映射。"
                     .into(),
             ),
             category: Some("custom".into()),
         },
-        // ── Grok ──────────────────────────────────────────────
         ProviderPreset {
             id: "grok-custom".into(),
             name: "自定义 Grok 渠道".into(),

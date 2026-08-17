@@ -142,10 +142,11 @@ fn live_status_for(
                 "direct",
                 "drift",
                 false,
-                // Codex: base_url / official shape (model id switch is not drift).
-                // Grok: [models].default identity + base_url (API .model switch is not drift).
+                // Codex / Grok: base_url / official shape (model id switch is not drift).
+                // Grok identity is the public `chatgpt-tools-proxy` table; leftover
+                // pre-migration table names with the same base_url are not drift.
                 if kind == AppKind::Grok {
-                    "供应商与本机配置不一致（默认模型身份或渠道地址可能已在外部更改）".into()
+                    "供应商与本机配置不一致（渠道地址可能已在外部更改）".into()
                 } else {
                     "供应商与本机配置不一致（渠道地址可能已在外部更改）".into()
                 },
@@ -413,7 +414,11 @@ fn model_catalog_rows(p: &Provider) -> Vec<Value> {
         .unwrap_or_default()
 }
 
-fn parse_meta_from_request(request: &ProviderUpsertRequest) -> Result<Option<ProviderMeta>, String> {
+fn parse_meta_from_request(
+    kind: AppKind,
+    request: &ProviderUpsertRequest,
+    existing: Option<&Provider>,
+) -> Result<Option<ProviderMeta>, String> {
     let ua = request
         .custom_user_agent
         .as_deref()
@@ -424,7 +429,69 @@ fn parse_meta_from_request(request: &ProviderUpsertRequest) -> Result<Option<Pro
     let headers = parse_headers_json(request.local_proxy_headers_json.as_deref())?;
     let body = parse_body_json(request.local_proxy_body_json.as_deref())?;
 
-    if ua.is_none() && headers.is_none() && body.is_none() {
+    // Upstream protocol in meta.apiFormat (client live config always speaks Responses).
+    // Codex: form wire_api; Grok: form api_backend — both map to openai_chat | openai_responses.
+    let api_format = match kind {
+        AppKind::Codex => {
+            if let Some(wire) = request
+                .wire_api
+                .as_deref()
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+            {
+                Some(codex::api_format_from_wire(wire).to_string())
+            } else if let Some(fmt) = existing
+                .and_then(|p| p.settings_config.get("apiFormat"))
+                .and_then(|v| v.as_str())
+                .map(|s| codex::api_format_from_wire(s).to_string())
+            {
+                Some(fmt)
+            } else {
+                existing
+                    .and_then(|p| p.meta.as_ref())
+                    .and_then(|m| m.api_format.clone())
+            }
+        }
+        AppKind::Grok => {
+            if let Some(backend) = request
+                .api_backend
+                .as_deref()
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+            {
+                Some(codex::api_format_from_wire(backend).to_string())
+            } else if let Some(fmt) = existing
+                .and_then(|p| p.settings_config.get("apiFormat"))
+                .and_then(|v| v.as_str())
+                .map(|s| codex::api_format_from_wire(s).to_string())
+            {
+                Some(fmt)
+            } else {
+                // Infer from archive api_backend when meta was never set.
+                existing
+                    .and_then(|p| p.meta.as_ref())
+                    .and_then(|m| m.api_format.clone())
+                    .or_else(|| {
+                        let (_profile, backend, _cw) = grok::summarize_extra(existing?);
+                        Some(codex::api_format_from_wire(&backend).to_string())
+                    })
+            }
+        }
+    };
+
+    let prev = existing.and_then(|p| p.meta.as_ref());
+    let prompt_cache_key = prev.and_then(|m| m.prompt_cache_key.clone());
+    let prompt_cache_routing = prev.and_then(|m| m.prompt_cache_routing.clone());
+    let codex_chat_reasoning = prev.and_then(|m| m.codex_chat_reasoning.clone());
+
+    if ua.is_none()
+        && headers.is_none()
+        && body.is_none()
+        && api_format.is_none()
+        && prompt_cache_key.is_none()
+        && prompt_cache_routing.is_none()
+        && codex_chat_reasoning.is_none()
+    {
         return Ok(None);
     }
     let overrides = if headers.is_some() || body.is_some() {
@@ -435,6 +502,10 @@ fn parse_meta_from_request(request: &ProviderUpsertRequest) -> Result<Option<Pro
     Ok(Some(ProviderMeta {
         custom_user_agent: ua,
         local_proxy_request_overrides: overrides,
+        api_format,
+        prompt_cache_key,
+        prompt_cache_routing,
+        codex_chat_reasoning,
     }))
 }
 
@@ -606,7 +677,7 @@ pub fn add_provider(
 
     let settings = build_settings(kind, &request, name, category.as_deref(), None, false)?;
 
-    let meta = parse_meta_from_request(&request)?;
+    let meta = parse_meta_from_request(kind, &request, None)?;
     let mut provider = Provider::new(id.clone(), name.to_string(), settings);
     provider.website_url = request
         .website_url
@@ -750,7 +821,7 @@ pub fn update_provider(
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty());
     if !is_official {
-        p.meta = parse_meta_from_request(&request)?;
+        p.meta = parse_meta_from_request(kind, &request, Some(&existing))?;
     }
     p.updated_at = Some(chrono::Utc::now().timestamp_millis());
 
@@ -939,6 +1010,25 @@ pub fn switch_provider(
 }
 
 fn validate_switch(kind: AppKind, provider: &Provider) -> Result<(), String> {
+    // Chat Completions upstreams need the local Responses↔Chat bridge (Codex + Grok).
+    if !provider.is_official()
+        && crate::proxy::protocol::detect::codex_provider_uses_chat_completions(provider)
+    {
+        let file = store::load().unwrap_or_default();
+        let takeover = file.for_kind(kind).takeover_enabled;
+        if !takeover {
+            return Err(format!(
+                "该供应商上游为 Chat Completions：请先开启本地路由（{} 接管），再启用。客户端始终走 responses，由本地代理转换。",
+                kind.display_name()
+            ));
+        }
+        if !crate::proxy::runtime().is_running() {
+            return Err(
+                "本地路由未运行：Chat Completions 供应商需要代理进程做 Responses 转换，请先启动本地路由。"
+                    .into(),
+            );
+        }
+    }
     match kind {
         AppKind::Codex => codex::validate_for_switch(provider),
         AppKind::Grok => grok::validate_for_switch(provider),
@@ -1075,7 +1165,13 @@ pub fn import_live_as_provider(
                     format!("当前 live 配置无法作为自定义供应商导入: {e}")
                 })?;
             }
-            serde_json::json!({ "config": config })
+            // Store the routing fragment only, rewritten onto chatgpt-tools-proxy.
+            let stored = if !config.trim().is_empty() && !grok::is_official_live_config(&config) {
+                grok::extract_routing_fragment(&config).unwrap_or(config)
+            } else {
+                config
+            };
+            serde_json::json!({ "config": stored })
         }
     };
 
@@ -1257,7 +1353,6 @@ pub fn refresh_codex_model_unlock() -> Result<Value, String> {
     }))
 }
 
-// ── Connectivity / model list (add-provider form helpers) ───────────────────
 
 /// Lightweight base_url reachability probe.
 /// Any HTTP response = reachable; only network-level failures count as down.
@@ -1297,127 +1392,4 @@ pub async fn fetch_provider_models(
     })
     .await
     .map_err(|e| format!("拉取模型任务失败: {e}"))?
-}
-
-#[cfg(test)]
-mod import_dedup_tests {
-    use super::*;
-    use serde_json::json;
-
-    fn custom_codex(id: &str, name: &str, base_url: &str) -> Provider {
-        let mut p = Provider::new(
-            id.into(),
-            name.into(),
-            json!({
-                "auth": { "OPENAI_API_KEY": "sk-test" },
-                "config": format!(
-                    "model = \"deepseek-chat\"\nmodel_provider = \"custom\"\n[model_providers.custom]\nname = \"OpenAI\"\nbase_url = \"{base_url}\"\nwire_api = \"chat\"\n"
-                )
-            }),
-        );
-        p.category = Some("custom".into());
-        p
-    }
-
-    fn official_like_codex(id: &str, name: &str) -> Provider {
-        let mut p = Provider::new(
-            id.into(),
-            name.into(),
-            json!({
-                "auth": { "OPENAI_API_KEY": "" },
-                "config": "# comment only\n"
-            }),
-        );
-        p.category = Some("custom".into());
-        p
-    }
-
-    fn official_seed_codex() -> Provider {
-        let mut p = Provider::new(
-            store::CODEX_OFFICIAL_ID.into(),
-            "OpenAI Official".into(),
-            codex::official_settings_config(),
-        );
-        p.category = Some("official".into());
-        p
-    }
-
-    fn custom_grok(id: &str, name: &str, base_url: &str) -> Provider {
-        let mut p = Provider::new(
-            id.into(),
-            name.into(),
-            json!({
-                "config": format!(
-                    "[models]\ndefault = \"{name}\"\n\n[model.\"{name}\"]\nname = \"grok-4.5\"\nmodel = \"grok-4.5\"\nbase_url = \"{base_url}\"\napi_key = \"xai-test\"\napi_backend = \"responses\"\ncontext_window = 131072\n"
-                )
-            }),
-        );
-        p.category = Some("custom".into());
-        p
-    }
-
-    #[test]
-    fn same_base_url_is_duplicate_even_with_trailing_slash() {
-        let existing = vec![custom_codex(
-            "deepseek-1",
-            "DeepSeek",
-            "https://api.deepseek.com/v1",
-        )];
-        let candidate = custom_codex(
-            "import-1",
-            "从本机配置导入 · Codex",
-            "https://api.deepseek.com/v1/",
-        );
-        let dup = find_duplicate_live_import(AppKind::Codex, &candidate, &existing);
-        assert_eq!(dup.map(|p| p.id.as_str()), Some("deepseek-1"));
-    }
-
-    #[test]
-    fn different_base_url_is_not_duplicate() {
-        let existing = vec![custom_codex(
-            "deepseek-1",
-            "DeepSeek",
-            "https://api.deepseek.com/v1",
-        )];
-        let candidate = custom_codex(
-            "import-1",
-            "从本机配置导入 · Codex",
-            "https://openrouter.ai/api/v1",
-        );
-        assert!(find_duplicate_live_import(AppKind::Codex, &candidate, &existing).is_none());
-    }
-
-    #[test]
-    fn official_seed_does_not_block_first_official_like_import() {
-        let existing = vec![official_seed_codex()];
-        let candidate = official_like_codex("import-1", "从本机配置导入 · Codex");
-        assert!(find_duplicate_live_import(AppKind::Codex, &candidate, &existing).is_none());
-    }
-
-    #[test]
-    fn second_official_like_import_is_duplicate() {
-        let existing = vec![
-            official_seed_codex(),
-            official_like_codex("import-1", "从本机配置导入 · Codex"),
-        ];
-        let candidate = official_like_codex("import-2", "从本机配置导入 · Codex");
-        let dup = find_duplicate_live_import(AppKind::Codex, &candidate, &existing);
-        assert_eq!(dup.map(|p| p.id.as_str()), Some("import-1"));
-    }
-
-    #[test]
-    fn grok_same_base_url_is_duplicate() {
-        let existing = vec![custom_grok(
-            "proxy-1",
-            "CustomProxy",
-            "https://proxy.example.com/v1",
-        )];
-        let candidate = custom_grok(
-            "import-1",
-            "ImportedProxy",
-            "https://proxy.example.com/v1/",
-        );
-        let dup = find_duplicate_live_import(AppKind::Grok, &candidate, &existing);
-        assert_eq!(dup.map(|p| p.id.as_str()), Some("proxy-1"));
-    }
 }

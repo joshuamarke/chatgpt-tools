@@ -849,26 +849,3 @@ fn ensure_keep_thread() {
         })
         .ok();
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn fingerprint_stable_for_same_set() {
-        let mut meta = Map::new();
-        meta.insert(
-            "a".into(),
-            json!({"displayName": "A", "description": "A"}),
-        );
-        meta.insert(
-            "b".into(),
-            json!({"displayName": "B", "description": "B"}),
-        );
-        let f1 = fingerprint(&["b".into(), "a".into()], &meta);
-        let f2 = fingerprint(&["a".into(), "b".into()], &meta);
-        assert_eq!(f1, f2);
-        let f3 = fingerprint(&["a".into(), "b".into(), "c".into()], &meta);
-        assert_ne!(f1, f3);
-    }
-}

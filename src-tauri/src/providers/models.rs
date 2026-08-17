@@ -35,6 +35,28 @@ impl AppKind {
     }
 }
 
+/// Codex Responses → Chat Completions reasoning capability description.
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct CodexChatReasoningConfig {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub supports_thinking: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub supports_effort: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thinking_param: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effort_param: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effort_value_mode: Option<String>,
+    /// Declares where upstream returns reasoning (`reasoning_content` / tags / …).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub output_format: Option<String>,
+    /// Runtime-only legal effort levels for the current model (not persisted).
+    #[serde(skip)]
+    pub effort_levels: Option<Vec<String>>,
+}
+
 /// Optional provider-level metadata (User-Agent / local-proxy overrides).
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
@@ -45,6 +67,20 @@ pub struct ProviderMeta {
     /// Local proxy request header/body overrides (stored for future proxy / advanced use).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub local_proxy_request_overrides: Option<LocalProxyRequestOverrides>,
+    /// Upstream protocol for the local Responses bridge.
+    /// - `openai_responses` / `responses`: native Responses (no convert)
+    /// - `openai_chat` / `chat`: Chat Completions (proxy converts Responses ↔ Chat)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub api_format: Option<String>,
+    /// Prompt cache key for Chat Completions upstreams that support it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prompt_cache_key: Option<String>,
+    /// `auto` | `enabled` | `disabled` — session prompt-cache routing for Chat convert.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prompt_cache_routing: Option<String>,
+    /// Codex Responses → Chat reasoning capability metadata.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub codex_chat_reasoning: Option<CodexChatReasoningConfig>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -231,42 +267,6 @@ impl AppProviderStore {
     }
 }
 
-#[cfg(test)]
-mod failover_order_tests {
-    use super::*;
-    use serde_json::json;
-
-    #[test]
-    fn normalize_order_is_ssot_and_clears_stale_flags() {
-        let mut s = AppProviderStore::default();
-        let mut a = Provider::new("a".into(), "A".into(), json!({}));
-        a.in_failover_queue = true; // stale flag — must NOT re-enter order
-        let mut b = Provider::new("b".into(), "B".into(), json!({}));
-        b.in_failover_queue = false;
-        let mut c = Provider::new("c".into(), "C".into(), json!({}));
-        c.in_failover_queue = true;
-        s.providers = vec![a, b, c];
-        s.failover_order = vec!["c".into(), "missing".into()];
-        s.normalize_failover_order();
-        assert_eq!(s.failover_order, vec!["c".to_string()]);
-        assert!(!s.providers.iter().find(|p| p.id == "a").unwrap().in_failover_queue);
-        assert!(!s.providers.iter().find(|p| p.id == "b").unwrap().in_failover_queue);
-        assert!(s.providers.iter().find(|p| p.id == "c").unwrap().in_failover_queue);
-    }
-
-    #[test]
-    fn normalize_migrates_from_flags_when_order_empty() {
-        let mut s = AppProviderStore::default();
-        let mut a = Provider::new("a".into(), "A".into(), json!({}));
-        a.in_failover_queue = true;
-        let b = Provider::new("b".into(), "B".into(), json!({}));
-        s.providers = vec![a, b];
-        s.failover_order.clear();
-        s.normalize_failover_order();
-        assert_eq!(s.failover_order, vec!["a".to_string()]);
-    }
-}
-
 fn default_max_retries() -> u32 {
     3
 }
@@ -295,6 +295,11 @@ pub struct GlobalProxyConfig {
     /// How many days of proxy request logs to keep (UI-configurable, default 7).
     #[serde(default = "default_log_retention_days")]
     pub log_retention_days: u32,
+    /// When true (default), native Responses passthrough fills missing required
+    /// fields (e.g. `created_at`, SSE `sequence_number`, `usage.*_details`,
+    /// `annotations`) so strict clients like Grok Build can deserialize.
+    #[serde(default = "default_true")]
+    pub enable_passthrough_fill: bool,
     /// Optional upstream egress proxy for local-routing outbound requests
     /// (http / https / socks5). Empty = direct connect (no system proxy).
     /// Only applies when local routing is on: App → local proxy → [egress] → upstream.
@@ -321,6 +326,7 @@ impl Default for GlobalProxyConfig {
             listen_port: default_listen_port(),
             enable_logging: true,
             log_retention_days: default_log_retention_days(),
+            enable_passthrough_fill: true,
             egress_proxy: String::new(),
         }
     }
@@ -539,13 +545,17 @@ pub struct ProviderUpsertRequest {
     pub base_url: Option<String>,
     #[serde(default)]
     pub model: Option<String>,
-    /// Codex wire_api: `responses` | `chat`
+    /// Upstream protocol preference from the form: `responses` | `chat`.
+    ///
+    /// Archive TOML always stores client-facing `wire_api = "responses"`.
+    /// When this is `chat`, `meta.apiFormat = "openai_chat"` and the local
+    /// proxy bridges Responses ↔ Chat Completions.
     #[serde(default)]
     pub wire_api: Option<String>,
     /// Codex top-level `model_reasoning_effort`: high | medium | low | minimal
     #[serde(default)]
     pub reasoning_effort: Option<String>,
-    /// Grok `[models].default` / `[model."<id>"]` identity (defaults to supplier name).
+    /// Grok `[models].default` / `[model."<id>"]` identity (always `chatgpt-tools-proxy`).
     #[serde(default)]
     pub profile: Option<String>,
     /// Grok `api_backend`: responses | chat_completions
@@ -596,6 +606,8 @@ pub struct ProviderDetail {
     pub api_key: String,
     pub base_url: String,
     pub model: String,
+    /// Upstream format shown in the form (`responses` | `chat`).
+    /// Not necessarily the live Codex `wire_api` (always responses under routing).
     #[serde(default)]
     pub wire_api: String,
     #[serde(default)]

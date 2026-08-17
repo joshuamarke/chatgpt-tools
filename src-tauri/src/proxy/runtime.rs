@@ -396,12 +396,14 @@ impl ProxyRuntime {
             }
             file.proxy.enable_logging = next.enable_logging;
             file.proxy.log_retention_days = next.log_retention_days.max(1).min(365);
+            file.proxy.enable_passthrough_fill = next.enable_passthrough_fill;
             file.proxy.egress_proxy = next.egress_proxy;
             // Keep in-memory slot cfg in sync for status / debugging.
             if let Ok(mut guard) = self.server.lock() {
                 if let Some(slot) = guard.as_mut() {
                     slot.cfg.enable_logging = file.proxy.enable_logging;
                     slot.cfg.log_retention_days = file.proxy.log_retention_days;
+                    slot.cfg.enable_passthrough_fill = file.proxy.enable_passthrough_fill;
                     slot.cfg.egress_proxy = file.proxy.egress_proxy.clone();
                 }
             }

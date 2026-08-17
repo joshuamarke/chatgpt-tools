@@ -3258,6 +3258,14 @@ button.sm {
   color: var(--muted);
   line-height: 1.4;
 }
+.prov-field-hint.prov-protocol-route-hint,
+.prov-protocol-route-hint {
+  color: var(--danger, #e5484d);
+  font-weight: 500;
+}
+.prov-protocol-route-hint[hidden] {
+  display: none !important;
+}
 .prov-field-row {
   display: grid;
   grid-template-columns: 1fr 1fr;

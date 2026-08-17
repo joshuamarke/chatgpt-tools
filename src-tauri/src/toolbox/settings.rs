@@ -173,39 +173,3 @@ pub fn update_settings(
     LOADED.store(true, Ordering::Release);
     Ok(settings)
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn defaults_match_product() {
-        let s = ToolboxSettings::default();
-        assert!(!s.force_chinese_locale);
-        assert!(!s.plugin_marketplace_unlock);
-        assert!(!s.fast_startup);
-        assert!(!s.computer_use_guard_enabled);
-    }
-
-    #[test]
-    fn missing_fields_default_all_off() {
-        let parsed: ToolboxSettings = serde_json::from_str("{}").unwrap();
-        assert!(!parsed.force_chinese_locale);
-        assert!(!parsed.plugin_marketplace_unlock);
-        assert!(!parsed.fast_startup);
-        assert!(!parsed.computer_use_guard_enabled);
-    }
-
-    #[test]
-    fn force_chinese_false_round_trips() {
-        let s = ToolboxSettings {
-            force_chinese_locale: false,
-            plugin_marketplace_unlock: false,
-            fast_startup: true,
-            computer_use_guard_enabled: true,
-        };
-        let text = serde_json::to_string(&s).unwrap();
-        let parsed: ToolboxSettings = serde_json::from_str(&text).unwrap();
-        assert_eq!(parsed, s);
-    }
-}

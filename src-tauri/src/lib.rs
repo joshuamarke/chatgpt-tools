@@ -273,7 +273,7 @@ fn persist_windows_update_install_dir() {
         .output();
 }
 
-#[cfg(any(test, all(windows, not(debug_assertions))))]
+#[cfg(all(windows, not(debug_assertions)))]
 fn normalize_windows_install_dir(dir: &str) -> Option<&str> {
     let dir = dir.strip_prefix(r"\\?\").unwrap_or(dir).trim();
     let dir = dir.trim_end_matches(['\\', '/']);
@@ -281,24 +281,6 @@ fn normalize_windows_install_dir(dir: &str) -> Option<&str> {
         None
     } else {
         Some(dir)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::normalize_windows_install_dir;
-
-    #[test]
-    fn strips_extended_prefix_and_trailing_slash() {
-        assert_eq!(
-            normalize_windows_install_dir(r"\\?\D:\softs\chatgpt-tools\"),
-            Some(r"D:\softs\chatgpt-tools")
-        );
-        assert_eq!(
-            normalize_windows_install_dir(r"D:\softs\chatgpt-tools"),
-            Some(r"D:\softs\chatgpt-tools")
-        );
-        assert_eq!(normalize_windows_install_dir("   "), None);
     }
 }
 

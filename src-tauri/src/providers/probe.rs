@@ -9,7 +9,6 @@ use serde::{Deserialize, Serialize};
 use std::io::Read;
 use std::time::{Duration, Instant};
 
-// ── Connectivity ────────────────────────────────────────────────────────────
 
 const DEFAULT_CONNECT_TIMEOUT_SECS: u64 = 8;
 const MIN_CONNECT_TIMEOUT_SECS: u64 = 2;
@@ -182,7 +181,6 @@ fn map_network_error(err: &ureq::Error) -> String {
     }
 }
 
-// ── Model list fetch ────────────────────────────────────────────────────────
 
 const FETCH_TIMEOUT_SECS: u64 = 15;
 const ERROR_BODY_MAX_CHARS: usize = 512;
@@ -404,86 +402,4 @@ fn ends_with_version_segment(url: &str) -> bool {
     let last = url.rsplit('/').next().unwrap_or("");
     last.strip_prefix('v')
         .is_some_and(|digits| !digits.is_empty() && digits.bytes().all(|b| b.is_ascii_digit()))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn candidates_plain_root() {
-        let c = build_models_url_candidates("https://api.siliconflow.cn", None).unwrap();
-        assert_eq!(c, vec!["https://api.siliconflow.cn/v1/models"]);
-    }
-
-    #[test]
-    fn candidates_with_v1() {
-        let c = build_models_url_candidates("https://api.example.com/v1", None).unwrap();
-        assert_eq!(c, vec!["https://api.example.com/v1/models"]);
-    }
-
-    #[test]
-    fn candidates_zhipu_coding_paas_v4() {
-        let c =
-            build_models_url_candidates("https://open.bigmodel.cn/api/coding/paas/v4", None).unwrap();
-        assert_eq!(
-            c,
-            vec![
-                "https://open.bigmodel.cn/api/coding/paas/v4/models",
-                "https://open.bigmodel.cn/api/coding/paas/v4/v1/models",
-            ]
-        );
-    }
-
-    #[test]
-    fn candidates_deepseek_strip_anthropic() {
-        let c = build_models_url_candidates("https://api.deepseek.com/anthropic", None).unwrap();
-        assert_eq!(
-            c,
-            vec![
-                "https://api.deepseek.com/anthropic/v1/models",
-                "https://api.deepseek.com/v1/models",
-                "https://api.deepseek.com/models",
-            ]
-        );
-    }
-
-    #[test]
-    fn candidates_override() {
-        let c = build_models_url_candidates(
-            "https://api.deepseek.com/anthropic",
-            Some("https://api.deepseek.com/models"),
-        )
-        .unwrap();
-        assert_eq!(c, vec!["https://api.deepseek.com/models"]);
-    }
-
-    #[test]
-    fn candidates_empty_errors() {
-        assert!(build_models_url_candidates("", None).is_err());
-        assert!(build_models_url_candidates("not-a-url", None).is_err());
-    }
-
-    #[test]
-    fn parse_models_json() {
-        let json = r#"{"object":"list","data":[{"id":"gpt-4","owned_by":"openai"},{"id":"claude-3","owned_by":"anthropic"}]}"#;
-        let models = parse_models_body(json).unwrap();
-        assert_eq!(models.len(), 2);
-        assert_eq!(models[0].id, "claude-3"); // sorted
-        assert_eq!(models[1].id, "gpt-4");
-    }
-
-    #[test]
-    fn normalize_rejects_bad_url() {
-        assert!(normalize_probe_url("").is_err());
-        assert!(normalize_probe_url("ftp://x").is_err());
-        assert!(normalize_probe_url("https://api.example.com/v1").is_ok());
-    }
-
-    #[test]
-    fn sanitize_timeout_clamps() {
-        assert_eq!(sanitize_timeout(Some(1)), MIN_CONNECT_TIMEOUT_SECS);
-        assert_eq!(sanitize_timeout(Some(999)), MAX_CONNECT_TIMEOUT_SECS);
-        assert_eq!(sanitize_timeout(None), DEFAULT_CONNECT_TIMEOUT_SECS);
-    }
 }

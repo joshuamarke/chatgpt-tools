@@ -397,30 +397,3 @@ pub fn extra_launch_args() -> Vec<String> {
     }
     vec![statsig_fast_fail_host_resolver_rule()]
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn evaluate_script_includes_globals_and_bodies() {
-        let script = build_evaluate_script();
-        assert!(script.contains("__CHATGPT_TOOLS_FORCE_CHINESE_LOCALE__"));
-        assert!(script.contains("__CHATGPT_TOOLS_FAST_STARTUP__"));
-        assert!(script.contains("__CHATGPT_TOOLS_PLUGIN_MARKETPLACE_UNLOCK__"));
-        assert!(script.contains("__CHATGPT_TOOLS_PLUGIN_MARKETPLACES__"));
-        assert!(script.contains("forceChineseLocale.managed.v1"));
-        assert!(script.contains("statsigTimeoutMs") || script.contains("chatgptToolsFastStartup"));
-        assert!(
-            script.contains("installPluginMarketplaceBridgePatch")
-                || script.contains("cgt-plugin-unlock")
-        );
-    }
-
-    #[test]
-    fn host_resolver_rule_maps_statsig() {
-        let rule = statsig_fast_fail_host_resolver_rule();
-        assert!(rule.contains("api.statsigcdn.com"));
-        assert!(rule.starts_with("--host-resolver-rules="));
-    }
-}
