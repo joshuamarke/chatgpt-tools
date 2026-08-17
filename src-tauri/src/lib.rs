@@ -251,7 +251,8 @@ fn persist_windows_update_install_dir() {
     let Some(dir) = exe.parent() else {
         return;
     };
-    let Some(dir) = normalize_windows_install_dir(&dir.to_string_lossy()) else {
+    let binding = dir.to_string_lossy();
+    let Some(dir) = normalize_windows_install_dir(&binding) else {
         return;
     };
     use std::os::windows::process::CommandExt;
