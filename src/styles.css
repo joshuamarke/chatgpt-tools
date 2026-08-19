@@ -4728,11 +4728,23 @@ button.sm {
   padding: 12px;
   overflow: auto;
 }
+.about-ad-remote.is-html-mode,
+.about-ad-remote:has(.about-ad-html) {
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  overflow: visible;
+}
 .about-ad-remote-body {
   min-width: 0;
   font-size: 12.5px;
   line-height: 1.55;
   color: #4a5568;
+}
+.about-ad-remote.is-html-mode .about-ad-remote-body,
+.about-ad-remote-body:has(> .about-ad-html) {
+  width: 100%;
 }
 .about-ad-remote-body img {
   max-width: 100%;

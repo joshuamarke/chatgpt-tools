@@ -3738,7 +3738,9 @@ function clearAboutAdUi() {
 
   if (slot) {
     slot.querySelectorAll("style[data-about-ad-css]").forEach((el) => el.remove());
+    slot.classList.remove("is-html-mode");
   }
+  document.getElementById("aboutAdInjectedCss")?.remove();
   if (placeholder) placeholder.hidden = true;
   if (imageLink) {
     imageLink.hidden = true;
@@ -3752,6 +3754,7 @@ function clearAboutAdUi() {
   }
   if (remote) {
     remote.hidden = true;
+    remote.classList.remove("is-html-mode");
     remote.querySelector("style[data-about-ad-css]")?.remove();
   }
   if (remoteBody) remoteBody.innerHTML = "";
@@ -3807,19 +3810,18 @@ function applyAboutAd(ad, opts = {}) {
   }
 
   // Ensure cloud CSS for ad slot is injected and updated
-  if (slot) {
-    let styleEl = slot.querySelector("style[data-about-ad-css]");
-    const cssText = sanitizeAboutContactCss(conf.css || "");
-    if (cssText) {
-      if (!styleEl) {
-        styleEl = document.createElement("style");
-        styleEl.setAttribute("data-about-ad-css", "1");
-        slot.insertBefore(styleEl, slot.firstChild);
-      }
-      styleEl.textContent = cssText;
-    } else if (styleEl) {
-      styleEl.remove();
+  let styleEl = document.getElementById("aboutAdInjectedCss");
+  const cssText = sanitizeAboutContactCss(conf.css || "");
+  if (cssText) {
+    if (!styleEl) {
+      styleEl = document.createElement("style");
+      styleEl.id = "aboutAdInjectedCss";
+      styleEl.setAttribute("data-about-ad-css", "1");
+      document.head.appendChild(styleEl);
     }
+    styleEl.textContent = cssText;
+  } else if (styleEl) {
+    styleEl.remove();
   }
 
   const hideLayers = () => {
@@ -3833,11 +3835,16 @@ function applyAboutAd(ad, opts = {}) {
 
   if (mode === "html" && html && remote && remoteBody) {
     hideLayers();
+    remote.classList.add("is-html-mode");
+    if (slot) slot.classList.add("is-html-mode");
     remoteBody.innerHTML = sanitizeAboutContactHtml(html);
     remote.hidden = false;
     setAboutAdSlotVisible(true);
     return;
   }
+
+  if (remote) remote.classList.remove("is-html-mode");
+  if (slot) slot.classList.remove("is-html-mode");
 
   if (mode === "image" && imageUrl && imageLink && imageEl) {
     hideLayers();
@@ -3886,15 +3893,21 @@ async function loadAboutContactFromCloud(opts = {}) {
   try {
     const res = await window.skinAPI.cloudAbout({ refresh: opts.refresh === true });
     lastAboutSyncTime = Date.now();
+    if (res?.ok === false && !res?.contact && !res?.ad) {
+      // Temporary network error / offline without new data: keep existing cached UI
+      return;
+    }
     if (res?.contact && typeof res.contact === "object") {
       applyAboutContact(res.contact);
-    } else {
+    } else if (res?.contact === null) {
       clearAboutContactUi();
     }
     if (res && Object.prototype.hasOwnProperty.call(res, "ad")) {
-      applyAboutAd(res.ad);
-    } else {
-      clearAboutAdUi();
+      if (res.ad) {
+        applyAboutAd(res.ad);
+      } else if (res.ok !== false) {
+        clearAboutAdUi();
+      }
     }
   } catch {
     /* offline without cache: leave empty (already cleared on first paint) */
@@ -4190,7 +4203,7 @@ async function bootCloud() {
       const snap = await window.skinAPI.cloudStatus({ force: false });
       if (snap?.announcements) applyAnnouncementsToBanner(snap.announcements);
       if (snap?.about?.contact) applyAboutContact(snap.about.contact);
-      if (snap?.about && Object.prototype.hasOwnProperty.call(snap.about, "ad")) {
+      if (snap?.about?.ad) {
         applyAboutAd(snap.about.ad);
       }
     }
@@ -4213,7 +4226,7 @@ async function bootCloud() {
         if (snap?.about?.contact) {
           applyAboutContact(snap.about.contact);
         }
-        if (snap?.about && Object.prototype.hasOwnProperty.call(snap.about, "ad")) {
+        if (snap?.about?.ad) {
           applyAboutAd(snap.about.ad);
         }
         // Soft sync may be skipped (cache-fresh) — only rebuild list when catalog may change
@@ -4248,9 +4261,11 @@ async function syncCloudSoftBackground() {
     if (snap?.announcements) {
       applyAnnouncementsToBanner(snap.announcements);
     }
-    if (snap?.about?.contact || (snap?.about && Object.prototype.hasOwnProperty.call(snap.about, "ad"))) {
-      if (snap.about.contact) applyAboutContact(snap.about.contact);
-      if (Object.prototype.hasOwnProperty.call(snap.about, "ad")) applyAboutAd(snap.about.ad);
+    if (snap?.about?.contact) {
+      applyAboutContact(snap.about.contact);
+    }
+    if (snap?.about?.ad) {
+      applyAboutAd(snap.about.ad);
     }
   } catch {
     /* offline / network error: keep current cache state silently */
