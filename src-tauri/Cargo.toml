@@ -1,6 +1,6 @@
 [package]
 name = "chatgpt-tools"
-version = "1.1.14"
+version = "1.1.15"
 description = "ChatGPT Tools — ChatGPT / Codex desktop toolbox (skins, sessions, more)"
 authors = ["chatgpt-tools"]
 edition = "2021"

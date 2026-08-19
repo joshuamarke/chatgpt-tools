@@ -4,6 +4,12 @@
 
 ## Unreleased
 
+## 1.1.15 - 2026-08-19
+
+- 修复编译版客户端「关于 → 感谢与支持」未保留云端广告 HTML/CSS，导致结构可见但样式丢失的问题。
+- 首次启动无本地 about 缓存时主动拉取云端配置，并增加进入关于页及前台唤醒后的温和刷新。
+- 完善 Codex/Grok 协议路由与 Chat Completions 转换，修复供应商名称及模型配置写入兼容性。
+
 ## 1.1.14 - 2026-08-15
 
 - 自定义皮肤弹窗「面板透明度」范围改为 0–100%。
@@ -26,5 +32,5 @@
 
 1. 同步三处版本号：`package.json`、`src-tauri/tauri.conf.json`、`src-tauri/Cargo.toml`。
 2. 在本文件顶部新增 `## x.y.z - YYYY-MM-DD` 段落。
-3. 提交后打 tag（如 `v1.1.14`）并在 GitHub 创建 **Published** Release，正文使用本段 changelog。
+3. 提交后打 tag（如 `v1.1.15`）并在 GitHub 创建 **Published** Release，正文使用本段 changelog。
 4. 等待 Actions 把 `.exe` / `.dmg` / `latest.json` 挂到该 Release。
