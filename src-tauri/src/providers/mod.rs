@@ -6,6 +6,7 @@
 //! Independent of the skin engine. Focused on Codex / Grok profile storage
 //! and live projection (plus optional local routing).
 
+pub(crate) mod backup_utils;
 pub(crate) mod catalog;
 mod commands;
 pub(crate) mod codex;

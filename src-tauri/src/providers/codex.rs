@@ -1071,14 +1071,15 @@ fn is_api_key_only_auth(auth: &Value) -> bool {
 }
 
 fn backup_live_files() -> Result<(), String> {
-    let dir = crate::sessions::paths::app_state_dir().join("provider-live-backups");
-    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-    let stamp = chrono::Utc::now().format("%Y%m%d-%H%M%S");
     if auth_path().exists() {
-        let _ = fs::copy(auth_path(), dir.join(format!("codex-auth-{stamp}.json")));
+        if let Ok(bytes) = fs::read(auth_path()) {
+            let _ = super::backup_utils::save_live_backup("codex-auth", "json", &bytes);
+        }
     }
     if config_path().exists() {
-        let _ = fs::copy(config_path(), dir.join(format!("codex-config-{stamp}.toml")));
+        if let Ok(bytes) = fs::read(config_path()) {
+            let _ = super::backup_utils::save_live_backup("codex-config", "toml", &bytes);
+        }
     }
     Ok(())
 }

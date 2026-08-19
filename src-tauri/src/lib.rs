@@ -112,6 +112,8 @@ pub fn run() {
             let _ = app_settings::get_settings();
             // Toolbox enhancements (force Chinese / fast startup / Computer Use Guard).
             toolbox::warm_settings();
+            // Cleanup accumulated provider live backups on boot
+            providers::backup_utils::prune_all_provider_backups();
 
             // System tray: hide-to-tray keeps local routing alive.
             if let Err(e) = tray::setup_tray(app.handle()) {

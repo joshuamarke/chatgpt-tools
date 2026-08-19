@@ -1948,6 +1948,12 @@ function setMainView(view, opts = {}) {
     skinsNavExpanded = true;
   }
   syncCategoryNavActive();
+  if (activeView === "about") {
+    const now = Date.now();
+    if (now - lastAboutSyncTime > ABOUT_TAB_SYNC_COOLDOWN_MS) {
+      loadAboutContactFromCloud({ refresh: true }).catch(() => {});
+    }
+  }
   if (activeView === "sessions" && prev !== "sessions") {
     try {
       window.sessionsView?.enter?.();
@@ -3721,6 +3727,7 @@ function applyAboutContact(contact) {
  * Clear ad slot UI (no cloud ad / disabled / empty).
  */
 function clearAboutAdUi() {
+  const slot = document.getElementById("aboutAdSlot");
   const placeholder = document.getElementById("aboutAdPlaceholder");
   const imageLink = document.getElementById("aboutAdImageLink");
   const imageEl = document.getElementById("aboutAdImage");
@@ -3729,6 +3736,9 @@ function clearAboutAdUi() {
   const titleEl = document.getElementById("aboutAdTitle");
   const subEl = document.getElementById("aboutAdSub");
 
+  if (slot) {
+    slot.querySelectorAll("style[data-about-ad-css]").forEach((el) => el.remove());
+  }
   if (placeholder) placeholder.hidden = true;
   if (imageLink) {
     imageLink.hidden = true;
@@ -3747,15 +3757,33 @@ function clearAboutAdUi() {
   if (remoteBody) remoteBody.innerHTML = "";
   if (titleEl) titleEl.textContent = "";
   if (subEl) subEl.textContent = "";
+  lastRenderedAdJson = null;
   setAboutAdSlotVisible(false);
 }
+
+let lastRenderedAdJson = null;
+let lastRenderedAnnouncementsJson = null;
+let lastAboutSyncTime = 0;
+let lastCloudSoftSyncTime = 0;
+const ABOUT_TAB_SYNC_COOLDOWN_MS = 5 * 60 * 1000; // 5 minutes
+const FOCUS_SYNC_COOLDOWN_MS = 15 * 60 * 1000; // 15 minutes
+const CLOUD_HEARTBEAT_INTERVAL_MS = 20 * 60 * 1000; // 20 minutes
 
 /**
  * Apply cloud about.ad. Modes: placeholder | image | html.
  * Empty / missing / disabled → hide slot (never invent local ad copy).
  * @param {object|null|undefined} ad
+ * @param {{ force?: boolean }} [opts]
  */
-function applyAboutAd(ad) {
+function applyAboutAd(ad, opts = {}) {
+  const conf = ad && typeof ad === "object" ? ad : null;
+  const stateKey = JSON.stringify(conf || null);
+  if (!opts.force && stateKey === lastRenderedAdJson) {
+    return; // Content unchanged, avoid unnecessary DOM reflow / image flicker
+  }
+  lastRenderedAdJson = stateKey;
+
+  const slot = document.getElementById("aboutAdSlot");
   const placeholder = document.getElementById("aboutAdPlaceholder");
   const imageLink = document.getElementById("aboutAdImageLink");
   const imageEl = document.getElementById("aboutAdImage");
@@ -3764,7 +3792,6 @@ function applyAboutAd(ad) {
   const titleEl = document.getElementById("aboutAdTitle");
   const subEl = document.getElementById("aboutAdSub");
 
-  const conf = ad && typeof ad === "object" ? ad : null;
   if (!conf || conf.enabled === false) {
     clearAboutAdUi();
     return;
@@ -3779,25 +3806,33 @@ function applyAboutAd(ad) {
     mode = html ? "html" : imageUrl ? "image" : "placeholder";
   }
 
+  // Ensure cloud CSS for ad slot is injected and updated
+  if (slot) {
+    let styleEl = slot.querySelector("style[data-about-ad-css]");
+    const cssText = sanitizeAboutContactCss(conf.css || "");
+    if (cssText) {
+      if (!styleEl) {
+        styleEl = document.createElement("style");
+        styleEl.setAttribute("data-about-ad-css", "1");
+        slot.insertBefore(styleEl, slot.firstChild);
+      }
+      styleEl.textContent = cssText;
+    } else if (styleEl) {
+      styleEl.remove();
+    }
+  }
+
   const hideLayers = () => {
     if (placeholder) placeholder.hidden = true;
     if (imageLink) imageLink.hidden = true;
     if (remote) {
       remote.hidden = true;
-      remote.querySelector("style[data-about-ad-css]")?.remove();
       if (remoteBody) remoteBody.innerHTML = "";
     }
   };
 
   if (mode === "html" && html && remote && remoteBody) {
     hideLayers();
-    let styleEl = remote.querySelector("style[data-about-ad-css]");
-    if (!styleEl) {
-      styleEl = document.createElement("style");
-      styleEl.setAttribute("data-about-ad-css", "1");
-      remote.insertBefore(styleEl, remoteBody);
-    }
-    styleEl.textContent = sanitizeAboutContactCss(conf.css || "");
     remoteBody.innerHTML = sanitizeAboutContactHtml(html);
     remote.hidden = false;
     setAboutAdSlotVisible(true);
@@ -3850,6 +3885,7 @@ async function loadAboutContactFromCloud(opts = {}) {
   }
   try {
     const res = await window.skinAPI.cloudAbout({ refresh: opts.refresh === true });
+    lastAboutSyncTime = Date.now();
     if (res?.contact && typeof res.contact === "object") {
       applyAboutContact(res.contact);
     } else {
@@ -4065,9 +4101,14 @@ function paintPromo(index) {
   }
 }
 
-function applyAnnouncementsToBanner(payload) {
-  latestAnnouncements = payload || null;
+function applyAnnouncementsToBanner(payload, opts = {}) {
   const items = Array.isArray(payload?.items) ? payload.items : [];
+  const stateKey = JSON.stringify(items);
+  if (!opts.force && stateKey === lastRenderedAnnouncementsJson) {
+    return; // Content unchanged, keep current promo carousel running smoothly
+  }
+  lastRenderedAnnouncementsJson = stateKey;
+  latestAnnouncements = payload || null;
   // Prefer unread; if all read, still show active items once
   const unread = items.filter((it) => !it.read);
   const pool = (unread.length ? unread : items).slice(0, 8);
@@ -4177,14 +4218,66 @@ async function bootCloud() {
         }
         // Soft sync may be skipped (cache-fresh) — only rebuild list when catalog may change
         const skipped = res?.sync?.skipped === true || snap?.sync?.skipped === true;
+        startCloudHeartbeat();
         if (!skipped) return refresh();
         return null;
       })
       .catch(() => {
+        startCloudHeartbeat();
         /* offline: keep disk cache */
       });
   }, CLOUD_BOOT_DELAY_MS);
 }
+
+let isSyncingBackground = false;
+/**
+ * Gentle background sync for ads, announcements, and catalog.
+ * Uses HTTP ETag / 304 and soft TTL to keep zero unnecessary network/server load.
+ */
+async function syncCloudSoftBackground() {
+  if (isSyncingBackground) return;
+  if (typeof window.skinAPI?.cloudRefresh !== "function") return;
+  isSyncingBackground = true;
+  lastCloudSoftSyncTime = Date.now();
+  try {
+    // 1. Check about / ad (ETag protected, 0-byte 304 if unchanged)
+    await loadAboutContactFromCloud({ refresh: true });
+    // 2. Soft sync for catalog & announcements
+    const res = await window.skinAPI.cloudRefresh({ force: false });
+    const snap = res?.snapshot || res;
+    if (snap?.announcements) {
+      applyAnnouncementsToBanner(snap.announcements);
+    }
+    if (snap?.about?.contact || (snap?.about && Object.prototype.hasOwnProperty.call(snap.about, "ad"))) {
+      if (snap.about.contact) applyAboutContact(snap.about.contact);
+      if (Object.prototype.hasOwnProperty.call(snap.about, "ad")) applyAboutAd(snap.about.ad);
+    }
+  } catch {
+    /* offline / network error: keep current cache state silently */
+  } finally {
+    isSyncingBackground = false;
+  }
+}
+
+let cloudHeartbeatTimer = null;
+function startCloudHeartbeat() {
+  if (cloudHeartbeatTimer) clearInterval(cloudHeartbeatTimer);
+  // 20 min interval + small random jitter (±1 min) to disperse server requests across clients
+  const jitter = Math.floor((Math.random() - 0.5) * 120000);
+  const interval = Math.max(10 * 60 * 1000, CLOUD_HEARTBEAT_INTERVAL_MS + jitter);
+  cloudHeartbeatTimer = setInterval(() => {
+    if (document.visibilityState === "hidden") return;
+    syncCloudSoftBackground();
+  }, interval);
+}
+
+// Window focus listener for gentle soft wake-up refresh
+window.addEventListener("focus", () => {
+  const now = Date.now();
+  if (now - lastCloudSoftSyncTime > FOCUS_SYNC_COOLDOWN_MS) {
+    syncCloudSoftBackground();
+  }
+});
 
 document.getElementById("btnChooseApp").addEventListener("click", async () => {
   try {

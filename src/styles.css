@@ -1247,6 +1247,8 @@ button.sm {
   line-height: 1.65;
   color: #3a4458;
   white-space: pre-line;
+  word-break: break-word;
+  overflow-wrap: anywhere;
   user-select: text;
 }
 /* 弹窗底栏：颜色继承 button.primary/ghost/danger，此处只管布局 */

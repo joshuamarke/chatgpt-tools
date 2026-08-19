@@ -204,6 +204,20 @@
       .replace(/"/g, "&quot;");
   }
 
+  /**
+   * Truncate a session title for display in confirm dialogs / chips.
+   * Long unbroken strings (e.g. Codex thread id used as title) would otherwise
+   * blow out the fixed-width confirm card. Mirrors the backend Grok truncation
+   * (grok.rs TITLE_MAX_CHARS) so both sources render identically.
+   */
+  function truncateTitle(title, maxChars = 40) {
+    const value = String(title ?? "").trim();
+    if (!value) return "";
+    const count = value.length;
+    if (count <= maxChars) return value;
+    return `${value.slice(0, Math.max(0, maxChars - 1))}…`;
+  }
+
   function currentPage() {
     return Math.floor(offset / limit) + 1;
   }
@@ -777,11 +791,12 @@
 
   async function deleteOne(session) {
     const title = session.title || "未命名会话";
+    const displayTitle = truncateTitle(title);
     const ok = await confirm({
       title: "删除会话",
       message: isGrok()
-        ? `删除 Grok 会话「${title}」？\n\n将永久删除会话目录（含 chat_history 等），此操作不可撤销。`
-        : `删除会话「${title}」？\n\n将删除本地数据库记录和对应 rollout 文件，并创建备份。若 Codex / ChatGPT 正在使用该会话，请先关闭对应窗口。`,
+        ? `删除 Grok 会话「${displayTitle}」？\n\n将永久删除会话目录（含 chat_history 等），此操作不可撤销。`
+        : `删除会话「${displayTitle}」？\n\n将删除本地数据库记录和对应 rollout 文件，并创建备份。若 Codex / ChatGPT 正在使用该会话，请先关闭对应窗口。`,
       confirmText: "删除",
       variant: "danger",
     });
@@ -840,7 +855,7 @@
         undoToken: lastUndo.token,
         dbPath: lastUndo.dbPath || null,
       });
-      toast(`已恢复「${lastUndo.title}」`, "ok");
+      toast(`已恢复「${truncateTitle(lastUndo.title)}」`, "ok");
       lastUndo = null;
       clearUndoHideTimer();
       updateChrome();
@@ -866,7 +881,7 @@
     }
     const preview = picked
       .slice(0, 5)
-      .map((s) => `· ${s.title || s.id}`)
+      .map((s) => `· ${truncateTitle(s.title || s.id)}`)
       .join("\n");
     const more =
       picked.length > 5 ? `\n…以及另外 ${picked.length - 5} 个会话` : "";

@@ -152,6 +152,19 @@ pub fn get_about(cfg: &CloudConfig, network: bool) -> Value {
         return out;
     }
 
+    // First boot without disk cache: attempt network fetch if cloud base_url is available
+    if !cfg.base_url.is_empty() {
+        if let Ok(v) = refresh_about(cfg) {
+            let mut out = about_ui_fields(&v);
+            if let Some(obj) = out.as_object_mut() {
+                obj.insert("ok".into(), json!(true));
+                obj.insert("enabled".into(), json!(true));
+                obj.insert("fromNetwork".into(), json!(true));
+            }
+            return out;
+        }
+    }
+
     json!({
         "ok": true,
         "enabled": true,
@@ -315,8 +328,8 @@ fn normalize_ad(raw: &Value) -> Value {
             "subtitle": subtitle,
             "imageUrl": image_url,
             "href": href,
-            "html": "",
-            "css": "",
+            "html": html,
+            "css": css,
         });
     }
     // Pass through cloud title/subtitle as-is (may be empty → client hides)
@@ -327,8 +340,8 @@ fn normalize_ad(raw: &Value) -> Value {
         "subtitle": subtitle,
         "imageUrl": "",
         "href": "",
-        "html": "",
-        "css": "",
+        "html": html,
+        "css": css,
     })
 }
 
